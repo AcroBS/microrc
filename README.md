@@ -9,7 +9,6 @@ Every commit pushed to this repository triggers the **Build Android APK** workfl
 1. Open the **Actions** tab on GitHub and select the latest **Build Android APK** run.
 2. Under **Artifacts**, download `MicroRC-debug-apk-<run_number>`.
 3. Extract the `.zip` file and install `MicroRC-debug.apk` on your Android devices (Android 7.0+ / API 24+).
-4. Tagging a commit (e.g. `git tag v1.0.0 && git push --tags`) also attaches the APK directly to a GitHub Release.
 
 ## Local Wi-Fi / Hotspot Multiplayer Setup
 
