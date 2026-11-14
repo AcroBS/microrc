@@ -47,6 +47,7 @@ class PreferencesRepository(private val context: Context) {
         val RULE_HARD_BOUNDARY = booleanPreferencesKey("rule_hard_boundary_v2")
         val RULE_RANDOM_JUMPS = booleanPreferencesKey("rule_random_jumps_v2")
         val RULE_RANDOM_CONDITIONS = booleanPreferencesKey("rule_random_conditions")
+        val RULE_SHOW_PLAYER_NAMES = booleanPreferencesKey("rule_show_player_names")
         val RULE_WIN_CONDITION = stringPreferencesKey("rule_win_condition")
         val RULE_TOTAL_LAPS = intPreferencesKey("rule_total_laps")
         val RULE_TIME_LIMIT_SEC = intPreferencesKey("rule_time_limit_sec")
@@ -90,6 +91,7 @@ class PreferencesRepository(private val context: Context) {
             hardTrackBoundary = prefs[Keys.RULE_HARD_BOUNDARY] ?: true,
             randomJumpsEnabled = prefs[Keys.RULE_RANDOM_JUMPS] ?: true,
             randomConditionsEnabled = prefs[Keys.RULE_RANDOM_CONDITIONS] ?: true,
+            showPlayerNames = prefs[Keys.RULE_SHOW_PLAYER_NAMES] ?: true,
             winCondition = winCond.name,
             totalLaps = (prefs[Keys.RULE_TOTAL_LAPS] ?: 3).coerceIn(1, 9),
             timeLimitSec = (prefs[Keys.RULE_TIME_LIMIT_SEC] ?: 90).coerceIn(30, 300)
@@ -157,6 +159,7 @@ class PreferencesRepository(private val context: Context) {
             it[Keys.RULE_HARD_BOUNDARY] = rules.hardTrackBoundary
             it[Keys.RULE_RANDOM_JUMPS] = rules.randomJumpsEnabled
             it[Keys.RULE_RANDOM_CONDITIONS] = rules.randomConditionsEnabled
+            it[Keys.RULE_SHOW_PLAYER_NAMES] = rules.showPlayerNames
             it[Keys.RULE_WIN_CONDITION] = rules.winCondition
             it[Keys.RULE_TOTAL_LAPS] = rules.totalLaps.coerceIn(1, 9)
             it[Keys.RULE_TIME_LIMIT_SEC] = rules.timeLimitSec.coerceIn(30, 300)

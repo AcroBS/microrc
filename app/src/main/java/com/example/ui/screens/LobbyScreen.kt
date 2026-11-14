@@ -223,6 +223,9 @@ fun LobbyScreen(
                         if (activeRules.randomConditionsEnabled) {
                             item { LobbyRuleBadge("RANDOM WEATHER", MaterialTheme.colorScheme.secondary, onOpenSettings) }
                         }
+                        if (activeRules.showPlayerNames) {
+                            item { LobbyRuleBadge("NAME TAGS", MaterialTheme.colorScheme.tertiary, onOpenSettings) }
+                        }
                     }
                 }
 

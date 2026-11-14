@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Lock
@@ -312,6 +313,19 @@ fun SettingsScreen(
                     switchTestTag = "setting_random_conditions_switch",
                     onCheckedChange = {
                         onUpdateRules(rules.copy(randomConditionsEnabled = it))
+                    }
+                )
+
+                RuleToggleCard(
+                    icon = Icons.Default.Badge,
+                    accent = MaterialTheme.colorScheme.primary,
+                    title = "Player Names Next to Car",
+                    description = "Display driver callsigns next to each RC car during races (host/server controlled).",
+                    checked = rules.showPlayerNames,
+                    enabled = canEditRules,
+                    switchTestTag = "setting_show_player_names_switch",
+                    onCheckedChange = {
+                        onUpdateRules(rules.copy(showPlayerNames = it))
                     }
                 )
 

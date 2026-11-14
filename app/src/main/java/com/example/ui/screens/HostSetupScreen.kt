@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Hub
@@ -296,6 +297,15 @@ fun HostSetupScreen(
                     checked = draft.randomJumpsEnabled,
                     testTag = "setup_random_jumps_switch",
                     onCheckedChange = { draft = draft.copy(randomJumpsEnabled = it) }
+                )
+
+                SetupSwitchCard(
+                    icon = Icons.Default.Badge,
+                    title = "Player Names Next to Car",
+                    description = "Show driver name tags floating beside each RC car during the race for all players.",
+                    checked = draft.showPlayerNames,
+                    testTag = "setup_show_player_names_switch",
+                    onCheckedChange = { draft = draft.copy(showPlayerNames = it) }
                 )
             }
 

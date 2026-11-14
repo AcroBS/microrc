@@ -28,13 +28,19 @@ import kotlin.math.sin
 class RaceEngineUnitTest {
 
     @Test
-    fun defaultRaceRules_haveAutoAccelBounceJumpsAndWeatherEnabled() {
+    fun defaultRaceRules_haveAutoAccelBounceJumpsWeatherAndNameTagsEnabled() {
         val defaults = RaceRulesSettings()
         assertTrue(defaults.autoAccelerate)
         assertTrue(defaults.hardTrackBoundary)
         assertTrue(defaults.randomJumpsEnabled)
         assertTrue(defaults.randomConditionsEnabled)
+        assertTrue(defaults.showPlayerNames)
         assertEquals(WinCondition.FIRST_TO_FINISH, defaults.winConditionEnum)
+
+        val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+        val adapter = moshi.adapter(RaceRulesSettings::class.java)
+        val decoded = adapter.fromJson(adapter.toJson(defaults.copy(showPlayerNames = false)))
+        assertFalse(decoded?.showPlayerNames ?: true)
     }
 
     @Test

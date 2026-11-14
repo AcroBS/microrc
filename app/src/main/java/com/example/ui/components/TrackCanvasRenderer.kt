@@ -1,5 +1,7 @@
 package com.example.ui.components
 
+import android.graphics.Paint
+import android.graphics.Typeface
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -12,6 +14,8 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import com.example.model.ExternalEventType
 import com.example.model.ItemBoxState
@@ -27,6 +31,12 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 
+private val racerNamePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    textSize = 15f
+    textAlign = Paint.Align.CENTER
+    typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+}
+
 fun DrawScope.drawTrackWorld(
     track: TrackDefinition,
     itemBoxes: List<ItemBoxState>,
@@ -35,7 +45,10 @@ fun DrawScope.drawTrackWorld(
     animTimeSec: Float,
     hardBoundary: Boolean = false,
     rainPuddles: List<TrackPuddle> = emptyList(),
-    activeEvent: ExternalEventType = ExternalEventType.NONE
+    activeEvent: ExternalEventType = ExternalEventType.NONE,
+    showPlayerNames: Boolean = false,
+    localPlayerId: String? = null,
+    isOverview: Boolean = false
 ) {
     // 1. Background floor
     drawRect(
@@ -369,6 +382,50 @@ fun DrawScope.drawTrackWorld(
             scale = 1f,
             animTimeSec = animTimeSec
         )
+    }
+
+    // 10. Optional server-controlled player name tags drawn above/next to each car
+    if (showPlayerNames) {
+        val textScale = if (isOverview) 1.65f else 1f
+        racerNamePaint.textSize = 15f * textScale
+        val fm = racerNamePaint.fontMetrics
+        val textHeight = fm.descent - fm.ascent
+
+        for (r in orderedRacers) {
+            val label = r.name.trim().take(12).ifEmpty { "Racer" }
+            val isLocal = r.playerId == localPlayerId
+            val labelX = r.x
+            val labelY = r.y - (38f * textScale) - (r.jumpZ * 26f)
+            val textWidth = racerNamePaint.measureText(label)
+            val padX = 8f * textScale
+            val padY = 3.5f * textScale
+            val pillW = textWidth + padX * 2f
+            val pillH = textHeight + padY * 2f
+            val pillLeft = labelX - pillW / 2f
+            val pillTop = labelY - pillH / 2f
+
+            drawRoundRect(
+                color = Color(0xFF0B0E14).copy(alpha = 0.80f),
+                topLeft = Offset(pillLeft, pillTop),
+                size = Size(pillW, pillH),
+                cornerRadius = CornerRadius(7f * textScale, 7f * textScale)
+            )
+            drawRoundRect(
+                color = if (isLocal) Color(0xFF00E5FF) else Color(r.primaryColorArgb).copy(alpha = 0.9f),
+                topLeft = Offset(pillLeft, pillTop),
+                size = Size(pillW, pillH),
+                cornerRadius = CornerRadius(7f * textScale, 7f * textScale),
+                style = Stroke(width = 1.6f * textScale)
+            )
+
+            racerNamePaint.color = if (isLocal) {
+                Color(0xFF00E5FF).toArgb()
+            } else {
+                Color.White.toArgb()
+            }
+            val baselineY = labelY - (fm.ascent + fm.descent) / 2f
+            drawContext.canvas.nativeCanvas.drawText(label, labelX, baselineY, racerNamePaint)
+        }
     }
 }
 

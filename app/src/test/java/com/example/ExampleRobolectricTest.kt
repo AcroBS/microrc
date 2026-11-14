@@ -50,6 +50,7 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("setting_hard_boundary_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setting_random_jumps_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setting_random_conditions_switch").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setting_show_player_names_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("settings_back_button").performClick()
 
         composeTestRule.waitForIdle()
@@ -68,6 +69,7 @@ class ExampleRobolectricTest {
 
         composeTestRule.onNodeWithTag("win_condition_TIME_TRIAL_DISTANCE").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setup_random_conditions_switch").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setup_show_player_names_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("host_setup_open_lobby_button").assertIsDisplayed()
         composeTestRule.onNodeWithTag("host_setup_open_lobby_button").performClick()
 

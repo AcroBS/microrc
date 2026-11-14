@@ -775,6 +775,7 @@ class WifiP2pRaceManager(
             if (rules.hardTrackBoundary) add("Bounce Walls")
             if (rules.randomJumpsEnabled) add("Jumps")
             if (rules.randomConditionsEnabled) add("Random Weather")
+            if (rules.showPlayerNames) add("Name Tags")
         }.joinToString(" • ").ifEmpty { "Standard Rules" }
         addSystemChat("Match settings updated: $summary")
         if (_role.value == SessionRole.Host) broadcastLobbyState() else publishLocalLobbyState()

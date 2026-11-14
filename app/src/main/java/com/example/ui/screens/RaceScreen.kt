@@ -298,7 +298,10 @@ fun RaceScreen(
                         animTimeSec = animTimeSec,
                         hardBoundary = rules.hardTrackBoundary,
                         rainPuddles = snapshot?.rainPuddles.orEmpty(),
-                        activeEvent = activeEvent
+                        activeEvent = activeEvent,
+                        showPlayerNames = rules.showPlayerNames,
+                        localPlayerId = profile.playerId,
+                        isOverview = true
                     )
                 }
             } else {
@@ -315,7 +318,10 @@ fun RaceScreen(
                         animTimeSec = animTimeSec,
                         hardBoundary = rules.hardTrackBoundary,
                         rainPuddles = snapshot?.rainPuddles.orEmpty(),
-                        activeEvent = activeEvent
+                        activeEvent = activeEvent,
+                        showPlayerNames = rules.showPlayerNames,
+                        localPlayerId = profile.playerId,
+                        isOverview = false
                     )
                 }
             }

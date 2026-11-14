@@ -98,6 +98,7 @@ data class RaceRulesSettings(
     val hardTrackBoundary: Boolean = true,
     val randomJumpsEnabled: Boolean = true,
     val randomConditionsEnabled: Boolean = true,
+    val showPlayerNames: Boolean = true,
     val winCondition: String = WinCondition.FIRST_TO_FINISH.name,
     val totalLaps: Int = 3,
     val timeLimitSec: Int = 90
