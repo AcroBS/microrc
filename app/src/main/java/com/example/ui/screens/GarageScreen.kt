@@ -41,7 +41,6 @@ import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -77,15 +76,7 @@ import com.example.model.RcCarType
 import com.example.model.RcColorPresets
 import com.example.sensors.TiltSteeringController
 import com.example.ui.components.drawRcCar
-import com.example.ui.theme.AcidLime
-import com.example.ui.theme.CarbonBg
-import com.example.ui.theme.ElectricCyan
 import com.example.ui.theme.GoldTrophy
-import com.example.ui.theme.PaddockOutline
-import com.example.ui.theme.PaddockSurface
-import com.example.ui.theme.PaddockSurfaceElevated
-import com.example.ui.theme.SignalOrange
-import com.example.ui.theme.TextSecondary
 
 @Composable
 fun GarageScreen(
@@ -102,7 +93,6 @@ fun GarageScreen(
     var tiltSensitivity by remember(profile.tiltSensitivity) { mutableFloatStateOf(profile.tiltSensitivity) }
     var autoGasTilt by remember(profile.autoGasInTilt) { mutableStateOf(profile.autoGasInTilt) }
 
-    // Custom Hue slider for primary body color
     var showCustomHue by remember { mutableStateOf(false) }
     var customHue by remember { mutableFloatStateOf(16f) }
 
@@ -129,17 +119,16 @@ fun GarageScreen(
         label = "turntable"
     )
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(CarbonBg)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
+    Surface(
+        color = MaterialTheme.colorScheme.background,
+        modifier = Modifier.fillMaxSize()
     ) {
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top Bar
             Row(
                 modifier = Modifier
                     .widthIn(max = 640.dp)
@@ -151,12 +140,24 @@ fun GarageScreen(
                     onClick = onBack,
                     modifier = Modifier.testTag("garage_back_button")
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onBackground
+                    )
                 }
                 Spacer(modifier = Modifier.width(6.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("RC GARAGE", style = MaterialTheme.typography.headlineMedium, color = Color.White)
-                    Text("Vehicle, Custom Paint & Controls", style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                    Text(
+                        text = "RC GARAGE",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Text(
+                        text = "Vehicle, Custom Paint & Controls",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
@@ -168,24 +169,24 @@ fun GarageScreen(
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Live Car Turntable Preview
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = PaddockSurface),
-                    border = BorderStroke(1.dp, PaddockOutline),
-                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    shape = RoundedCornerShape(22.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
+                        val gridAccent = MaterialTheme.colorScheme.secondary
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(160.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(PaddockSurfaceElevated),
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
                             contentAlignment = Alignment.Center
                         ) {
                             Canvas(modifier = Modifier.fillMaxSize()) {
-                                val gridColor = ElectricCyan.copy(alpha = 0.08f)
+                                val gridColor = gridAccent.copy(alpha = 0.1f)
                                 val step = 36f
                                 var gx = 0f
                                 while (gx < size.width) {
@@ -210,22 +211,21 @@ fun GarageScreen(
                             }
                         }
                         Spacer(modifier = Modifier.height(12.dp))
-                        Text(selectedCar.displayName, style = MaterialTheme.typography.headlineMedium, color = Color.White)
-                        Text(selectedCar.tagline, style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+                        Text(selectedCar.displayName, style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onSurface)
+                        Text(selectedCar.tagline, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(modifier = Modifier.height(12.dp))
 
-                        StatBarRow("Top Speed", selectedCar.topSpeedStat, SignalOrange)
+                        StatBarRow("Top Speed", selectedCar.topSpeedStat, MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.height(6.dp))
-                        StatBarRow("Acceleration", selectedCar.accelStat, ElectricCyan)
+                        StatBarRow("Acceleration", selectedCar.accelStat, MaterialTheme.colorScheme.secondary)
                         Spacer(modifier = Modifier.height(6.dp))
                         StatBarRow("Handling", selectedCar.handlingStat, GoldTrophy)
                         Spacer(modifier = Modifier.height(6.dp))
-                        StatBarRow("Off-Road Grip", selectedCar.gripStat, AcidLime)
+                        StatBarRow("Off-Road Grip", selectedCar.gripStat, MaterialTheme.colorScheme.tertiary)
                     }
                 }
 
-                // Vehicle Picker
-                Text("SELECT CHASSIS", style = MaterialTheme.typography.labelLarge, color = TextSecondary)
+                Text("SELECT CHASSIS", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -233,13 +233,16 @@ fun GarageScreen(
                     RcCarType.entries.forEach { car ->
                         val active = car == selectedCar
                         Surface(
-                            color = if (active) SignalOrange.copy(alpha = 0.2f) else PaddockSurface,
-                            shape = RoundedCornerShape(14.dp),
-                            border = BorderStroke(1.5.dp, if (active) SignalOrange else PaddockOutline),
+                            color = if (active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(
+                                1.5.dp,
+                                if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                            ),
                             modifier = Modifier
                                 .weight(1f)
                                 .height(68.dp)
-                                .clip(RoundedCornerShape(14.dp))
+                                .clip(RoundedCornerShape(16.dp))
                                 .clickable {
                                     selectedCar = car
                                     onSaveCarAndColors(car, primaryColorArgb, accentColorArgb)
@@ -256,29 +259,32 @@ fun GarageScreen(
                                 Text(
                                     text = car.displayName.substringBefore(" "),
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = if (active) SignalOrange else Color.White
+                                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
                                     text = car.displayName.substringAfter(" "),
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = TextSecondary
+                                    color = if (active) {
+                                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
                                 )
                             }
                         }
                     }
                 }
 
-                // Color Customization
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("CUSTOM PAINT SHELL", style = MaterialTheme.typography.labelLarge, color = TextSecondary)
+                    Text("CUSTOM PAINT SHELL", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
                         text = if (showCustomHue) "Hide Hue Slider" else "Custom Hue",
                         style = MaterialTheme.typography.labelMedium,
-                        color = ElectricCyan,
+                        color = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .clickable { showCustomHue = !showCustomHue }
@@ -299,7 +305,7 @@ fun GarageScreen(
                                 .background(Color(preset.primaryArgb))
                                 .border(
                                     width = if (isSelected) 3.dp else 1.5.dp,
-                                    color = if (isSelected) Color.White else PaddockOutline,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onBackground else MaterialTheme.colorScheme.outlineVariant,
                                     shape = CircleShape
                                 )
                                 .clickable {
@@ -314,7 +320,7 @@ fun GarageScreen(
                                 Icon(
                                     Icons.Default.Check,
                                     contentDescription = preset.name,
-                                    tint = CarbonBg,
+                                    tint = Color(0xFF0B0E14),
                                     modifier = Modifier.size(22.dp)
                                 )
                             }
@@ -324,9 +330,9 @@ fun GarageScreen(
 
                 if (showCustomHue) {
                     Surface(
-                        color = PaddockSurface,
-                        shape = RoundedCornerShape(14.dp),
-                        border = BorderStroke(1.dp, PaddockOutline),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(14.dp)) {
@@ -349,8 +355,7 @@ fun GarageScreen(
                     }
                 }
 
-                // Control Mode Selection
-                Text("STEERING CONTROLS", style = MaterialTheme.typography.labelLarge, color = TextSecondary)
+                Text("STEERING CONTROLS", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -358,12 +363,15 @@ fun GarageScreen(
                     ControlMode.entries.forEach { mode ->
                         val active = selectedControlMode == mode
                         Surface(
-                            color = if (active) ElectricCyan.copy(alpha = 0.16f) else PaddockSurface,
-                            shape = RoundedCornerShape(16.dp),
-                            border = BorderStroke(1.5.dp, if (active) ElectricCyan else PaddockOutline),
+                            color = if (active) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                            shape = RoundedCornerShape(18.dp),
+                            border = BorderStroke(
+                                1.5.dp,
+                                if (active) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outlineVariant
+                            ),
                             modifier = Modifier
                                 .weight(1f)
-                                .clip(RoundedCornerShape(16.dp))
+                                .clip(RoundedCornerShape(18.dp))
                                 .clickable {
                                     selectedControlMode = mode
                                     onSaveControlSettings(mode, tiltSensitivity, autoGasTilt)
@@ -374,18 +382,22 @@ fun GarageScreen(
                                 Icon(
                                     if (mode == ControlMode.TILT_SENSOR) Icons.Default.PhoneAndroid else Icons.Default.TouchApp,
                                     contentDescription = mode.label,
-                                    tint = if (active) ElectricCyan else TextSecondary
+                                    tint = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
                                     text = mode.label,
                                     style = MaterialTheme.typography.titleMedium,
-                                    color = if (active) ElectricCyan else Color.White
+                                    color = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
                                     text = mode.subtitle,
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = TextSecondary
+                                    color = if (active) {
+                                        MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
                                 )
                             }
                         }
@@ -394,9 +406,9 @@ fun GarageScreen(
 
                 if (selectedControlMode == ControlMode.TILT_SENSOR) {
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = PaddockSurface),
-                        border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.5f)),
-                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(18.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(
@@ -418,13 +430,12 @@ fun GarageScreen(
                                     Text("Zero Tilt")
                                 }
                             }
-                            // Visual tilt bar (-1..+1)
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(14.dp)
                                     .clip(RoundedCornerShape(50))
-                                    .background(PaddockSurfaceElevated)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                             ) {
                                 val fraction = ((liveSteer + 1f) / 2f).coerceIn(0.04f, 0.96f)
                                 Box(
@@ -437,7 +448,7 @@ fun GarageScreen(
                                             .align(Alignment.CenterEnd)
                                             .size(18.dp, 14.dp)
                                             .clip(CircleShape)
-                                            .background(ElectricCyan)
+                                            .background(MaterialTheme.colorScheme.secondary)
                                     )
                                 }
                             }
@@ -464,7 +475,7 @@ fun GarageScreen(
                                     Text(
                                         "Automatically accelerate while tilting to steer",
                                         style = MaterialTheme.typography.bodyMedium,
-                                        color = TextSecondary
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                                 Switch(
@@ -481,8 +492,7 @@ fun GarageScreen(
 
                 Button(
                     onClick = onBack,
-                    colors = ButtonDefaults.buttonColors(containerColor = SignalOrange, contentColor = CarbonBg),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp)
@@ -511,13 +521,13 @@ private fun StatBarRow(label: String, value: Int, color: Color) {
         Text(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.width(112.dp)
         )
         LinearProgressIndicator(
             progress = { animProgress },
             color = color,
-            trackColor = PaddockSurfaceElevated,
+            trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
             modifier = Modifier
                 .weight(1f)
                 .height(8.dp)

@@ -2,6 +2,7 @@ package com.example.network
 
 import com.example.data.TrackCatalog
 import com.example.model.ControlInput
+import com.example.model.ExternalEventType
 import com.example.model.ItemBoxState
 import com.example.model.LobbyPlayer
 import com.example.model.PowerUpType
@@ -11,6 +12,8 @@ import com.example.model.RacerState
 import com.example.model.TrackDefinition
 import com.example.model.TrackHazard
 import com.example.model.TrackId
+import com.example.model.TrackPuddle
+import com.example.model.WinCondition
 import java.util.Locale
 
 object RaceTelemetryCodec {
@@ -54,10 +57,12 @@ object RaceTelemetryCodec {
     }
 
     fun encodeSnapshot(seq: Long, snap: RaceSnapshot): ByteArray {
-        val sb = StringBuilder(340)
+        val sb = StringBuilder(460)
         val phaseOrd = runCatching { RacePhase.valueOf(snap.phase).ordinal }.getOrDefault(0)
         val trackOrd = runCatching { TrackId.valueOf(snap.trackId).ordinal }.getOrDefault(0)
         val banner = (snap.eventBanner ?: "").replace("|", "").replace("\n", "")
+        val winOrd = runCatching { WinCondition.valueOf(snap.winCondition).ordinal }.getOrDefault(0)
+        val evOrd = runCatching { ExternalEventType.valueOf(snap.activeEvent).ordinal }.getOrDefault(0)
 
         sb.append("S|")
             .append(seq).append('|')
@@ -68,7 +73,7 @@ object RaceTelemetryCodec {
             .append(trackOrd).append('|')
             .append(banner).append('|')
 
-        // Racers
+        // Racers (index 8)
         snap.racers.forEachIndexed { idx, r ->
             if (idx > 0) sb.append(';')
             val heldOrd = r.heldPowerUp?.let {
@@ -95,17 +100,18 @@ object RaceTelemetryCodec {
                 .append(r.bestLapMs ?: -1L).append(',')
                 .append(r.currentLapStartMs).append(',')
                 .append(r.lapTimesMs.joinToString("-")).append(',')
-                .append(String.format(Locale.US, "%.2f", r.jumpZ))
+                .append(String.format(Locale.US, "%.2f", r.jumpZ)).append(',')
+                .append(r.racePoints)
         }
         sb.append('|')
 
-        // Item boxes compact mask
+        // Item boxes compact mask (index 9)
         for (b in snap.itemBoxes) {
             sb.append(if (b.available) '1' else '0')
         }
         sb.append('|')
 
-        // Hazards
+        // Hazards (index 10)
         snap.hazards.forEachIndexed { idx, h ->
             if (idx > 0) sb.append(';')
             sb.append(h.id).append(',')
@@ -113,6 +119,25 @@ object RaceTelemetryCodec {
                 .append(String.format(Locale.US, "%.1f", h.x)).append(',')
                 .append(String.format(Locale.US, "%.1f", h.y)).append(',')
                 .append(h.remainingMs)
+        }
+        sb.append('|')
+
+        // Match & Weather Event meta (index 11)
+        sb.append(winOrd).append(',')
+            .append(snap.timeLimitSec).append(',')
+            .append(evOrd).append(',')
+            .append(snap.eventRemainingMs).append(',')
+            .append(String.format(Locale.US, "%.3f", snap.windAngleRad)).append(',')
+            .append(String.format(Locale.US, "%.2f", snap.windStrength)).append(',')
+            .append(snap.postFinishGraceMs)
+        sb.append('|')
+
+        // Rain puddles (index 12)
+        snap.rainPuddles.forEachIndexed { idx, p ->
+            if (idx > 0) sb.append(';')
+            sb.append(String.format(Locale.US, "%.0f", p.x)).append(',')
+                .append(String.format(Locale.US, "%.0f", p.y)).append(',')
+                .append(String.format(Locale.US, "%.0f", p.radius))
         }
 
         return sb.toString().toByteArray(Charsets.UTF_8)
@@ -162,6 +187,7 @@ object RaceTelemetryCodec {
                     f[20].split('-').mapNotNull { it.toLongOrNull() }
                 }
                 val jumpZ = f.getOrNull(21)?.toFloatOrNull() ?: 0f
+                val racePoints = f.getOrNull(22)?.toIntOrNull() ?: 0
 
                 val vx = f[4].toFloatOrNull() ?: 0f
                 val vy = f[5].toFloatOrNull() ?: 0f
@@ -193,7 +219,8 @@ object RaceTelemetryCodec {
                     finishTimeMs = finishMs,
                     bestLapMs = bestLap,
                     currentLapStartMs = f[19].toLongOrNull() ?: 0L,
-                    lapTimesMs = lapTimes
+                    lapTimesMs = lapTimes,
+                    racePoints = racePoints
                 )
             }
         }
@@ -226,6 +253,34 @@ object RaceTelemetryCodec {
             }
         }
 
+        val metaFields = parts.getOrNull(11)?.split(',').orEmpty()
+        val winCondition = WinCondition.entries.getOrElse(metaFields.getOrNull(0)?.toIntOrNull() ?: 0) {
+            WinCondition.FIRST_TO_FINISH
+        }.name
+        val timeLimitSec = metaFields.getOrNull(1)?.toIntOrNull() ?: 90
+        val activeEvent = ExternalEventType.entries.getOrElse(metaFields.getOrNull(2)?.toIntOrNull() ?: 0) {
+            ExternalEventType.NONE
+        }.name
+        val eventRemainingMs = metaFields.getOrNull(3)?.toLongOrNull() ?: 0L
+        val windAngleRad = metaFields.getOrNull(4)?.toFloatOrNull() ?: 0f
+        val windStrength = metaFields.getOrNull(5)?.toFloatOrNull() ?: 0f
+        val postFinishGraceMs = metaFields.getOrNull(6)?.toLongOrNull() ?: 0L
+
+        val puddlesRaw = parts.getOrNull(12).orEmpty()
+        val rainPuddles = if (puddlesRaw.isEmpty()) {
+            emptyList()
+        } else {
+            puddlesRaw.split(';').mapNotNull { entry ->
+                val f = entry.split(',')
+                if (f.size < 3) return@mapNotNull null
+                TrackPuddle(
+                    x = f[0].toFloatOrNull() ?: return@mapNotNull null,
+                    y = f[1].toFloatOrNull() ?: return@mapNotNull null,
+                    radius = f[2].toFloatOrNull() ?: 40f
+                )
+            }
+        }
+
         return DecodedSnapshot(
             seq = seq,
             snapshot = RaceSnapshot(
@@ -237,7 +292,15 @@ object RaceTelemetryCodec {
                 racers = racers,
                 itemBoxes = boxes,
                 hazards = hazards,
-                eventBanner = banner
+                eventBanner = banner,
+                winCondition = winCondition,
+                timeLimitSec = timeLimitSec,
+                activeEvent = activeEvent,
+                eventRemainingMs = eventRemainingMs,
+                windAngleRad = windAngleRad,
+                windStrength = windStrength,
+                rainPuddles = rainPuddles,
+                postFinishGraceMs = postFinishGraceMs
             )
         )
     }

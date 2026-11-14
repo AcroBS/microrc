@@ -40,16 +40,13 @@ import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -80,14 +77,6 @@ import com.example.model.TrackPoint
 import com.example.model.TrackRamp
 import com.example.ui.components.drawTrackMiniMap
 import com.example.ui.components.drawTrackWorld
-import com.example.ui.theme.AcidLime
-import com.example.ui.theme.CarbonBg
-import com.example.ui.theme.ElectricCyan
-import com.example.ui.theme.PaddockOutline
-import com.example.ui.theme.PaddockSurface
-import com.example.ui.theme.PaddockSurfaceElevated
-import com.example.ui.theme.SignalOrange
-import com.example.ui.theme.TextSecondary
 import kotlin.math.atan2
 import kotlin.math.hypot
 import kotlin.math.roundToInt
@@ -166,17 +155,16 @@ fun TrackEditorScreen(
         return bestSegment
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(CarbonBg)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
+    Surface(
+        color = MaterialTheme.colorScheme.background,
+        modifier = Modifier.fillMaxSize()
     ) {
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Top Bar
             Row(
                 modifier = Modifier
                     .widthIn(max = 720.dp)
@@ -188,11 +176,16 @@ fun TrackEditorScreen(
                     onClick = onBack,
                     modifier = Modifier.testTag("editor_back_button")
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onBackground
+                    )
                 }
                 Text(
                     text = "Track Studio",
                     style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
                     modifier = Modifier.weight(1f)
                 )
                 OutlinedButton(
@@ -204,15 +197,14 @@ fun TrackEditorScreen(
                         )
                         selectedNodeIdx = 0
                     },
-                    border = BorderStroke(1.dp, SignalOrange.copy(alpha = 0.7f)),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                     modifier = Modifier
                         .height(48.dp)
                         .testTag("editor_random_button")
                 ) {
-                    Icon(Icons.Default.Casino, contentDescription = null, tint = SignalOrange, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Casino, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Random", color = SignalOrange, style = MaterialTheme.typography.labelLarge)
+                    Text("Random", style = MaterialTheme.typography.labelLarge)
                 }
             }
 
@@ -224,11 +216,13 @@ fun TrackEditorScreen(
                     .padding(horizontal = 14.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Interactive Track Canvas
+                val primaryColor = MaterialTheme.colorScheme.primary
+                val secondaryColor = MaterialTheme.colorScheme.secondary
+
                 Surface(
                     color = Color(selectedTheme.baseBgColorHex),
                     shape = RoundedCornerShape(18.dp),
-                    border = BorderStroke(1.5.dp, ElectricCyan.copy(alpha = 0.55f)),
+                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.55f)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(250.dp)
@@ -345,7 +339,6 @@ fun TrackEditorScreen(
                                     animTimeSec = 0f
                                 )
 
-                                // Control polygon
                                 val ctrl = draft.controlPoints
                                 if (ctrl.size >= 2) {
                                     val poly = Path().apply {
@@ -355,7 +348,7 @@ fun TrackEditorScreen(
                                     }
                                     drawPath(
                                         path = poly,
-                                        color = ElectricCyan.copy(alpha = 0.45f),
+                                        color = secondaryColor.copy(alpha = 0.45f),
                                         style = Stroke(
                                             width = 5f,
                                             pathEffect = PathEffect.dashPathEffect(floatArrayOf(18f, 14f), 0f)
@@ -363,11 +356,10 @@ fun TrackEditorScreen(
                                     )
                                 }
 
-                                // Draggable corner handles
                                 ctrl.forEachIndexed { idx, pt ->
                                     val isSel = idx == selectedNodeIdx
                                     drawCircle(
-                                        color = if (isSel) SignalOrange else ElectricCyan,
+                                        color = if (isSel) primaryColor else secondaryColor,
                                         radius = if (isSel) 34f else 26f,
                                         center = Offset(pt.x, pt.y)
                                     )
@@ -381,7 +373,7 @@ fun TrackEditorScreen(
                         }
 
                         Surface(
-                            color = CarbonBg.copy(alpha = 0.8f),
+                            color = Color(0xFF0B0E14).copy(alpha = 0.82f),
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier
                                 .align(Alignment.TopStart)
@@ -389,20 +381,19 @@ fun TrackEditorScreen(
                         ) {
                             Text(
                                 text = when (activeTool) {
-                                    EditorTool.MOVE_NODE -> "Drag cyan/orange dots to reshape corners"
+                                    EditorTool.MOVE_NODE -> "Drag dots to reshape corners"
                                     EditorTool.ADD_NODE -> "Tap anywhere to insert a new corner"
                                     EditorTool.TOGGLE_RAMP -> "Tap on track to add or remove a Jump Ramp"
                                     EditorTool.TOGGLE_BOOST -> "Tap on track to add or remove a Boost Pad"
                                 },
                                 style = MaterialTheme.typography.labelSmall,
-                                color = ElectricCyan,
+                                color = Color(0xFF80EAFF),
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                         }
                     }
                 }
 
-                // Tool Mode Selector + Node Actions
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(EditorTool.entries) { tool ->
                         val active = activeTool == tool
@@ -416,12 +407,7 @@ fun TrackEditorScreen(
                             selected = active,
                             onClick = { activeTool = tool },
                             leadingIcon = { Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                            label = { Text(tool.label, style = MaterialTheme.typography.labelSmall) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = ElectricCyan,
-                                selectedLabelColor = CarbonBg,
-                                selectedLeadingIconColor = CarbonBg
-                            )
+                            label = { Text(tool.label, style = MaterialTheme.typography.labelSmall) }
                         )
                     }
                 }
@@ -467,7 +453,6 @@ fun TrackEditorScreen(
                     }
                 }
 
-                // Track Name + Width
                 OutlinedTextField(
                     value = draft.name,
                     onValueChange = { if (it.length <= 24) draft = draft.copy(name = it) },
@@ -483,11 +468,11 @@ fun TrackEditorScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Track Width", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                        Text("Track Width", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(
                             "${draft.roadHalfWidth.roundToInt()} px",
                             style = MaterialTheme.typography.labelMedium,
-                            color = ElectricCyan
+                            color = MaterialTheme.colorScheme.secondary
                         )
                     }
                     Slider(
@@ -498,42 +483,35 @@ fun TrackEditorScreen(
                                 controlPoints = draft.controlPoints.map { it.copy(halfWidth = w) }
                             )
                         },
-                        valueRange = 92f..136f,
-                        colors = SliderDefaults.colors(
-                            thumbColor = ElectricCyan,
-                            activeTrackColor = ElectricCyan
-                        )
+                        valueRange = 92f..136f
                     )
                 }
 
-                // Surface Theme Picker
-                Text("SURFACE THEME", style = MaterialTheme.typography.labelLarge, color = TextSecondary)
+                Text("SURFACE THEME", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(TrackId.entries) { theme ->
                         val active = theme == selectedTheme
                         FilterChip(
                             selected = active,
                             onClick = { draft = draft.copy(themeId = theme.name) },
-                            label = { Text(theme.displayName, style = MaterialTheme.typography.labelSmall) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = Color(theme.kerbPrimaryHex),
-                                selectedLabelColor = CarbonBg
-                            )
+                            label = { Text(theme.displayName, style = MaterialTheme.typography.labelSmall) }
                         )
                     }
                 }
 
-                // Saved Tracks List
                 if (savedTracks.isNotEmpty()) {
-                    Text("SAVED CUSTOM TRACKS", style = MaterialTheme.typography.labelLarge, color = TextSecondary)
+                    Text("SAVED CUSTOM TRACKS", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         items(savedTracks, key = { it.id }) { saved ->
                             val preview = remember(saved) { TrackCatalog.buildCustomTrack(saved) }
                             val isCurrent = saved.id == draft.id
                             Surface(
-                                color = PaddockSurface,
+                                color = MaterialTheme.colorScheme.surfaceContainer,
                                 shape = RoundedCornerShape(14.dp),
-                                border = BorderStroke(1.5.dp, if (isCurrent) ElectricCyan else PaddockOutline),
+                                border = BorderStroke(
+                                    1.5.dp,
+                                    if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                ),
                                 modifier = Modifier
                                     .width(156.dp)
                                     .clip(RoundedCornerShape(14.dp))
@@ -562,7 +540,7 @@ fun TrackEditorScreen(
                                             Icon(
                                                 Icons.Default.Delete,
                                                 contentDescription = "Delete Custom Track",
-                                                tint = Color.White.copy(alpha = 0.8f),
+                                                tint = Color.White.copy(alpha = 0.85f),
                                                 modifier = Modifier.size(16.dp)
                                             )
                                         }
@@ -571,7 +549,7 @@ fun TrackEditorScreen(
                                     Text(
                                         text = saved.name,
                                         style = MaterialTheme.typography.labelMedium,
-                                        color = Color.White,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -582,10 +560,9 @@ fun TrackEditorScreen(
                 }
             }
 
-            // Bottom Save / Apply Bar
             Surface(
-                color = PaddockSurface,
-                border = BorderStroke(1.dp, PaddockOutline),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                tonalElevation = 4.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Box(
@@ -603,11 +580,7 @@ fun TrackEditorScreen(
                             )
                             onSaveTrack(finalTrack, canApplyToLobby)
                         },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = AcidLime,
-                            contentColor = CarbonBg
-                        ),
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .widthIn(max = 680.dp)
                             .fillMaxWidth()

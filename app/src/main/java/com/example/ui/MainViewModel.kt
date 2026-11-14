@@ -3,8 +3,10 @@ package com.example.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.audio.RaceAudioEngine
 import com.example.data.PreferencesRepository
 import com.example.data.TrackCatalog
+import com.example.model.AudioSettings
 import com.example.model.ControlMode
 import com.example.model.CustomTrackData
 import com.example.model.DiscoveredLobby
@@ -32,6 +34,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val prefsRepo = PreferencesRepository(application)
     val raceManager = WifiP2pRaceManager(application, viewModelScope)
     val tiltController = TiltSteeringController(application)
+    val audioEngine = RaceAudioEngine(viewModelScope)
 
     val profile: StateFlow<PlayerProfile> = prefsRepo.profileFlow.stateIn(
         scope = viewModelScope,
@@ -43,6 +46,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = RaceRulesSettings()
+    )
+
+    val audioSettings: StateFlow<AudioSettings> = prefsRepo.audioSettingsFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = AudioSettings()
     )
 
     val customTracks: StateFlow<List<CustomTrackData>> = prefsRepo.customTracksFlow.stateIn(
@@ -66,6 +75,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch {
             prefsRepo.ensurePlayerId()
+        }
+        viewModelScope.launch {
+            audioSettings.collect { audioEngine.updateAudioSettings(it) }
         }
     }
 
@@ -109,6 +121,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateAudioSettings(newAudio: AudioSettings) {
+        viewModelScope.launch {
+            prefsRepo.updateAudioSettings(newAudio)
+            audioEngine.updateAudioSettings(newAudio)
+        }
+    }
+
     fun saveCustomTrack(track: CustomTrackData, applyToLobby: Boolean) {
         viewModelScope.launch {
             prefsRepo.saveCustomTrack(track)
@@ -128,8 +147,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _overviewCamera.value = !_overviewCamera.value
     }
 
-    fun startHosting() {
-        raceManager.hostLobby(profile.value, initialRules = rules.value)
+    fun startHosting(setupRules: RaceRulesSettings = rules.value) {
+        viewModelScope.launch {
+            prefsRepo.updateRaceRules(setupRules)
+        }
+        raceManager.hostLobby(profile.value, initialRules = setupRules)
     }
 
     fun startSolo() {
@@ -173,6 +195,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
+        audioEngine.stop()
         tiltController.stop()
         raceManager.discovery.stopBrowsing()
         raceManager.leaveSession()

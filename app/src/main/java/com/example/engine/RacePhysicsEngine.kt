@@ -2,25 +2,27 @@ package com.example.engine
 
 import com.example.data.TrackCatalog
 import com.example.model.ControlInput
+import com.example.model.ExternalEventType
 import com.example.model.ItemBoxState
 import com.example.model.LobbyPlayer
 import com.example.model.PowerUpType
 import com.example.model.PropShape
 import com.example.model.RacePhase
-import com.example.model.RaceSnapshot
 import com.example.model.RaceRulesSettings
+import com.example.model.RaceSnapshot
 import com.example.model.RacerState
 import com.example.model.RcCarType
 import com.example.model.TrackDefinition
 import com.example.model.TrackHazard
 import com.example.model.TrackId
+import com.example.model.TrackPuddle
+import com.example.model.WinCondition
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -28,7 +30,8 @@ class RacePhysicsEngine(
     private val track: TrackDefinition,
     private val totalLaps: Int,
     players: List<LobbyPlayer>,
-    private val rules: RaceRulesSettings = RaceRulesSettings()
+    private val rules: RaceRulesSettings = RaceRulesSettings(),
+    private val random: Random = Random.Default
 ) {
     private data class MutableRacer(
         val playerId: String,
@@ -45,6 +48,7 @@ class RacePhysicsEngine(
         var steerVisual: Float = 0f,
         var lap: Int = 1,
         var checkpointIndex: Int = 0,
+        var lastTrackIdx: Int = 0,
         var sectorMask: Int = 0,
         var currentLapStartMs: Long = 0L,
         val lapTimesMs: MutableList<Long> = mutableListOf(),
@@ -62,13 +66,19 @@ class RacePhysicsEngine(
         var vz: Float = 0f,
         var jumpCooldownMs: Long = 0L,
         var powerUpHits: Int = 0,
+        var racePoints: Int = 0,
         var botLaneOffset: Float = 0f,
         var botPowerUpDelayMs: Long = 0L
     )
 
+    private val winCondition: WinCondition = rules.winConditionEnum
+    private val effectiveLaps: Int = totalLaps.coerceIn(1, 9)
+    private val timeLimitMs: Long = rules.timeLimitSec.coerceIn(30, 300) * 1000L
+
     private val racers: MutableList<MutableRacer> = players.mapIndexed { idx, p ->
         val (sx, sy, angle) = TrackCatalog.gridStartTransform(track, idx)
         val car = runCatching { RcCarType.valueOf(p.carType) }.getOrDefault(RcCarType.VOLT_BUGGY)
+        val startTrackIdx = (track.centerline.size - 4 - (idx / 2) * 3).mod(track.centerline.size)
         MutableRacer(
             playerId = p.id,
             name = p.name,
@@ -79,7 +89,8 @@ class RacePhysicsEngine(
             x = sx,
             y = sy,
             angleRad = angle,
-            checkpointIndex = track.centerline.size - 4,
+            checkpointIndex = startTrackIdx,
+            lastTrackIdx = startTrackIdx,
             botLaneOffset = ((idx % 3) - 1) * 26f
         )
     }.toMutableList()
@@ -96,6 +107,21 @@ class RacePhysicsEngine(
     private var phase: RacePhase = RacePhase.COUNTDOWN
     private var bannerText: String? = null
     private var bannerTimerMs: Long = 0L
+    private var firstHumanFinishTimeMs: Long? = null
+
+    // Random external weather/quake event state
+    private var activeEvent: ExternalEventType = ExternalEventType.NONE
+    private var eventRemainingMs: Long = 0L
+    private var nextEventCooldownMs: Long = if (rules.randomConditionsEnabled) {
+        random.nextLong(6000L, 9500L)
+    } else {
+        Long.MAX_VALUE
+    }
+    private var lastEventType: ExternalEventType = ExternalEventType.NONE
+    private var windAngleRad: Float = 0f
+    private var windStrength: Float = 0f
+    private val rainPuddles: MutableList<TrackPuddle> = mutableListOf()
+    private var quakePulseTimerMs: Long = 0L
 
     private val latestInputs = mutableMapOf<String, ControlInput>()
     private val pendingPowerUpTrigger = mutableSetOf<String>()
@@ -104,6 +130,129 @@ class RacePhysicsEngine(
         latestInputs[playerId] = input
         if (input.usePowerUp) {
             pendingPowerUpTrigger.add(playerId)
+        }
+    }
+
+    /**
+     * Exposed primarily for deterministic testing or host-triggered inspection.
+     */
+    fun triggerExternalEvent(type: ExternalEventType, durationMs: Long = 10000L) {
+        if (type == ExternalEventType.NONE) {
+            clearExternalEvent()
+            return
+        }
+        activeEvent = type
+        lastEventType = type
+        eventRemainingMs = durationMs.coerceAtLeast(1000L)
+        rainPuddles.clear()
+        windStrength = 0f
+        quakePulseTimerMs = 0L
+
+        when (type) {
+            ExternalEventType.RAIN -> {
+                spawnRainPuddles()
+                setBanner("RAINFALL! Puddles slow & pull steering!", 2600L)
+            }
+            ExternalEventType.EARTHQUAKE -> {
+                setBanner("EARTHQUAKE! Hold your line!", 2600L)
+            }
+            ExternalEventType.WIND -> {
+                windAngleRad = random.nextFloat() * (2f * PI.toFloat())
+                windStrength = 0.85f + random.nextFloat() * 0.3f
+                setBanner("GUSTY WIND! Tailwind boosts, crosswind drifts!", 2600L)
+            }
+            ExternalEventType.SNOW -> {
+                setBanner("SNOWFALL! Icy track — expect skidding!", 2600L)
+            }
+            ExternalEventType.NONE -> Unit
+        }
+    }
+
+    private fun clearExternalEvent() {
+        val wasActive = activeEvent != ExternalEventType.NONE
+        activeEvent = ExternalEventType.NONE
+        eventRemainingMs = 0L
+        windStrength = 0f
+        rainPuddles.clear()
+        nextEventCooldownMs = if (rules.randomConditionsEnabled) {
+            random.nextLong(8500L, 14000L)
+        } else {
+            Long.MAX_VALUE
+        }
+        if (wasActive && phase == RacePhase.RACING) {
+            setBanner("Weather clearing — full grip restored!", 1600L)
+        }
+    }
+
+    private fun spawnRainPuddles() {
+        val pts = track.centerline
+        if (pts.size < 20) return
+        val count = random.nextInt(6, 10)
+        repeat(count) {
+            val idx = random.nextInt(8, pts.size - 4)
+            val pt = pts[idx]
+            val next = pts[(idx + 1) % pts.size]
+            val tangAng = atan2(next.y - pt.y, next.x - pt.x)
+            val perpX = -sin(tangAng)
+            val perpY = cos(tangAng)
+            val offset = (random.nextFloat() * 2f - 1f) * (pt.halfWidth * 0.55f)
+            rainPuddles.add(
+                TrackPuddle(
+                    x = pt.x + perpX * offset,
+                    y = pt.y + perpY * offset,
+                    radius = 36f + random.nextFloat() * 14f
+                )
+            )
+        }
+    }
+
+    private fun updateExternalEvents(dtMs: Long, dt: Float) {
+        if (!rules.randomConditionsEnabled || phase != RacePhase.RACING) return
+
+        if (activeEvent != ExternalEventType.NONE) {
+            eventRemainingMs = (eventRemainingMs - dtMs).coerceAtLeast(0L)
+            if (activeEvent == ExternalEventType.EARTHQUAKE) {
+                quakePulseTimerMs += dtMs
+                if (quakePulseTimerMs >= 260L) {
+                    quakePulseTimerMs = 0L
+                    for (r in racers) {
+                        if (r.jumpZ < 0.08f) {
+                            val joltAng = random.nextFloat() * (2f * PI.toFloat())
+                            r.vx += cos(joltAng) * 58f
+                            r.vy += sin(joltAng) * 58f
+                            r.angleRad = normalizeAngle(r.angleRad + (random.nextFloat() - 0.5f) * 0.11f)
+                        }
+                    }
+                }
+            } else if (activeEvent == ExternalEventType.WIND) {
+                val wx = cos(windAngleRad) * 95f * windStrength
+                val wy = sin(windAngleRad) * 95f * windStrength
+                for (r in racers) {
+                    r.vx += wx * dt
+                    r.vy += wy * dt
+                    // Crosswind subtly nudges heading so straight lines require counter-steering
+                    val rightX = -sin(r.angleRad)
+                    val rightY = cos(r.angleRad)
+                    val cross = (wx * rightX + wy * rightY) / 95f
+                    r.angleRad = normalizeAngle(r.angleRad + cross * 0.28f * dt)
+                }
+            }
+
+            if (eventRemainingMs == 0L) {
+                clearExternalEvent()
+            }
+        } else {
+            nextEventCooldownMs -= dtMs
+            if (nextEventCooldownMs <= 0L) {
+                val choices = listOf(
+                    ExternalEventType.RAIN,
+                    ExternalEventType.EARTHQUAKE,
+                    ExternalEventType.WIND,
+                    ExternalEventType.SNOW
+                ).filter { it != lastEventType }
+                val nextType = choices[random.nextInt(choices.size)]
+                triggerExternalEvent(nextType, durationMs = random.nextLong(8500L, 12500L))
+            }
         }
     }
 
@@ -131,6 +280,7 @@ class RacePhysicsEngine(
 
         if (phase == RacePhase.RACING) {
             raceTimeMs += dtMs
+            updateExternalEvents(dtMs, dt)
         }
 
         // Update item boxes respawn
@@ -165,7 +315,17 @@ class RacePhysicsEngine(
 
             val input = when {
                 phase != RacePhase.RACING -> ControlInput()
-                racer.finished -> computeBotInput(racer, dtMs, cruise = true)
+                racer.finished && !racer.isBot -> {
+                    // NEVER autopilot finished human players! Let them keep manual brake/steer
+                    // and gently coast instead of auto-accelerating off on their own.
+                    val raw = latestInputs[racer.playerId] ?: ControlInput()
+                    if (rules.autoAccelerate && raw.throttle > 0.25f) {
+                        raw.copy(throttle = 0f)
+                    } else {
+                        raw
+                    }
+                }
+                racer.finished && racer.isBot -> ControlInput(throttle = 0f, steer = 0f)
                 racer.isBot -> computeBotInput(racer, dtMs, cruise = false)
                 else -> latestInputs[racer.playerId] ?: ControlInput()
             }
@@ -200,22 +360,44 @@ class RacePhysicsEngine(
         // Update rankings
         updateRankings()
 
-        // Check if all human racers finished (or everyone finished)
-        val humanRacers = racers.filter { !it.isBot }
-        val allHumansDone = humanRacers.isNotEmpty() && humanRacers.all { it.finished }
-        val allRacersDone = racers.all { it.finished }
-        if (phase == RacePhase.RACING && (allRacersDone || allHumansDone)) {
-            // Auto-complete remaining bots with estimated finish times for clean leaderboard
-            for (r in racers) {
-                if (!r.finished) {
-                    r.finished = true
-                    val remainingLaps = (totalLaps - r.lap + 1).coerceAtLeast(1)
-                    r.finishTimeMs = raceTimeMs + remainingLaps * 9500L
-                }
+        // Check win / finish conditions
+        if (phase == RacePhase.RACING) {
+            val humanRacers = racers.filter { !it.isBot }
+            val firstHumanDoneMs = firstHumanFinishTimeMs
+            val graceExpired = firstHumanDoneMs != null && (raceTimeMs - firstHumanDoneMs) >= FINISH_GRACE_MS
+
+            val timeLimitReached = winCondition == WinCondition.TIME_TRIAL_DISTANCE &&
+                raceTimeMs >= timeLimitMs
+            val safetyPointsTimeout = winCondition == WinCondition.CHAMPIONSHIP_POINTS &&
+                humanRacers.all { it.finished }
+            val allHumansDone = humanRacers.isNotEmpty() && humanRacers.all { it.finished }
+            val allRacersDone = racers.all { it.finished }
+
+            val shouldEndRace = when (winCondition) {
+                WinCondition.TIME_TRIAL_DISTANCE -> timeLimitReached || allRacersDone
+                WinCondition.FIRST_TO_FINISH, WinCondition.CHAMPIONSHIP_POINTS ->
+                    allRacersDone || allHumansDone || safetyPointsTimeout || graceExpired
             }
-            updateRankings()
-            phase = RacePhase.FINISHED
-            setBanner("CHECKERED FLAG!", 3000L)
+
+            if (shouldEndRace) {
+                for (r in racers) {
+                    if (!r.finished) {
+                        r.finished = true
+                        r.finishTimeMs = if (timeLimitReached) {
+                            raceTimeMs
+                        } else {
+                            val remainingLaps = (effectiveLaps - r.lap + 1).coerceAtLeast(1)
+                            raceTimeMs + remainingLaps * 9500L
+                        }
+                    }
+                }
+                if (winCondition == WinCondition.CHAMPIONSHIP_POINTS) {
+                    awardFinalPointsBonuses()
+                }
+                updateRankings()
+                phase = RacePhase.FINISHED
+                setBanner("CHECKERED FLAG!", 3000L)
+            }
         }
 
         return buildSnapshot(countdownSec = 0)
@@ -246,7 +428,13 @@ class RacePhysicsEngine(
     }
 
     private fun integrateCarPhysics(racer: MutableRacer, input: ControlInput, dt: Float) {
-        val (closestIdx, distToCenter) = TrackCatalog.nearestTrackPoint(track, racer.x, racer.y)
+        val (closestIdx, distToCenter) = TrackCatalog.nearestTrackPointLocal(
+            track = track,
+            x = racer.x,
+            y = racer.y,
+            hintIdx = racer.lastTrackIdx
+        )
+        racer.lastTrackIdx = closestIdx
         val trackPt = track.centerline[closestIdx]
         val isAirborne = racer.jumpZ > 0.08f
         val isOffRoad = !isAirborne && distToCenter > trackPt.halfWidth
@@ -255,6 +443,10 @@ class RacePhysicsEngine(
         val hasOverdrive = racer.overdriveMs > 0L
         val isStunned = racer.stunnedMs > 0L
 
+        val inRainPuddle = !isAirborne && activeEvent == ExternalEventType.RAIN && rainPuddles.any {
+            TrackCatalog.distance(racer.x, racer.y, it.x, it.y) <= it.radius + racer.carType.radiusPx * 0.45f
+        }
+
         val offRoadFactor = if (isOffRoad && !hasOverdrive && !hasBoost) {
             val blended = racer.carType.offRoadRetention * (0.65f + 0.35f * track.id.offRoadDragMultiplier)
             blended.coerceIn(0.48f, 0.98f)
@@ -262,15 +454,25 @@ class RacePhysicsEngine(
             1.0f
         }
 
+        val weatherSpeedMult = when {
+            inRainPuddle && !hasOverdrive -> 0.76f
+            activeEvent == ExternalEventType.RAIN -> 0.93f
+            activeEvent == ExternalEventType.SNOW -> 0.89f
+            else -> 1.0f
+        }
+
         val speedMult = when {
             isStunned -> 0.36f
             hasBoost -> 1.44f
             hasOverdrive -> 1.18f
             else -> 1.0f
-        } * offRoadFactor
+        } * offRoadFactor * weatherSpeedMult
 
         val maxSpeed = racer.carType.maxSpeedPx * speedMult
-        val accel = racer.carType.accelRate * (if (hasBoost) 1.75f else if (hasOverdrive) 1.3f else 1.0f)
+        val accelWeatherMult = if (activeEvent == ExternalEventType.SNOW) 0.84f else 1.0f
+        val accel = racer.carType.accelRate *
+            accelWeatherMult *
+            (if (hasBoost) 1.75f else if (hasOverdrive) 1.3f else 1.0f)
 
         val cosA = cos(racer.angleRad)
         val sinA = sin(racer.angleRad)
@@ -281,40 +483,52 @@ class RacePhysicsEngine(
         var lateralVel = racer.vx * rightX + racer.vy * rightY
 
         val throttle = if (isStunned) 0.15f else input.throttle.coerceIn(-1f, 1f)
-        val steer = if (isStunned) 0f else input.steer.coerceIn(-1f, 1f)
-        racer.steerVisual = steer
+        val rawSteer = if (isStunned) 0f else input.steer.coerceIn(-1f, 1f)
+        val puddleSteerJitter = if (inRainPuddle && !hasOverdrive) {
+            sin((elapsedMs / 110f) + closestIdx.toFloat()) * 0.55f
+        } else {
+            0f
+        }
+        val steer = (rawSteer + puddleSteerJitter).coerceIn(-1.15f, 1.15f)
+        racer.steerVisual = rawSteer
 
         if (!isAirborne) {
-            // Forward acceleration / braking
             if (throttle > 0.05f) {
                 forwardVel += throttle * accel * dt
             } else if (throttle < -0.05f) {
-                val brakeMult = if (forwardVel > 0f) 1.55f else 0.72f
+                // Strong braking and snappy reverse torque so cars can always back off a wall
+                val brakeMult = if (forwardVel > 0f) 1.85f else 1.45f
                 forwardVel += throttle * accel * brakeMult * dt
             } else {
-                // Natural rolling drag
-                val drag = 2.1f
+                val drag = if (activeEvent == ExternalEventType.SNOW) 1.15f else 2.25f
                 forwardVel *= max(0f, 1f - drag * dt)
             }
 
-            // Clamp forward speed
-            forwardVel = forwardVel.coerceIn(-maxSpeed * 0.42f, maxSpeed)
+            forwardVel = forwardVel.coerceIn(-maxSpeed * 0.58f, maxSpeed)
         }
 
-        // Steering scales smoothly with speed (minimal mid-air authority)
-        val speedNorm = (abs(forwardVel) / 220f).coerceIn(0.18f, 1.0f)
-        val reverseFlip = if (forwardVel < -15f) -1f else 1f
+        // Responsive low-speed & reverse steering so cars never stay wedged against a barrier
+        val speedNorm = (abs(forwardVel) / 180f).coerceIn(0.32f, 1.0f)
+        val reverseFlip = if (forwardVel < -25f) -1f else 1f
         val gripTurnBoost = if (hasOverdrive) 1.18f else 1.0f
         val airSteerFactor = if (isAirborne) 0.25f else 1.0f
         racer.angleRad = normalizeAngle(
             racer.angleRad + steer * racer.carType.turnRateRad * gripTurnBoost * airSteerFactor * speedNorm * reverseFlip * dt
         )
 
-        // Lateral grip cancels sideways drift while grounded
+        // Lateral grip (reduced sharply during Snow or Rain puddles to cause skidding/sliding)
         if (!isAirborne) {
+            val weatherGripMult = when {
+                inRainPuddle && !hasOverdrive -> 0.45f
+                activeEvent == ExternalEventType.SNOW -> 0.40f
+                activeEvent == ExternalEventType.RAIN -> 0.72f
+                activeEvent == ExternalEventType.EARTHQUAKE -> 0.80f
+                else -> 1.0f
+            }
             val grip = racer.carType.lateralGrip *
                 track.id.surfaceGripMultiplier *
-                (if (hasOverdrive) 1.5f else 1.0f) *
+                weatherGripMult *
+                (if (hasOverdrive) 1.55f else 1.0f) *
                 (if (isOffRoad) 0.85f else 1.0f)
             lateralVel *= max(0f, 1f - grip * dt)
         }
@@ -331,28 +545,47 @@ class RacePhysicsEngine(
         racer.x += racer.vx * dt
         racer.y += racer.vy * dt
 
-        // Track boundary: either Hard Track Boundary (cars bounce cleanly off kerbs)
-        // or soft wide outer corridor allowing off-road grass/sand shortcuts
+        // Re-evaluate distance after move using local spline index
+        val (postIdx, postDist) = TrackCatalog.nearestTrackPointLocal(
+            track = track,
+            x = racer.x,
+            y = racer.y,
+            hintIdx = racer.lastTrackIdx
+        )
+        racer.lastTrackIdx = postIdx
+        val postPt = track.centerline[postIdx]
+
+        // Track boundary: Hard Track Boundary keeps cars inside kerb with clean elastic separation,
+        // or wide off-road corridor when disabled
         val maxCorridor = if (rules.hardTrackBoundary) {
-            (trackPt.halfWidth - racer.carType.radiusPx * 0.45f).coerceAtLeast(42f)
+            (postPt.halfWidth - racer.carType.radiusPx * 0.45f).coerceAtLeast(42f)
         } else {
-            trackPt.halfWidth + 130f
+            postPt.halfWidth + 130f
         }
-        if (distToCenter > maxCorridor) {
-            val dx = racer.x - trackPt.x
-            val dy = racer.y - trackPt.y
+        if (postDist > maxCorridor) {
+            val dx = racer.x - postPt.x
+            val dy = racer.y - postPt.y
             val d = hypot(dx, dy).coerceAtLeast(1f)
             val nx = dx / d
             val ny = dy / d
-            racer.x = trackPt.x + nx * maxCorridor
-            racer.y = trackPt.y + ny * maxCorridor
-            // Reflect outward velocity component
+            // Place cleanly just inside boundary so car isn't pinned inside collision skin
+            val safeDist = (maxCorridor - 2.5f).coerceAtLeast(24f)
+            racer.x = postPt.x + nx * safeDist
+            racer.y = postPt.y + ny * safeDist
+
             val vn = racer.vx * nx + racer.vy * ny
             if (vn > 0f) {
-                val restitution = if (rules.hardTrackBoundary) 1.65f else 1.35f
-                val retention = if (rules.hardTrackBoundary) 0.84f else 0.85f
+                val restitution = if (rules.hardTrackBoundary) 1.55f else 1.3f
+                val retention = if (rules.hardTrackBoundary) 0.80f else 0.84f
                 racer.vx = (racer.vx - restitution * vn * nx) * retention
                 racer.vy = (racer.vy - restitution * vn * ny) * retention
+            }
+            // Gently align nose along track tangent when glancing/stuck nose-first under auto-gas
+            if (throttle > 0.1f && abs(vn) < 40f && rules.hardTrackBoundary) {
+                val nextPt = track.centerline[(postIdx + 2) % track.centerline.size]
+                val tangAng = atan2(nextPt.y - postPt.y, nextPt.x - postPt.x)
+                val diff = normalizeAngle(tangAng - racer.angleRad)
+                racer.angleRad = normalizeAngle(racer.angleRad + diff * (2.6f * dt).coerceAtMost(0.35f))
             }
         }
     }
@@ -360,14 +593,14 @@ class RacePhysicsEngine(
     private fun handleWorldAndPropCollisions(racer: MutableRacer) {
         val margin = racer.carType.radiusPx + 12f
         if (racer.x < margin) {
-            racer.x = margin; racer.vx = abs(racer.vx) * 0.5f
+            racer.x = margin; racer.vx = abs(racer.vx) * 0.55f
         } else if (racer.x > track.worldWidth - margin) {
-            racer.x = track.worldWidth - margin; racer.vx = -abs(racer.vx) * 0.5f
+            racer.x = track.worldWidth - margin; racer.vx = -abs(racer.vx) * 0.55f
         }
         if (racer.y < margin) {
-            racer.y = margin; racer.vy = abs(racer.vy) * 0.5f
+            racer.y = margin; racer.vy = abs(racer.vy) * 0.55f
         } else if (racer.y > track.worldHeight - margin) {
-            racer.y = track.worldHeight - margin; racer.vy = -abs(racer.vy) * 0.5f
+            racer.y = track.worldHeight - margin; racer.vy = -abs(racer.vy) * 0.55f
         }
 
         for (prop in track.props) {
@@ -376,15 +609,15 @@ class RacePhysicsEngine(
             val dist = hypot(dx, dy)
             if (prop.isSolidObstacle && racer.jumpZ < 0.25f) {
                 val minDist = prop.radius + racer.carType.radiusPx
-                if (dist < minDist && dist > 0.01f) {
-                    val nx = dx / dist
-                    val ny = dy / dist
-                    racer.x = prop.x + nx * minDist
-                    racer.y = prop.y + ny * minDist
+                if (dist < minDist) {
+                    val nx = if (dist > 0.01f) dx / dist else cos(racer.angleRad)
+                    val ny = if (dist > 0.01f) dy / dist else sin(racer.angleRad)
+                    racer.x = prop.x + nx * (minDist + 2f)
+                    racer.y = prop.y + ny * (minDist + 2f)
                     val vn = racer.vx * nx + racer.vy * ny
                     if (vn < 0f) {
-                        racer.vx -= 1.5f * vn * nx
-                        racer.vy -= 1.5f * vn * ny
+                        racer.vx = (racer.vx - 1.45f * vn * nx) * 0.82f
+                        racer.vy = (racer.vy - 1.45f * vn * ny) * 0.82f
                     }
                 }
             } else if (prop.shape == PropShape.MUD_POOL && dist < prop.radius && racer.jumpZ <= 0.05f) {
@@ -443,9 +676,9 @@ class RacePhysicsEngine(
                 } else {
                     PowerUpType.entries
                 }
-                racer.heldPowerUp = pool[Random.nextInt(pool.size)]
+                racer.heldPowerUp = pool[random.nextInt(pool.size)]
                 if (racer.isBot) {
-                    racer.botPowerUpDelayMs = Random.nextLong(700L, 2200L)
+                    racer.botPowerUpDelayMs = random.nextLong(700L, 2200L)
                 }
                 break
             }
@@ -479,6 +712,7 @@ class RacePhysicsEngine(
                         target.vx *= 0.35f
                         target.vy *= 0.35f
                         racer.powerUpHits += 1
+                        racer.racePoints += 35
                         setBanner("${racer.name} zapped ${target.name} with EMP!", 1800L)
                     }
                 }
@@ -513,7 +747,6 @@ class RacePhysicsEngine(
         val it = hazards.iterator()
         while (it.hasNext()) {
             val h = it.next()
-            // Owner has 1.2s grace period after dropping
             if (h.ownerId == racer.playerId && h.remainingMs > 9800L) continue
             if (TrackCatalog.distance(racer.x, racer.y, h.x, h.y) <= h.radius + racer.carType.radiusPx * 0.7f) {
                 it.remove()
@@ -527,6 +760,7 @@ class RacePhysicsEngine(
                     val owner = racers.find { o -> o.playerId == h.ownerId }
                     if (owner != null && owner.playerId != racer.playerId) {
                         owner.powerUpHits += 1
+                        owner.racePoints += 35
                     }
                     setBanner("${racer.name} spun out on Glue Slick!", 1600L)
                 }
@@ -571,7 +805,7 @@ class RacePhysicsEngine(
 
     private fun updateLapProgress(racer: MutableRacer) {
         val n = track.centerline.size
-        val (newIdx, _) = TrackCatalog.nearestTrackPoint(track, racer.x, racer.y)
+        val (newIdx, _) = TrackCatalog.nearestTrackPointLocal(track, racer.x, racer.y, racer.lastTrackIdx)
         val q1 = n / 4
         val q2 = n / 2
         val q3 = (3 * n) / 4
@@ -581,7 +815,6 @@ class RacePhysicsEngine(
 
         when {
             newIdx < q1 -> {
-                // Crossing finish line forward after completing all 4 sectors
                 if (prevIdx >= q3 && racer.sectorMask == 0b1111) {
                     val lapTime = (raceTimeMs - racer.currentLapStartMs).coerceAtLeast(1000L)
                     racer.lapTimesMs.add(lapTime)
@@ -589,15 +822,20 @@ class RacePhysicsEngine(
                     if (prevBest == null || lapTime < prevBest) {
                         racer.bestLapMs = lapTime
                     }
-                    if (racer.lap >= totalLaps) {
+                    racer.racePoints += 50
+
+                    if (winCondition != WinCondition.TIME_TRIAL_DISTANCE && racer.lap >= effectiveLaps) {
                         racer.finished = true
                         racer.finishTimeMs = raceTimeMs
+                        if (!racer.isBot && firstHumanFinishTimeMs == null) {
+                            firstHumanFinishTimeMs = raceTimeMs
+                        }
                         setBanner("${racer.name} finished!", 1800L)
                     } else {
                         racer.lap += 1
                         racer.currentLapStartMs = raceTimeMs
                         racer.sectorMask = 0b0001
-                        if (racer.lap == totalLaps) {
+                        if (winCondition != WinCondition.TIME_TRIAL_DISTANCE && racer.lap == effectiveLaps) {
                             setBanner("${racer.name}: FINAL LAP!", 1500L)
                         }
                     }
@@ -607,24 +845,42 @@ class RacePhysicsEngine(
             }
             newIdx in q1 until q2 -> {
                 if ((racer.sectorMask and 0b0001) != 0) {
+                    if ((racer.sectorMask and 0b0010) == 0) racer.racePoints += 10
                     racer.sectorMask = racer.sectorMask or 0b0010
                 }
             }
             newIdx in q2 until q3 -> {
                 if ((racer.sectorMask and 0b0010) != 0) {
+                    if ((racer.sectorMask and 0b0100) == 0) racer.racePoints += 10
                     racer.sectorMask = racer.sectorMask or 0b0100
                 }
             }
             else -> {
                 if ((racer.sectorMask and 0b0100) != 0) {
+                    if ((racer.sectorMask and 0b1000) == 0) racer.racePoints += 10
                     racer.sectorMask = racer.sectorMask or 0b1000
                 }
             }
         }
     }
 
+    private fun awardFinalPointsBonuses() {
+        val byProgress = racers.sortedByDescending { computeProgressScore(it) }
+        val finishBonuses = listOf(100, 65, 40, 20)
+        byProgress.forEachIndexed { idx, r ->
+            r.racePoints += finishBonuses.getOrElse(idx) { 10 }
+        }
+    }
+
     private fun computeProgressScore(racer: MutableRacer): Float {
-        if (racer.finished) {
+        if (winCondition == WinCondition.CHAMPIONSHIP_POINTS) {
+            return racer.racePoints * 10000f + computeDistanceScore(racer)
+        }
+        return computeDistanceScore(racer)
+    }
+
+    private fun computeDistanceScore(racer: MutableRacer): Float {
+        if (racer.finished && winCondition != WinCondition.TIME_TRIAL_DISTANCE) {
             return 10_000_000f - (racer.finishTimeMs ?: raceTimeMs).toFloat()
         }
         val n = track.centerline.size.toFloat()
@@ -646,7 +902,7 @@ class RacePhysicsEngine(
 
     private fun computeBotInput(racer: MutableRacer, dtMs: Long, cruise: Boolean): ControlInput {
         val pts = track.centerline
-        val (closestIdx, _) = TrackCatalog.nearestTrackPoint(track, racer.x, racer.y)
+        val (closestIdx, _) = TrackCatalog.nearestTrackPointLocal(track, racer.x, racer.y, racer.lastTrackIdx)
         val lookAhead = 7
         val targetIdx = (closestIdx + lookAhead) % pts.size
         val nextIdx = (targetIdx + 1) % pts.size
@@ -675,12 +931,16 @@ class RacePhysicsEngine(
     }
 
     private fun buildSnapshot(countdownSec: Int): RaceSnapshot {
+        val graceRem = firstHumanFinishTimeMs?.let { firstMs ->
+            if (phase == RacePhase.RACING) (FINISH_GRACE_MS - (raceTimeMs - firstMs)).coerceAtLeast(0L) else 0L
+        } ?: 0L
+
         return RaceSnapshot(
             raceTimeMs = raceTimeMs,
             countdownSec = countdownSec,
             phase = phase.name,
             trackId = track.id.name,
-            totalLaps = totalLaps,
+            totalLaps = effectiveLaps,
             racers = racers.map { r ->
                 RacerState(
                     playerId = r.playerId,
@@ -713,16 +973,27 @@ class RacePhysicsEngine(
                     stunnedMs = r.stunnedMs,
                     overdriveMs = r.overdriveMs,
                     spinVisualOffset = r.spinVisualOffset,
-                    powerUpHits = r.powerUpHits
+                    powerUpHits = r.powerUpHits,
+                    racePoints = r.racePoints
                 )
             },
             itemBoxes = itemBoxes.toList(),
             hazards = hazards.toList(),
-            eventBanner = bannerText
+            eventBanner = bannerText,
+            winCondition = winCondition.name,
+            timeLimitSec = rules.timeLimitSec,
+            activeEvent = activeEvent.name,
+            eventRemainingMs = eventRemainingMs,
+            windAngleRad = windAngleRad,
+            windStrength = windStrength,
+            rainPuddles = rainPuddles.toList(),
+            postFinishGraceMs = graceRem
         )
     }
 
     companion object {
+        const val FINISH_GRACE_MS = 20_000L
+
         fun normalizeAngle(angle: Float): Float {
             var a = angle
             val twoPi = (2.0 * PI).toFloat()

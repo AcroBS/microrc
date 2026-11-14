@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.unit.dp
+import com.example.model.ExternalEventType
 import com.example.model.ItemBoxState
 import com.example.model.PropShape
 import com.example.model.RacerState
@@ -20,6 +21,7 @@ import com.example.model.RcCarType
 import com.example.model.TrackDefinition
 import com.example.model.TrackHazard
 import com.example.model.TrackId
+import com.example.model.TrackPuddle
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
@@ -31,7 +33,9 @@ fun DrawScope.drawTrackWorld(
     hazards: List<TrackHazard>,
     racers: List<RacerState>,
     animTimeSec: Float,
-    hardBoundary: Boolean = false
+    hardBoundary: Boolean = false,
+    rainPuddles: List<TrackPuddle> = emptyList(),
+    activeEvent: ExternalEventType = ExternalEventType.NONE
 ) {
     // 1. Background floor
     drawRect(
@@ -95,6 +99,15 @@ fun DrawScope.drawTrackWorld(
         style = Stroke(width = roadWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
     )
 
+    // Frosty glaze on track surface during Snowfall
+    if (activeEvent == ExternalEventType.SNOW) {
+        drawPath(
+            path = roadPath,
+            color = Color(0xFFE3F2FD).copy(alpha = 0.24f),
+            style = Stroke(width = roadWidth - 8f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+    }
+
     // Subtle racing groove / centerline dashes
     drawPath(
         path = roadPath,
@@ -104,6 +117,29 @@ fun DrawScope.drawTrackWorld(
             pathEffect = PathEffect.dashPathEffect(floatArrayOf(28f, 32f), 0f)
         )
     )
+
+    // Rain puddles on road surface (glossy blue with animated ripples)
+    for (i in rainPuddles.indices) {
+        val p = rainPuddles[i]
+        drawOval(
+            color = Color(0xFF0277BD).copy(alpha = 0.56f),
+            topLeft = Offset(p.x - p.radius, p.y - p.radius * 0.78f),
+            size = Size(p.radius * 2f, p.radius * 1.56f)
+        )
+        drawOval(
+            color = Color(0xFF4FC3F7).copy(alpha = 0.45f),
+            topLeft = Offset(p.x - p.radius * 0.72f, p.y - p.radius * 0.52f),
+            size = Size(p.radius * 1.44f, p.radius * 1.04f)
+        )
+        val ripplePhase = ((animTimeSec * 1.8f + i * 0.37f) % 1f)
+        val rr = p.radius * (0.25f + 0.65f * ripplePhase)
+        drawCircle(
+            color = Color(0xFFB3E5FC).copy(alpha = (1f - ripplePhase) * 0.6f),
+            radius = rr,
+            center = Offset(p.x, p.y),
+            style = Stroke(width = 2.5f)
+        )
+    }
 
     // 4. Start / Finish checkered gantry
     val p0 = pts[0]
@@ -479,3 +515,113 @@ fun DrawScope.drawTrackMiniMap(
         )
     }
 }
+
+fun DrawScope.drawWeatherScreenOverlay(
+    activeEvent: ExternalEventType,
+    animTimeSec: Float,
+    windAngleRad: Float,
+    windStrength: Float
+) {
+    val w = size.width
+    val h = size.height
+    if (w <= 0f || h <= 0f) return
+
+    when (activeEvent) {
+        ExternalEventType.RAIN -> {
+            drawRect(color = Color(0xFF0A2442).copy(alpha = 0.16f))
+            val dropColor = Color(0xFFB3E5FC).copy(alpha = 0.48f)
+            for (i in 0 until 54) {
+                val seedX = ((i * 197 + 43) % 1000) / 1000f
+                val seedY = ((i * 353 + 17) % 1000) / 1000f
+                val t = (seedY + animTimeSec * (1.25f + (i % 4) * 0.12f)) % 1f
+                val x = ((seedX * w + t * 90f) % (w + 60f)) - 30f
+                val y = t * (h + 60f) - 30f
+                drawLine(
+                    color = dropColor,
+                    start = Offset(x, y),
+                    end = Offset(x + 12f, y + 32f),
+                    strokeWidth = 2.2f,
+                    cap = StrokeCap.Round
+                )
+            }
+        }
+        ExternalEventType.SNOW -> {
+            drawRect(color = Color(0xFFDCEEFB).copy(alpha = 0.12f))
+            for (i in 0 until 48) {
+                val seedX = ((i * 251 + 71) % 1000) / 1000f
+                val seedY = ((i * 419 + 29) % 1000) / 1000f
+                val fall = (seedY + animTimeSec * (0.28f + (i % 3) * 0.07f)) % 1f
+                val sway = sin(animTimeSec * 2.2f + i) * 26f
+                val x = ((seedX * w + sway + w) % w)
+                val y = fall * h
+                val radius = (3f + (i % 4) * 1.4f)
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.76f),
+                    radius = radius,
+                    center = Offset(x, y)
+                )
+            }
+        }
+        ExternalEventType.WIND -> {
+            val dirX = cos(windAngleRad)
+            val dirY = sin(windAngleRad)
+            val speedScale = 0.45f + windStrength * 0.35f
+            val leafColors = listOf(
+                Color(0xFF7CB342),
+                Color(0xFFFFB300),
+                Color(0xFFE65100),
+                Color(0xFF9CCC65)
+            )
+            // Air gust streaks
+            for (i in 0 until 14) {
+                val baseX = ((i * 313 + 89) % 1000) / 1000f
+                val baseY = ((i * 547 + 19) % 1000) / 1000f
+                val prog = (animTimeSec * speedScale + baseX) % 1f
+                val cx = ((baseX + dirX * prog) % 1f + 1f) % 1f * w
+                val cy = ((baseY + dirY * prog) % 1f + 1f) % 1f * h
+                drawLine(
+                    color = Color.White.copy(alpha = 0.25f),
+                    start = Offset(cx - dirX * 36f, cy - dirY * 36f),
+                    end = Offset(cx + dirX * 36f, cy + dirY * 36f),
+                    strokeWidth = 2.5f,
+                    cap = StrokeCap.Round
+                )
+            }
+            // Blowing leaves moving & tumbling in wind direction
+            for (i in 0 until 26) {
+                val baseX = ((i * 179 + 31) % 1000) / 1000f
+                val baseY = ((i * 601 + 53) % 1000) / 1000f
+                val prog = (animTimeSec * (speedScale * (0.85f + (i % 4) * 0.1f)) + i * 0.17f) % 1f
+                val wobble = sin(animTimeSec * 4.5f + i) * 20f
+                val perpX = -dirY
+                val perpY = dirX
+                val lx = (((baseX + dirX * prog) % 1f + 1f) % 1f) * w + perpX * wobble
+                val ly = (((baseY + dirY * prog) % 1f + 1f) % 1f) * h + perpY * wobble
+                val spinDeg = (animTimeSec * 220f + i * 47f) % 360f
+                val leafColor = leafColors[i % leafColors.size].copy(alpha = 0.88f)
+                withTransform({
+                    translate(lx, ly)
+                    rotate(spinDeg, Offset.Zero)
+                }) {
+                    drawOval(
+                        color = leafColor,
+                        topLeft = Offset(-9f, -4.5f),
+                        size = Size(18f, 9f)
+                    )
+                    drawLine(
+                        color = Color(0xFF3E2723).copy(alpha = 0.65f),
+                        start = Offset(-9f, 0f),
+                        end = Offset(8f, 0f),
+                        strokeWidth = 1.5f
+                    )
+                }
+            }
+        }
+        ExternalEventType.EARTHQUAKE -> {
+            // Subtle warm dust haze during tremors
+            drawRect(color = Color(0xFF5D4037).copy(alpha = 0.10f))
+        }
+        ExternalEventType.NONE -> Unit
+    }
+}
+

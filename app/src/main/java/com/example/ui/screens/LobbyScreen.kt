@@ -48,7 +48,6 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -74,18 +73,11 @@ import com.example.model.CustomTrackData
 import com.example.model.LobbyStatePayload
 import com.example.model.RcCarType
 import com.example.model.TrackId
+import com.example.model.WinCondition
 import com.example.network.SessionRole
 import com.example.ui.components.drawRcCar
 import com.example.ui.components.drawTrackMiniMap
-import com.example.ui.theme.AcidLime
-import com.example.ui.theme.CarbonBg
-import com.example.ui.theme.ElectricCyan
 import com.example.ui.theme.GoldTrophy
-import com.example.ui.theme.PaddockOutline
-import com.example.ui.theme.PaddockSurface
-import com.example.ui.theme.PaddockSurfaceElevated
-import com.example.ui.theme.SignalOrange
-import com.example.ui.theme.TextSecondary
 
 @Composable
 fun LobbyScreen(
@@ -120,15 +112,15 @@ fun LobbyScreen(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(CarbonBg)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .imePadding()
+    Surface(
+        color = MaterialTheme.colorScheme.background,
+        modifier = Modifier.fillMaxSize()
     ) {
         Column(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .imePadding(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Top Bar
@@ -143,12 +135,17 @@ fun LobbyScreen(
                     onClick = onLeaveLobby,
                     modifier = Modifier.testTag("lobby_leave_button")
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Leave Lobby", tint = Color.White)
+                    Icon(
+                        Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Leave Lobby",
+                        tint = MaterialTheme.colorScheme.onBackground
+                    )
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = lobby?.lobbyName ?: "Race Paddock",
                         style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onBackground,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -156,13 +153,13 @@ fun LobbyScreen(
                         Text(
                             text = "Host IP: ${lobby.hostIp}:${lobby.tcpPort}",
                             style = MaterialTheme.typography.labelSmall,
-                            color = ElectricCyan
+                            color = MaterialTheme.colorScheme.secondary
                         )
                     } else {
                         Text(
                             text = "Offline Practice vs AI",
                             style = MaterialTheme.typography.labelSmall,
-                            color = AcidLime
+                            color = MaterialTheme.colorScheme.tertiary
                         )
                     }
                 }
@@ -175,21 +172,21 @@ fun LobbyScreen(
                     ) {
                         Icon(
                             Icons.Default.Tune,
-                            contentDescription = "Match Rules & Settings",
-                            tint = SignalOrange
+                            contentDescription = "Match Rules & Audio",
+                            tint = MaterialTheme.colorScheme.primary
                         )
                     }
                     OutlinedButton(
                         onClick = onOpenGarage,
-                        border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.6f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                         modifier = Modifier
                             .height(48.dp)
                             .testTag("lobby_garage_button")
                     ) {
-                        Icon(Icons.Default.Build, contentDescription = null, tint = ElectricCyan, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Car", color = ElectricCyan, style = MaterialTheme.typography.labelMedium)
+                        Text("Car", style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
@@ -206,14 +203,25 @@ fun LobbyScreen(
                 val activeRules = lobby?.rules
                 if (activeRules != null) {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        item {
+                            val label = if (activeRules.winConditionEnum == WinCondition.TIME_TRIAL_DISTANCE) {
+                                "${activeRules.timeLimitSec}s LIMIT"
+                            } else {
+                                activeRules.winConditionEnum.displayName.uppercase()
+                            }
+                            LobbyRuleBadge(label, MaterialTheme.colorScheme.primary, onOpenSettings)
+                        }
                         if (activeRules.autoAccelerate) {
-                            item { LobbyRuleBadge("AUTO-GAS (ALL)", AcidLime, onOpenSettings) }
+                            item { LobbyRuleBadge("AUTO-GAS", MaterialTheme.colorScheme.tertiary, onOpenSettings) }
                         }
                         if (activeRules.hardTrackBoundary) {
-                            item { LobbyRuleBadge("BOUNCE WALLS", SignalOrange, onOpenSettings) }
+                            item { LobbyRuleBadge("BOUNCE WALLS", MaterialTheme.colorScheme.primary, onOpenSettings) }
                         }
                         if (activeRules.randomJumpsEnabled) {
-                            item { LobbyRuleBadge("RANDOM JUMPS", ElectricCyan, onOpenSettings) }
+                            item { LobbyRuleBadge("JUMPS", MaterialTheme.colorScheme.secondary, onOpenSettings) }
+                        }
+                        if (activeRules.randomConditionsEnabled) {
+                            item { LobbyRuleBadge("RANDOM WEATHER", MaterialTheme.colorScheme.secondary, onOpenSettings) }
                         }
                     }
                 }
@@ -232,22 +240,25 @@ fun LobbyScreen(
                     Text(
                         text = if (isHostOrSolo) "SELECT TRACK" else "SELECTED TRACK",
                         style = MaterialTheme.typography.labelLarge,
-                        color = TextSecondary
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    // Lap Selector
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        listOf(2, 3, 5).forEach { laps ->
-                            val active = (lobby?.totalLaps ?: 3) == laps
-                            FilterChip(
-                                selected = active,
-                                onClick = { if (isHostOrSolo) onSelectLaps(laps) },
-                                enabled = isHostOrSolo,
-                                label = { Text("${laps}L", style = MaterialTheme.typography.labelSmall) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = SignalOrange,
-                                    selectedLabelColor = CarbonBg
+                    if (activeRules?.winConditionEnum == WinCondition.TIME_TRIAL_DISTANCE) {
+                        Text(
+                            text = "TIME: ${activeRules.timeLimitSec}s",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(2, 3, 5).forEach { laps ->
+                                val active = (lobby?.totalLaps ?: 3) == laps
+                                FilterChip(
+                                    selected = active,
+                                    onClick = { if (isHostOrSolo) onSelectLaps(laps) },
+                                    enabled = isHostOrSolo,
+                                    label = { Text("${laps}L", style = MaterialTheme.typography.labelSmall) }
                                 )
-                            )
+                            }
                         }
                     }
                 }
@@ -259,29 +270,27 @@ fun LobbyScreen(
                     ) {
                         OutlinedButton(
                             onClick = onGenerateRandomTrack,
-                            border = BorderStroke(1.dp, SignalOrange.copy(alpha = 0.65f)),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(14.dp),
                             modifier = Modifier
                                 .weight(1f)
                                 .height(48.dp)
                                 .testTag("lobby_random_track_button")
                         ) {
-                            Icon(Icons.Default.Casino, contentDescription = null, tint = SignalOrange, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Casino, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Random Track", color = SignalOrange, style = MaterialTheme.typography.labelMedium)
+                            Text("Random Track", style = MaterialTheme.typography.labelMedium)
                         }
                         OutlinedButton(
                             onClick = onOpenTrackEditor,
-                            border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.65f)),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(14.dp),
                             modifier = Modifier
                                 .weight(1f)
                                 .height(48.dp)
                                 .testTag("lobby_track_editor_button")
                         ) {
-                            Icon(Icons.Default.Map, contentDescription = null, tint = ElectricCyan, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Track Editor", color = ElectricCyan, style = MaterialTheme.typography.labelMedium)
+                            Text("Track Editor", style = MaterialTheme.typography.labelMedium)
                         }
                     }
                 }
@@ -301,11 +310,15 @@ fun LobbyScreen(
                         val previewDef = remember(cTrack) { TrackCatalog.buildCustomTrack(cTrack) }
                         val active = activeCustom?.id == cTrack.id
                         Surface(
-                            color = if (active) Color(previewDef.id.roadColorHex).copy(alpha = 0.7f) else PaddockSurface,
+                            color = if (active) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainer
+                            },
                             shape = RoundedCornerShape(16.dp),
                             border = BorderStroke(
                                 width = if (active) 2.dp else 1.dp,
-                                color = if (active) ElectricCyan else PaddockOutline
+                                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
                             ),
                             modifier = Modifier
                                 .width(156.dp)
@@ -329,14 +342,14 @@ fun LobbyScreen(
                                 Text(
                                     text = cTrack.name,
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = Color.White,
+                                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
                                     text = "Custom • ${previewDef.ramps.size} Jumps",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (active) ElectricCyan else TextSecondary,
+                                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1
                                 )
                             }
@@ -346,11 +359,15 @@ fun LobbyScreen(
                     items(TrackCatalog.allTracks(), key = { it.id.name }) { track ->
                         val active = activeCustom == null && track.id == selectedTrack
                         Surface(
-                            color = if (active) Color(track.id.roadColorHex).copy(alpha = 0.7f) else PaddockSurface,
+                            color = if (active) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainer
+                            },
                             shape = RoundedCornerShape(16.dp),
                             border = BorderStroke(
                                 width = if (active) 2.dp else 1.dp,
-                                color = if (active) Color(track.id.kerbPrimaryHex) else PaddockOutline
+                                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
                             ),
                             modifier = Modifier
                                 .width(156.dp)
@@ -374,14 +391,14 @@ fun LobbyScreen(
                                 Text(
                                     text = track.id.displayName,
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = Color.White,
+                                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
                                     text = "${track.id.surfaceLabel} • ${track.id.difficulty}",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (active) ElectricCyan else TextSecondary,
+                                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1
                                 )
                             }
@@ -396,7 +413,11 @@ fun LobbyScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     val count = lobby?.players?.size ?: 0
-                    Text("RACERS ($count/4)", style = MaterialTheme.typography.labelLarge, color = TextSecondary)
+                    Text(
+                        text = "RACERS ($count/4)",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     if (isHostOrSolo) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             val hasBot = lobby?.players?.any { it.isBot } == true
@@ -404,7 +425,7 @@ fun LobbyScreen(
                                 OutlinedButton(
                                     onClick = onRemoveBot,
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-                                    modifier = Modifier.height(34.dp)
+                                    modifier = Modifier.height(36.dp)
                                 ) {
                                     Icon(Icons.Default.Remove, contentDescription = null, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
@@ -416,7 +437,7 @@ fun LobbyScreen(
                                     onClick = onAddBot,
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
                                     modifier = Modifier
-                                        .height(34.dp)
+                                        .height(36.dp)
                                         .testTag("add_bot_button")
                                 ) {
                                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
@@ -432,11 +453,15 @@ fun LobbyScreen(
                     lobby?.players.orEmpty().forEach { player ->
                         val car = runCatching { RcCarType.valueOf(player.carType) }.getOrDefault(RcCarType.VOLT_BUGGY)
                         Surface(
-                            color = PaddockSurface,
-                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            shape = RoundedCornerShape(16.dp),
                             border = BorderStroke(
                                 1.dp,
-                                if (player.id == localPlayerId) ElectricCyan.copy(alpha = 0.6f) else PaddockOutline
+                                if (player.id == localPlayerId) {
+                                    MaterialTheme.colorScheme.secondary
+                                } else {
+                                    MaterialTheme.colorScheme.outlineVariant
+                                }
                             ),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -450,7 +475,7 @@ fun LobbyScreen(
                                     modifier = Modifier
                                         .size(44.dp)
                                         .clip(RoundedCornerShape(10.dp))
-                                        .background(PaddockSurfaceElevated)
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                                 ) {
                                     Canvas(modifier = Modifier.fillMaxSize()) {
                                         drawRcCar(
@@ -470,22 +495,31 @@ fun LobbyScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
-                                        Text(player.name, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                                        Text(
+                                            text = player.name,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1
+                                        )
                                         if (player.isHost) {
                                             Icon(Icons.Default.Star, contentDescription = "Host", tint = GoldTrophy, modifier = Modifier.size(15.dp))
                                         }
                                         if (player.isBot) {
-                                            Icon(Icons.Default.SmartToy, contentDescription = "AI Bot", tint = ElectricCyan, modifier = Modifier.size(15.dp))
+                                            Icon(Icons.Default.SmartToy, contentDescription = "AI Bot", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(15.dp))
                                         }
                                     }
                                     Text(
                                         text = "${car.displayName} • ${player.sessionPoints} pts",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = TextSecondary
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                                 Surface(
-                                    color = if (player.isReady) AcidLime.copy(alpha = 0.16f) else PaddockSurfaceElevated,
+                                    color = if (player.isReady) {
+                                        MaterialTheme.colorScheme.tertiaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceContainerHigh
+                                    },
                                     shape = RoundedCornerShape(50)
                                 ) {
                                     Row(
@@ -494,12 +528,21 @@ fun LobbyScreen(
                                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
                                         if (player.isReady) {
-                                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AcidLime, modifier = Modifier.size(14.dp))
+                                            Icon(
+                                                Icons.Default.CheckCircle,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                                modifier = Modifier.size(14.dp)
+                                            )
                                         }
                                         Text(
                                             text = if (player.isHost) "HOST" else if (player.isReady) "READY" else "WAITING",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = if (player.isReady) AcidLime else TextSecondary
+                                            color = if (player.isReady) {
+                                                MaterialTheme.colorScheme.onTertiaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
                                         )
                                     }
                                 }
@@ -510,23 +553,27 @@ fun LobbyScreen(
 
                 // Lobby Chat Card
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = PaddockSurface),
-                    border = BorderStroke(1.dp, PaddockOutline),
-                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    shape = RoundedCornerShape(18.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
                         modifier = Modifier.padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("PADDOCK CHAT", style = MaterialTheme.typography.labelLarge, color = TextSecondary)
+                        Text(
+                            text = "PADDOCK CHAT",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         LazyColumn(
                             state = chatListState,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(118.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(PaddockSurfaceElevated)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                                 .padding(8.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
@@ -535,19 +582,19 @@ fun LobbyScreen(
                                     Text(
                                         text = "• ${msg.text}",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = ElectricCyan
+                                        color = MaterialTheme.colorScheme.secondary
                                     )
                                 } else {
                                     Row {
                                         Text(
                                             text = "${msg.senderName}: ",
                                             style = MaterialTheme.typography.labelMedium,
-                                            color = SignalOrange
+                                            color = MaterialTheme.colorScheme.primary
                                         )
                                         Text(
                                             text = msg.text,
                                             style = MaterialTheme.typography.bodyMedium,
-                                            color = Color.White
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                     }
                                 }
@@ -559,9 +606,9 @@ fun LobbyScreen(
                             val quickPhrases = listOf("Ready!", "Good luck!", "Rematch!", "Wait up!")
                             items(quickPhrases) { phrase ->
                                 Surface(
-                                    color = PaddockSurfaceElevated,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                     shape = RoundedCornerShape(50),
-                                    border = BorderStroke(1.dp, PaddockOutline),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(50))
                                         .clickable { onSendChat(phrase) }
@@ -569,7 +616,7 @@ fun LobbyScreen(
                                     Text(
                                         text = phrase,
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = TextSecondary,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                                     )
                                 }
@@ -598,10 +645,14 @@ fun LobbyScreen(
                                 modifier = Modifier
                                     .size(48.dp)
                                     .clip(CircleShape)
-                                    .background(ElectricCyan)
+                                    .background(MaterialTheme.colorScheme.secondary)
                                     .testTag("chat_send_button")
                             ) {
-                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send Chat", tint = CarbonBg)
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = "Send Chat",
+                                    tint = MaterialTheme.colorScheme.onSecondary
+                                )
                             }
                         }
                     }
@@ -610,8 +661,8 @@ fun LobbyScreen(
 
             // Bottom Start / Ready Bar
             Surface(
-                color = PaddockSurface,
-                border = BorderStroke(1.dp, PaddockOutline),
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                tonalElevation = 4.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Box(
@@ -624,11 +675,7 @@ fun LobbyScreen(
                         val playerCount = lobby?.players?.size ?: 1
                         Button(
                             onClick = onStartRace,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = SignalOrange,
-                                contentColor = CarbonBg
-                            ),
-                            shape = RoundedCornerShape(14.dp),
+                            shape = RoundedCornerShape(16.dp),
                             modifier = Modifier
                                 .widthIn(max = 640.dp)
                                 .fillMaxWidth()
@@ -647,10 +694,10 @@ fun LobbyScreen(
                         Button(
                             onClick = onToggleReady,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (meReady) AcidLime else ElectricCyan,
-                                contentColor = CarbonBg
+                                containerColor = if (meReady) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.secondary,
+                                contentColor = if (meReady) MaterialTheme.colorScheme.onTertiary else MaterialTheme.colorScheme.onSecondary
                             ),
-                            shape = RoundedCornerShape(14.dp),
+                            shape = RoundedCornerShape(16.dp),
                             modifier = Modifier
                                 .widthIn(max = 640.dp)
                                 .fillMaxWidth()
@@ -676,9 +723,9 @@ private fun LobbyRuleBadge(
     onClick: () -> Unit
 ) {
     Surface(
-        color = color.copy(alpha = 0.16f),
+        color = color.copy(alpha = 0.14f),
         shape = RoundedCornerShape(50),
-        border = BorderStroke(1.dp, color.copy(alpha = 0.55f)),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.5f)),
         modifier = Modifier
             .clip(RoundedCornerShape(50))
             .clickable(onClick = onClick)

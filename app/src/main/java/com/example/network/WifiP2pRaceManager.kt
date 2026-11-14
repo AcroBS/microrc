@@ -197,6 +197,7 @@ class WifiP2pRaceManager(
         leaveSession()
         localPlayerId = profile.playerId
         currentRules = initialRules
+        currentTotalLaps = initialRules.totalLaps.coerceIn(1, 9)
         currentCustomTrack = initialCustomTrack
         if (initialCustomTrack != null) {
             currentTrackId = runCatching { TrackId.valueOf(initialCustomTrack.themeId) }.getOrDefault(TrackId.NEON_ROOFTOP)
@@ -236,6 +237,7 @@ class WifiP2pRaceManager(
         leaveSession()
         localPlayerId = profile.playerId
         currentRules = initialRules
+        currentTotalLaps = initialRules.totalLaps.coerceIn(1, 9)
         currentCustomTrack = initialCustomTrack
         if (initialCustomTrack != null) {
             currentTrackId = runCatching { TrackId.valueOf(initialCustomTrack.themeId) }.getOrDefault(TrackId.NEON_ROOFTOP)
@@ -246,6 +248,8 @@ class WifiP2pRaceManager(
         playersList.clear()
         playersList.add(profile.toLobbyPlayer(isHost = true, isReady = true))
         addSystemChat("Lobby hosted on local Wi-Fi. Waiting for 2-4 players...")
+        publishLocalLobbyState()
+        _navEvents.tryEmit(RaceNavEvent.EnterLobby)
         acquireLowLatencyWifiLock()
 
         scope.launch(Dispatchers.IO) {
@@ -262,14 +266,18 @@ class WifiP2pRaceManager(
                 tcpPort = ss.localPort
 
                 val udpSock = runCatching {
-                    DatagramSocket(tcpPort).apply { trafficClass = 0x10 }
-                }.getOrElse {
-                    DatagramSocket(0).apply { trafficClass = 0x10 }
+                    DatagramSocket(tcpPort)
+                }.recoverCatching {
+                    DatagramSocket(0)
+                }.getOrNull()?.apply {
+                    runCatching { trafficClass = 0x10 }
                 }
                 hostUdpSocket = udpSock
-                hostUdpPort = udpSock.localPort
+                hostUdpPort = udpSock?.localPort ?: 0
 
-                startHostUdpReader(udpSock)
+                if (udpSock != null) {
+                    startHostUdpReader(udpSock)
+                }
                 publishLocalLobbyState()
 
                 discovery.startAdvertising(scope) {
@@ -286,8 +294,6 @@ class WifiP2pRaceManager(
                         inRace = state.inRace
                     )
                 }
-
-                _navEvents.tryEmit(RaceNavEvent.EnterLobby)
 
                 acceptJob = scope.launch(Dispatchers.IO) {
                     while (isActive && !ss.isClosed) {
@@ -373,7 +379,7 @@ class WifiP2pRaceManager(
 
                 // Open client UDP socket for ultra-low-latency gameplay packets
                 val udpSock = DatagramSocket().apply {
-                    trafficClass = 0x10
+                    runCatching { trafficClass = 0x10 }
                 }
                 clientUdpSocket = udpSock
                 startClientUdpReader(udpSock)
@@ -762,10 +768,13 @@ class WifiP2pRaceManager(
     fun updateRules(rules: RaceRulesSettings) {
         if (_role.value != SessionRole.Host && _role.value != SessionRole.Solo) return
         currentRules = rules
+        currentTotalLaps = rules.totalLaps.coerceIn(1, 9)
         val summary = buildList {
+            add(rules.winConditionEnum.displayName)
             if (rules.autoAccelerate) add("Auto-Gas")
             if (rules.hardTrackBoundary) add("Bounce Walls")
             if (rules.randomJumpsEnabled) add("Jumps")
+            if (rules.randomConditionsEnabled) add("Random Weather")
         }.joinToString(" • ").ifEmpty { "Standard Rules" }
         addSystemChat("Match settings updated: $summary")
         if (_role.value == SessionRole.Host) broadcastLobbyState() else publishLocalLobbyState()
@@ -773,7 +782,8 @@ class WifiP2pRaceManager(
 
     fun setTotalLaps(laps: Int) {
         if (_role.value != SessionRole.Host && _role.value != SessionRole.Solo) return
-        currentTotalLaps = laps.coerceIn(1, 7)
+        currentTotalLaps = laps.coerceIn(1, 9)
+        currentRules = currentRules.copy(totalLaps = currentTotalLaps)
         if (_role.value == SessionRole.Host) broadcastLobbyState() else publishLocalLobbyState()
     }
 
@@ -970,9 +980,11 @@ class WifiP2pRaceManager(
         }
         if (_role.value == SessionRole.Client) {
             val nowNs = System.nanoTime()
-            val changedSignificantly = abs(throttle - lastSentThrottle) > 0.05f ||
+            val throttleFlipped = (throttle * lastSentThrottle <= 0f) && abs(throttle - lastSentThrottle) > 0.1f
+            val changedSignificantly = throttleFlipped ||
+                abs(throttle - lastSentThrottle) > 0.05f ||
                 abs(steer - lastSentSteer) > 0.03f
-            if (changedSignificantly && (nowNs - lastInputSendNs) >= 12_000_000L) {
+            if (throttleFlipped || (changedSignificantly && (nowNs - lastInputSendNs) >= 12_000_000L)) {
                 lastSentThrottle = throttle
                 lastSentSteer = steer
                 lastInputSendNs = nowNs

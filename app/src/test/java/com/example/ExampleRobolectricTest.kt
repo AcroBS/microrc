@@ -44,9 +44,12 @@ class ExampleRobolectricTest {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("open_settings_button").performScrollTo().performClick()
         composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("setting_auto_accel_switch").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("setting_hard_boundary_switch").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("setting_random_jumps_switch").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setting_music_switch").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setting_sfx_switch").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setting_auto_accel_switch").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setting_hard_boundary_switch").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setting_random_jumps_switch").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setting_random_conditions_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("settings_back_button").performClick()
 
         composeTestRule.waitForIdle()
@@ -55,5 +58,26 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("editor_random_button").assertIsDisplayed()
         composeTestRule.onNodeWithTag("editor_random_button").performClick()
         composeTestRule.onNodeWithTag("editor_save_button").assertIsDisplayed()
+    }
+
+    @Test
+    fun hostRace_opensHostSetupScreenAndLaunchesLobby() {
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("host_race_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("win_condition_TIME_TRIAL_DISTANCE").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setup_random_conditions_switch").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("host_setup_open_lobby_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("host_setup_open_lobby_button").performClick()
+
+        composeTestRule.waitUntil(timeoutMillis = 5_000L) {
+            runCatching {
+                composeTestRule.onNodeWithTag("start_race_button").assertIsDisplayed()
+                true
+            }.getOrDefault(false)
+        }
+        composeTestRule.onNodeWithTag("lobby_leave_button").performClick()
+        composeTestRule.waitForIdle()
     }
 }

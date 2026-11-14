@@ -31,7 +31,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Hub
@@ -47,6 +46,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -67,21 +67,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
 import com.example.model.ControlMode
 import com.example.model.PlayerProfile
 import com.example.ui.components.drawRcCar
-import com.example.ui.theme.AcidLime
-import com.example.ui.theme.CarbonBg
-import com.example.ui.theme.ElectricCyan
-import com.example.ui.theme.PaddockOutline
-import com.example.ui.theme.PaddockSurface
-import com.example.ui.theme.PaddockSurfaceElevated
-import com.example.ui.theme.SignalOrange
-import com.example.ui.theme.TextSecondary
 
 @Composable
 fun HomeScreen(
@@ -106,15 +97,14 @@ fun HomeScreen(
         label = "angle"
     )
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(CarbonBg)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
+    Surface(
+        color = MaterialTheme.colorScheme.background,
+        modifier = Modifier.fillMaxSize()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -128,7 +118,7 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(176.dp)
-                        .clip(RoundedCornerShape(22.dp))
+                        .clip(RoundedCornerShape(24.dp))
                 ) {
                     Image(
                         painter = painterResource(id = R.drawable.img_hero_paddock),
@@ -142,8 +132,8 @@ fun HomeScreen(
                             .background(
                                 Brush.verticalGradient(
                                     colors = listOf(
-                                        Color.Black.copy(alpha = 0.15f),
-                                        CarbonBg.copy(alpha = 0.92f)
+                                        Color.Black.copy(alpha = 0.12f),
+                                        Color(0xFF0B0E14).copy(alpha = 0.88f)
                                     )
                                 )
                             )
@@ -154,9 +144,8 @@ fun HomeScreen(
                             .padding(18.dp)
                     ) {
                         Surface(
-                            color = SignalOrange.copy(alpha = 0.22f),
-                            shape = RoundedCornerShape(50),
-                            border = BorderStroke(1.dp, SignalOrange.copy(alpha = 0.6f))
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f),
+                            shape = RoundedCornerShape(50)
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -166,13 +155,13 @@ fun HomeScreen(
                                 Icon(
                                     Icons.Default.Wifi,
                                     contentDescription = null,
-                                    tint = SignalOrange,
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Text(
                                     text = "2-4 PLAYER OFFLINE WI-FI P2P",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = SignalOrange
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                             }
                         }
@@ -185,16 +174,16 @@ fun HomeScreen(
                         Text(
                             text = "Top-down local multiplayer RC racing",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary
+                            color = Color(0xFFDCE3EE)
                         )
                     }
                 }
 
                 // Driver Profile Pill Row
                 Surface(
-                    color = PaddockSurface,
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, PaddockOutline),
+                    color = MaterialTheme.colorScheme.surfaceContainer,
+                    shape = RoundedCornerShape(20.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
@@ -208,13 +197,13 @@ fun HomeScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .weight(1f)
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(RoundedCornerShape(12.dp))
                                 .clickable { showNameDialog = true }
                                 .padding(vertical = 4.dp, horizontal = 4.dp)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(36.dp)
+                                    .size(38.dp)
                                     .clip(CircleShape)
                                     .background(Color(profile.primaryColorArgb)),
                                 contentAlignment = Alignment.Center
@@ -222,7 +211,7 @@ fun HomeScreen(
                                 Text(
                                     text = profile.name.take(1).uppercase(),
                                     style = MaterialTheme.typography.titleLarge,
-                                    color = CarbonBg
+                                    color = Color(0xFF0B0E14)
                                 )
                             }
                             Spacer(modifier = Modifier.width(10.dp))
@@ -230,12 +219,13 @@ fun HomeScreen(
                                 Text(
                                     text = "DRIVER TAG",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = TextSecondary
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         text = profile.name,
                                         style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -243,7 +233,7 @@ fun HomeScreen(
                                     Icon(
                                         Icons.Default.Edit,
                                         contentDescription = "Edit Driver Name",
-                                        tint = ElectricCyan,
+                                        tint = MaterialTheme.colorScheme.secondary,
                                         modifier = Modifier.size(16.dp)
                                     )
                                 }
@@ -251,9 +241,8 @@ fun HomeScreen(
                         }
 
                         Surface(
-                            color = PaddockSurfaceElevated,
+                            color = MaterialTheme.colorScheme.secondaryContainer,
                             shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.4f)),
                             modifier = Modifier
                                 .clip(RoundedCornerShape(12.dp))
                                 .clickable(onClick = onOpenGarage)
@@ -270,13 +259,13 @@ fun HomeScreen(
                                         Icons.Default.TouchApp
                                     },
                                     contentDescription = "Control Mode",
-                                    tint = ElectricCyan,
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Text(
                                     text = profile.controlMode.label,
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = ElectricCyan
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
                                 )
                             }
                         }
@@ -285,9 +274,9 @@ fun HomeScreen(
 
                 // Active RC Car Preview + Garage Link
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = PaddockSurface),
-                    border = BorderStroke(1.dp, PaddockOutline),
-                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    shape = RoundedCornerShape(22.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Row(
@@ -299,8 +288,8 @@ fun HomeScreen(
                         Box(
                             modifier = Modifier
                                 .size(92.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(PaddockSurfaceElevated),
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
                             contentAlignment = Alignment.Center
                         ) {
                             Canvas(modifier = Modifier.fillMaxSize()) {
@@ -320,36 +309,35 @@ fun HomeScreen(
                             Text(
                                 text = profile.carType.displayName,
                                 style = MaterialTheme.typography.titleLarge,
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
                                 text = profile.carType.tagline,
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = TextSecondary,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Spacer(modifier = Modifier.height(8.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                MiniStatBadge("SPD ${profile.carType.topSpeedStat}", SignalOrange)
-                                MiniStatBadge("HDL ${profile.carType.handlingStat}", ElectricCyan)
-                                MiniStatBadge("GRP ${profile.carType.gripStat}", AcidLime)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                MiniStatBadge("SPD ${profile.carType.topSpeedStat}", MaterialTheme.colorScheme.primary)
+                                MiniStatBadge("HDL ${profile.carType.handlingStat}", MaterialTheme.colorScheme.secondary)
+                                MiniStatBadge("GRP ${profile.carType.gripStat}", MaterialTheme.colorScheme.tertiary)
                             }
                         }
                     }
-                    OutlinedButton(
+                    FilledTonalButton(
                         onClick = onOpenGarage,
-                        border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.6f)),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(start = 14.dp, end = 14.dp, bottom = 14.dp)
                             .height(48.dp)
                             .testTag("open_garage_button")
                     ) {
-                        Icon(Icons.Default.Build, contentDescription = null, tint = ElectricCyan)
+                        Icon(Icons.Default.Build, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Garage, Colors & Controls", color = ElectricCyan)
+                        Text("Garage, Colors & Controls")
                     }
                 }
 
@@ -361,10 +349,10 @@ fun HomeScreen(
                     Button(
                         onClick = onHostRace,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = SignalOrange,
-                            contentColor = CarbonBg
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
                         ),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(18.dp),
                         modifier = Modifier
                             .weight(1f)
                             .height(66.dp)
@@ -374,17 +362,17 @@ fun HomeScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text("HOST RACE", style = MaterialTheme.typography.labelLarge)
-                            Text("2-4 Players", style = MaterialTheme.typography.labelSmall)
+                            Text("Setup & Lobby", style = MaterialTheme.typography.labelSmall)
                         }
                     }
 
                     Button(
                         onClick = onJoinRace,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = ElectricCyan,
-                            contentColor = CarbonBg
+                            containerColor = MaterialTheme.colorScheme.secondary,
+                            contentColor = MaterialTheme.colorScheme.onSecondary
                         ),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(18.dp),
                         modifier = Modifier
                             .weight(1f)
                             .height(66.dp)
@@ -400,18 +388,17 @@ fun HomeScreen(
                 }
 
                 // Solo Practice vs Bots
-                OutlinedButton(
+                FilledTonalButton(
                     onClick = onSoloRace,
-                    border = BorderStroke(1.dp, AcidLime.copy(alpha = 0.6f)),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp)
                         .testTag("solo_race_button")
                 ) {
-                    Icon(Icons.Default.Speed, contentDescription = null, tint = AcidLime)
+                    Icon(Icons.Default.Speed, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Solo Practice vs AI Bots", color = AcidLime, style = MaterialTheme.typography.labelLarge)
+                    Text("Solo Practice vs AI Bots", style = MaterialTheme.typography.labelLarge)
                 }
 
                 // Track Studio + Match Settings Row
@@ -421,38 +408,37 @@ fun HomeScreen(
                 ) {
                     OutlinedButton(
                         onClick = onOpenTrackEditor,
-                        border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.55f)),
-                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .weight(1f)
                             .height(52.dp)
                             .testTag("open_track_editor_button")
                     ) {
-                        Icon(Icons.Default.Map, contentDescription = null, tint = ElectricCyan, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Track Studio", color = ElectricCyan, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                        Text("Track Studio", style = MaterialTheme.typography.labelLarge, maxLines = 1)
                     }
 
                     OutlinedButton(
                         onClick = onOpenSettings,
-                        border = BorderStroke(1.dp, SignalOrange.copy(alpha = 0.55f)),
-                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .weight(1f)
                             .height(52.dp)
                             .testTag("open_settings_button")
                     ) {
-                        Icon(Icons.Default.Tune, contentDescription = null, tint = SignalOrange, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Match Rules", color = SignalOrange, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                        Text("Rules & Audio", style = MaterialTheme.typography.labelLarge, maxLines = 1)
                     }
                 }
 
                 // Offline Wi-Fi / Hotspot Tip Card
                 Surface(
-                    color = PaddockSurfaceElevated.copy(alpha = 0.7f),
-                    shape = RoundedCornerShape(14.dp),
-                    border = BorderStroke(1.dp, PaddockOutline)
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = RoundedCornerShape(16.dp)
                 ) {
                     Row(
                         modifier = Modifier.padding(14.dp),
@@ -462,13 +448,13 @@ fun HomeScreen(
                         Icon(
                             Icons.Default.Wifi,
                             contentDescription = null,
-                            tint = ElectricCyan,
+                            tint = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.size(22.dp)
                         )
                         Text(
                             text = "No internet needed: Connect all phones to the same Wi-Fi, or enable a Hotspot on one phone and connect the others before hosting.",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -480,7 +466,6 @@ fun HomeScreen(
         var draft by remember(profile.name) { mutableStateOf(profile.name) }
         AlertDialog(
             onDismissRequest = { showNameDialog = false },
-            containerColor = PaddockSurface,
             title = { Text("Driver Callsign", style = MaterialTheme.typography.titleLarge) },
             text = {
                 OutlinedTextField(
@@ -513,7 +498,7 @@ fun HomeScreen(
 private fun MiniStatBadge(label: String, color: Color) {
     Surface(
         color = color.copy(alpha = 0.14f),
-        shape = RoundedCornerShape(6.dp)
+        shape = RoundedCornerShape(8.dp)
     ) {
         Text(
             text = label,

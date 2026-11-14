@@ -8,6 +8,45 @@ enum class RacePhase {
     FINISHED
 }
 
+enum class WinCondition(
+    val displayName: String,
+    val description: String
+) {
+    FIRST_TO_FINISH(
+        displayName = "First to Finish",
+        description = "Complete all laps and cross the checkered line first"
+    ),
+    TIME_TRIAL_DISTANCE(
+        displayName = "Time Limit",
+        description = "Race until the clock expires — furthest distance wins"
+    ),
+    CHAMPIONSHIP_POINTS(
+        displayName = "Points & Hits",
+        description = "Score points from lap checkpoints, power-up hits & podium finish"
+    )
+}
+
+enum class ExternalEventType(val displayName: String) {
+    NONE("Clear Track"),
+    RAIN("Rainfall"),
+    EARTHQUAKE("Earthquake"),
+    WIND("Crosswind"),
+    SNOW("Snowfall")
+}
+
+@JsonClass(generateAdapter = true)
+data class TrackPuddle(
+    val x: Float,
+    val y: Float,
+    val radius: Float = 42f
+)
+
+@JsonClass(generateAdapter = true)
+data class AudioSettings(
+    val musicEnabled: Boolean = true,
+    val carSfxEnabled: Boolean = true
+)
+
 @JsonClass(generateAdapter = true)
 data class DiscoveredLobby(
     val hostId: String,
@@ -55,10 +94,17 @@ data class ControlInput(
 
 @JsonClass(generateAdapter = true)
 data class RaceRulesSettings(
-    val autoAccelerate: Boolean = false,
-    val hardTrackBoundary: Boolean = false,
-    val randomJumpsEnabled: Boolean = true
-)
+    val autoAccelerate: Boolean = true,
+    val hardTrackBoundary: Boolean = true,
+    val randomJumpsEnabled: Boolean = true,
+    val randomConditionsEnabled: Boolean = true,
+    val winCondition: String = WinCondition.FIRST_TO_FINISH.name,
+    val totalLaps: Int = 3,
+    val timeLimitSec: Int = 90
+) {
+    val winConditionEnum: WinCondition
+        get() = runCatching { WinCondition.valueOf(winCondition) }.getOrDefault(WinCondition.FIRST_TO_FINISH)
+}
 
 @JsonClass(generateAdapter = true)
 data class RacerState(
@@ -92,7 +138,8 @@ data class RacerState(
     val stunnedMs: Long = 0L,
     val overdriveMs: Long = 0L,
     val spinVisualOffset: Float = 0f,
-    val powerUpHits: Int = 0
+    val powerUpHits: Int = 0,
+    val racePoints: Int = 0
 )
 
 @JsonClass(generateAdapter = true)
@@ -105,7 +152,15 @@ data class RaceSnapshot(
     val racers: List<RacerState> = emptyList(),
     val itemBoxes: List<ItemBoxState> = emptyList(),
     val hazards: List<TrackHazard> = emptyList(),
-    val eventBanner: String? = null
+    val eventBanner: String? = null,
+    val winCondition: String = WinCondition.FIRST_TO_FINISH.name,
+    val timeLimitSec: Int = 90,
+    val activeEvent: String = ExternalEventType.NONE.name,
+    val eventRemainingMs: Long = 0L,
+    val windAngleRad: Float = 0f,
+    val windStrength: Float = 0f,
+    val rainPuddles: List<TrackPuddle> = emptyList(),
+    val postFinishGraceMs: Long = 0L
 )
 
 @JsonClass(generateAdapter = true)

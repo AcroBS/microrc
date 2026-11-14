@@ -29,7 +29,6 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -48,18 +47,11 @@ import androidx.compose.ui.unit.dp
 import com.example.model.LobbyStatePayload
 import com.example.model.RaceSnapshot
 import com.example.model.TrackId
+import com.example.model.WinCondition
 import com.example.network.SessionRole
-import com.example.ui.theme.AcidLime
 import com.example.ui.theme.BronzeMedal
-import com.example.ui.theme.CarbonBg
-import com.example.ui.theme.ElectricCyan
 import com.example.ui.theme.GoldTrophy
-import com.example.ui.theme.PaddockOutline
-import com.example.ui.theme.PaddockSurface
-import com.example.ui.theme.PaddockSurfaceElevated
-import com.example.ui.theme.SignalOrange
 import com.example.ui.theme.SilverMedal
-import com.example.ui.theme.TextSecondary
 
 @Composable
 fun ResultsScreen(
@@ -81,16 +73,18 @@ fun ResultsScreen(
     val trackName = runCatching {
         TrackId.valueOf(results?.trackId ?: TrackId.LIVING_ROOM_GP.name).displayName
     }.getOrDefault("Circuit")
+    val winCond = runCatching {
+        WinCondition.valueOf(results?.winCondition ?: WinCondition.FIRST_TO_FINISH.name)
+    }.getOrDefault(WinCondition.FIRST_TO_FINISH)
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(CarbonBg)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
+    Surface(
+        color = MaterialTheme.colorScheme.background,
+        modifier = Modifier.fillMaxSize()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
@@ -115,11 +109,20 @@ fun ResultsScreen(
                         }
                     }
                     Column {
-                        Text("CHECKERED FLAG", style = MaterialTheme.typography.headlineLarge, color = Color.White)
                         Text(
-                            text = "$trackName • ${results?.totalLaps ?: 3} Laps",
+                            text = "CHECKERED FLAG",
+                            style = MaterialTheme.typography.headlineLarge,
+                            color = MaterialTheme.colorScheme.onBackground
+                        )
+                        val modeDesc = when (winCond) {
+                            WinCondition.TIME_TRIAL_DISTANCE -> "${results?.timeLimitSec ?: 90}s Time Limit"
+                            WinCondition.CHAMPIONSHIP_POINTS -> "Points & Hits (${results?.totalLaps ?: 3} Laps)"
+                            WinCondition.FIRST_TO_FINISH -> "${results?.totalLaps ?: 3} Laps"
+                        }
+                        Text(
+                            text = "$trackName • $modeDesc",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = ElectricCyan
+                            color = MaterialTheme.colorScheme.secondary
                         )
                     }
                 }
@@ -130,21 +133,27 @@ fun ResultsScreen(
                         1 -> GoldTrophy
                         2 -> SilverMedal
                         3 -> BronzeMedal
-                        else -> TextSecondary
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
-                    val gapStr = if (racer.rank == 1 || racer.finishTimeMs == null) {
-                        racer.finishTimeMs?.let { formatRaceTime(it) } ?: "--:--"
-                    } else {
-                        "+${String.format("%.2fs", ((racer.finishTimeMs - leaderTime).coerceAtLeast(0L)) / 1000f)}"
+                    val rightMetric = when (winCond) {
+                        WinCondition.CHAMPIONSHIP_POINTS -> "${racer.racePoints} PTS"
+                        WinCondition.TIME_TRIAL_DISTANCE -> "Lap ${racer.lap}"
+                        WinCondition.FIRST_TO_FINISH -> {
+                            if (racer.rank == 1 || racer.finishTimeMs == null) {
+                                racer.finishTimeMs?.let { formatRaceTime(it) } ?: "--:--"
+                            } else {
+                                "+${String.format("%.2fs", ((racer.finishTimeMs - leaderTime).coerceAtLeast(0L)) / 1000f)}"
+                            }
+                        }
                     }
                     val isMe = racer.playerId == localPlayerId
 
                     Surface(
-                        color = PaddockSurface,
-                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        shape = RoundedCornerShape(18.dp),
                         border = BorderStroke(
                             if (isMe) 1.5.dp else 1.dp,
-                            if (isMe) ElectricCyan else PaddockOutline
+                            if (isMe) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outlineVariant
                         ),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -171,53 +180,58 @@ fun ResultsScreen(
                                 Text(
                                     text = if (isMe) "${racer.name} (You)" else racer.name,
                                     style = MaterialTheme.typography.titleMedium,
-                                    color = Color.White
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
                                     text = "Best Lap: ${racer.bestLapMs?.let { formatRaceTime(it) } ?: "--"} • Hits: ${racer.powerUpHits}",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (racer.bestLapMs != null && racer.bestLapMs == overallBestLap) AcidLime else TextSecondary
+                                    color = if (racer.bestLapMs != null && racer.bestLapMs == overallBestLap) {
+                                        MaterialTheme.colorScheme.tertiary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
                                 )
                             }
                             Text(
-                                text = gapStr,
+                                text = rightMetric,
                                 style = MaterialTheme.typography.labelLarge,
-                                color = if (racer.rank == 1) GoldTrophy else Color.White
+                                color = if (racer.rank == 1) GoldTrophy else MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
                 }
 
                 // Lap Time Comparison Table
-                val lapCount = results?.totalLaps ?: 3
+                val lapCount = (sortedRacers.maxOfOrNull { it.lapTimesMs.size } ?: 0)
+                    .coerceAtLeast(if (winCond == WinCondition.TIME_TRIAL_DISTANCE) 1 else (results?.totalLaps ?: 3))
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = PaddockSurface),
-                    border = BorderStroke(1.dp, PaddockOutline),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     shape = RoundedCornerShape(18.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(14.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Default.Timer, contentDescription = null, tint = ElectricCyan, modifier = Modifier.size(18.dp))
-                            Text("LAP TIME COMPARISON", style = MaterialTheme.typography.labelLarge, color = ElectricCyan)
+                            Icon(Icons.Default.Timer, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
+                            Text("LAP TIME COMPARISON", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
                         }
                         Spacer(modifier = Modifier.height(10.dp))
 
                         Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
                             Row(modifier = Modifier.padding(vertical = 4.dp)) {
-                                Text("RACER", style = MaterialTheme.typography.labelSmall, color = TextSecondary, modifier = Modifier.width(108.dp))
+                                Text("RACER", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(108.dp))
                                 for (l in 1..lapCount) {
-                                    Text("LAP $l", style = MaterialTheme.typography.labelSmall, color = TextSecondary, modifier = Modifier.width(76.dp))
+                                    Text("LAP $l", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(76.dp))
                                 }
-                                Text("BEST", style = MaterialTheme.typography.labelSmall, color = AcidLime, modifier = Modifier.width(78.dp))
+                                Text("BEST", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary, modifier = Modifier.width(78.dp))
                             }
-                            HorizontalDivider(color = PaddockOutline)
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                             sortedRacers.forEach { racer ->
                                 Row(modifier = Modifier.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         text = racer.name,
                                         style = MaterialTheme.typography.labelMedium,
-                                        color = Color.White,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
                                         modifier = Modifier.width(108.dp)
                                     )
@@ -226,18 +240,26 @@ fun ResultsScreen(
                                         Text(
                                             text = lt?.let { formatRaceTime(it) } ?: "--",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = if (lt != null && lt == overallBestLap) AcidLime else TextSecondary,
+                                            color = if (lt != null && lt == overallBestLap) {
+                                                MaterialTheme.colorScheme.tertiary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
                                             modifier = Modifier.width(76.dp)
                                         )
                                     }
                                     Text(
                                         text = racer.bestLapMs?.let { formatRaceTime(it) } ?: "--",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = if (racer.bestLapMs != null && racer.bestLapMs == overallBestLap) AcidLime else ElectricCyan,
+                                        color = if (racer.bestLapMs != null && racer.bestLapMs == overallBestLap) {
+                                            MaterialTheme.colorScheme.tertiary
+                                        } else {
+                                            MaterialTheme.colorScheme.secondary
+                                        },
                                         modifier = Modifier.width(78.dp)
                                     )
                                 }
-                                HorizontalDivider(color = PaddockSurfaceElevated)
+                                HorizontalDivider(color = MaterialTheme.colorScheme.surfaceContainerHigh)
                             }
                         }
                     }
@@ -247,8 +269,8 @@ fun ResultsScreen(
                 val sessionStandings = lobby?.players.orEmpty().sortedByDescending { it.sessionPoints }
                 if (sessionStandings.isNotEmpty()) {
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = PaddockSurface),
-                        border = BorderStroke(1.dp, PaddockOutline),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         shape = RoundedCornerShape(18.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -256,13 +278,17 @@ fun ResultsScreen(
                             modifier = Modifier.padding(14.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Text("CHAMPIONSHIP SCORE LEADERBOARD", style = MaterialTheme.typography.labelLarge, color = SignalOrange)
+                            Text(
+                                text = "CHAMPIONSHIP SCORE LEADERBOARD",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary
+                            )
                             sessionStandings.forEachIndexed { idx, p ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("${idx + 1}.", style = MaterialTheme.typography.labelLarge, color = TextSecondary, modifier = Modifier.width(26.dp))
+                                    Text("${idx + 1}.", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(26.dp))
                                     Box(
                                         modifier = Modifier
                                             .size(12.dp)
@@ -270,9 +296,9 @@ fun ResultsScreen(
                                             .background(Color(p.primaryColorArgb))
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text(p.name, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                                    Text(p.name, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                                     Text("${p.wins}W", style = MaterialTheme.typography.labelSmall, color = GoldTrophy, modifier = Modifier.padding(end = 10.dp))
-                                    Text("${p.sessionPoints} PTS", style = MaterialTheme.typography.labelLarge, color = ElectricCyan)
+                                    Text("${p.sessionPoints} PTS", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
                                 }
                             }
                         }
@@ -283,7 +309,7 @@ fun ResultsScreen(
                     Text(
                         text = "Stay here to automatically rejoin the paddock when the host hits Rematch.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = TextSecondary
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
@@ -294,7 +320,7 @@ fun ResultsScreen(
                 ) {
                     OutlinedButton(
                         onClick = onExitHome,
-                        border = BorderStroke(1.dp, PaddockOutline),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
                             .weight(1f)
@@ -309,7 +335,6 @@ fun ResultsScreen(
                     if (isHostOrSolo) {
                         Button(
                             onClick = onReturnToLobby,
-                            colors = ButtonDefaults.buttonColors(containerColor = SignalOrange, contentColor = CarbonBg),
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier
                                 .weight(1.6f)

@@ -12,6 +12,7 @@ import com.example.network.RaceNavEvent
 import com.example.network.SessionRole
 import com.example.ui.screens.GarageScreen
 import com.example.ui.screens.HomeScreen
+import com.example.ui.screens.HostSetupScreen
 import com.example.ui.screens.JoinBrowserScreen
 import com.example.ui.screens.LobbyScreen
 import com.example.ui.screens.RaceScreen
@@ -21,6 +22,7 @@ import com.example.ui.screens.TrackEditorScreen
 
 object Routes {
     const val HOME = "home"
+    const val HOST_SETUP = "host_setup"
     const val GARAGE = "garage"
     const val SETTINGS = "settings"
     const val TRACK_EDITOR = "track_editor"
@@ -36,6 +38,7 @@ fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
 
     val profile by viewModel.profile.collectAsState()
     val rules by viewModel.rules.collectAsState()
+    val audioSettings by viewModel.audioSettings.collectAsState()
     val customTracks by viewModel.customTracks.collectAsState()
     val discoveredLobbies by viewModel.discoveredLobbies.collectAsState()
     val sessionRole by viewModel.sessionRole.collectAsState()
@@ -89,13 +92,23 @@ fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
         composable(Routes.HOME) {
             HomeScreen(
                 profile = profile,
-                onHostRace = { viewModel.startHosting() },
+                onHostRace = { navController.navigate(Routes.HOST_SETUP) },
                 onJoinRace = { navController.navigate(Routes.BROWSER) },
                 onSoloRace = { viewModel.startSolo() },
                 onOpenGarage = { navController.navigate(Routes.GARAGE) },
                 onOpenTrackEditor = { navController.navigate(Routes.TRACK_EDITOR) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 onUpdateDriverName = viewModel::updateDriverName
+            )
+        }
+
+        composable(Routes.HOST_SETUP) {
+            HostSetupScreen(
+                initialRules = rules,
+                onCreateLobby = { setupRules ->
+                    viewModel.startHosting(setupRules)
+                },
+                onBack = { navController.popBackStack() }
             )
         }
 
@@ -115,9 +128,11 @@ fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
                 sessionRole == SessionRole.Solo
             SettingsScreen(
                 rules = effectiveRules,
+                audioSettings = audioSettings,
                 canEditRules = canEdit,
                 inSession = sessionRole != SessionRole.None,
                 onUpdateRules = viewModel::updateRaceRules,
+                onUpdateAudio = viewModel::updateAudioSettings,
                 onBack = { navController.popBackStack() }
             )
         }
@@ -181,6 +196,8 @@ fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
                 snapshot = raceSnapshot,
                 activeTrack = activeTrack,
                 rules = effectiveRules,
+                audioSettings = audioSettings,
+                audioEngine = viewModel.audioEngine,
                 overviewCamera = overviewCamera,
                 tiltController = viewModel.tiltController,
                 onToggleOverviewCamera = viewModel::toggleOverviewCamera,
@@ -189,6 +206,7 @@ fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
                 },
                 onTriggerPowerUp = { viewModel.raceManager.triggerLocalPowerUp() },
                 onSwitchControlMode = viewModel::updateControlSettings,
+                onUpdateAudioSettings = viewModel::updateAudioSettings,
                 onLeaveRace = {
                     viewModel.leaveSession()
                     navController.popBackStack(Routes.HOME, inclusive = false)

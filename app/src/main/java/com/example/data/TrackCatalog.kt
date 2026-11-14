@@ -510,6 +510,41 @@ object TrackCatalog {
     }
 
     /**
+     * Local-window spline lookup around hintIdx to prevent snapping onto an adjacent
+     * track section on hairpins or custom figure-8 bends. Falls back globally if far.
+     */
+    fun nearestTrackPointLocal(
+        track: TrackDefinition,
+        x: Float,
+        y: Float,
+        hintIdx: Int,
+        windowRadius: Int = 20
+    ): Pair<Int, Float> {
+        val pts = track.centerline
+        if (pts.isEmpty()) return 0 to 0f
+        val n = pts.size
+        var bestIdx = hintIdx.mod(n)
+        var bestDistSq = Float.MAX_VALUE
+        for (offset in -windowRadius..windowRadius) {
+            val idx = (hintIdx + offset).mod(n)
+            val dx = x - pts[idx].x
+            val dy = y - pts[idx].y
+            val d2 = dx * dx + dy * dy
+            if (d2 < bestDistSq) {
+                bestDistSq = d2
+                bestIdx = idx
+            }
+        }
+        val localDist = kotlin.math.sqrt(bestDistSq)
+        val fallbackThresh = (pts[bestIdx].halfWidth * 2.4f).coerceAtLeast(260f)
+        return if (localDist <= fallbackThresh) {
+            bestIdx to localDist
+        } else {
+            nearestTrackPoint(track, x, y)
+        }
+    }
+
+    /**
      * Computes grid start positions behind the start/finish line (index 0).
      */
     fun gridStartTransform(track: TrackDefinition, slotIndex: Int): Triple<Float, Float, Float> {

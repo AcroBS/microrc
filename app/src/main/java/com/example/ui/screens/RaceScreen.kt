@@ -26,15 +26,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.AcUnit
+import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -57,16 +60,19 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.withTransform
-import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import com.example.audio.RaceAudioEngine
 import com.example.data.TrackCatalog
 import com.example.engine.RacePhysicsEngine
+import com.example.model.AudioSettings
 import com.example.model.ControlMode
+import com.example.model.ExternalEventType
 import com.example.model.PlayerProfile
 import com.example.model.PowerUpType
 import com.example.model.RacePhase
@@ -74,9 +80,11 @@ import com.example.model.RaceRulesSettings
 import com.example.model.RaceSnapshot
 import com.example.model.RacerState
 import com.example.model.TrackDefinition
+import com.example.model.WinCondition
 import com.example.sensors.TiltSteeringController
 import com.example.ui.components.drawTrackMiniMap
 import com.example.ui.components.drawTrackWorld
+import com.example.ui.components.drawWeatherScreenOverlay
 import com.example.ui.theme.AcidLime
 import com.example.ui.theme.AlertRed
 import com.example.ui.theme.CarbonBg
@@ -96,12 +104,15 @@ fun RaceScreen(
     snapshot: RaceSnapshot?,
     activeTrack: TrackDefinition? = null,
     rules: RaceRulesSettings = RaceRulesSettings(),
+    audioSettings: AudioSettings = AudioSettings(),
+    audioEngine: RaceAudioEngine? = null,
     overviewCamera: Boolean,
     tiltController: TiltSteeringController,
     onToggleOverviewCamera: () -> Unit,
     onUpdateControlInput: (Float, Float) -> Unit,
     onTriggerPowerUp: () -> Unit,
     onSwitchControlMode: (ControlMode, Float, Boolean) -> Unit,
+    onUpdateAudioSettings: (AudioSettings) -> Unit = {},
     onLeaveRace: () -> Unit
 ) {
     val view = LocalView.current
@@ -109,6 +120,15 @@ fun RaceScreen(
         val oldKeep = view.keepScreenOn
         view.keepScreenOn = true
         onDispose { view.keepScreenOn = oldKeep }
+    }
+
+    // Start & feed procedural guitar riff BGM + per-car RC motor SFX
+    DisposableEffect(audioEngine) {
+        audioEngine?.start()
+        onDispose { audioEngine?.stop() }
+    }
+    LaunchedEffect(snapshot, profile.playerId, audioEngine) {
+        audioEngine?.updateSnapshot(snapshot, profile.playerId)
     }
 
     var showPauseDialog by remember { mutableStateOf(false) }
@@ -131,7 +151,6 @@ fun RaceScreen(
         onDispose { tiltController.stop() }
     }
 
-    // Stream control inputs continuously
     LaunchedEffect(
         profile.controlMode,
         profile.autoGasInTilt,
@@ -157,7 +176,6 @@ fun RaceScreen(
         onUpdateControlInput(throttle, steer)
     }
 
-    // Smooth animation clock, dead-reckoning interpolation & camera state
     var animTimeSec by remember { mutableFloatStateOf(0f) }
     var camX by remember { mutableFloatStateOf(1100f) }
     var camY by remember { mutableFloatStateOf(750f) }
@@ -165,7 +183,7 @@ fun RaceScreen(
     var lastFrameNanos by remember { mutableLongStateOf(0L) }
     var lastSnapshotArrivalNanos by remember { mutableLongStateOf(0L) }
     var smoothedRacers by remember { mutableStateOf<List<RacerState>>(emptyList()) }
-    val smoothPoseMap = remember { mutableMapOf<String, FloatArray>() } // [x, y, angle, jumpZ]
+    val smoothPoseMap = remember { mutableMapOf<String, FloatArray>() }
 
     val localRacer = snapshot?.racers?.find { it.playerId == profile.playerId }
         ?: snapshot?.racers?.firstOrNull()
@@ -236,24 +254,41 @@ fun RaceScreen(
         TrackCatalog.getTrack(snapshot?.trackId ?: "LIVING_ROOM_GP")
     }
     val racersToDraw = smoothedRacers.ifEmpty { snapshot?.racers.orEmpty() }
+    val activeEvent = runCatching {
+        ExternalEventType.valueOf(snapshot?.activeEvent ?: ExternalEventType.NONE.name)
+    }.getOrDefault(ExternalEventType.NONE)
+    val winCond = runCatching {
+        WinCondition.valueOf(snapshot?.winCondition ?: rules.winCondition)
+    }.getOrDefault(WinCondition.FIRST_TO_FINISH)
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(track.id.baseBgColorHex))
     ) {
-        // World Canvas
+        // World + Screen Weather Canvas
         Canvas(modifier = Modifier.fillMaxSize()) {
             val viewW = size.width
             val viewH = size.height
 
+            val shakeX = if (activeEvent == ExternalEventType.EARTHQUAKE && snapshot?.phase == RacePhase.RACING.name) {
+                sin(animTimeSec * 44f) * 14f + sin(animTimeSec * 29f) * 6f
+            } else {
+                0f
+            }
+            val shakeY = if (activeEvent == ExternalEventType.EARTHQUAKE && snapshot?.phase == RacePhase.RACING.name) {
+                cos(animTimeSec * 51f) * 11f + cos(animTimeSec * 33f) * 5f
+            } else {
+                0f
+            }
+
             if (overviewCamera) {
                 val scale = minOf(viewW / track.worldWidth, viewH / track.worldHeight) * 0.94f
-                val tx = (viewW - track.worldWidth * scale) / 2f
-                val ty = (viewH - track.worldHeight * scale) / 2f
+                val tx = (viewW - track.worldWidth * scale) / 2f + shakeX
+                val ty = (viewH - track.worldHeight * scale) / 2f + shakeY
                 withTransform({
                     translate(tx, ty)
-                    scale(scale, scale, androidx.compose.ui.geometry.Offset.Zero)
+                    scale(scale, scale, Offset.Zero)
                 }) {
                     drawTrackWorld(
                         track = track,
@@ -261,14 +296,16 @@ fun RaceScreen(
                         hazards = snapshot?.hazards.orEmpty(),
                         racers = racersToDraw,
                         animTimeSec = animTimeSec,
-                        hardBoundary = rules.hardTrackBoundary
+                        hardBoundary = rules.hardTrackBoundary,
+                        rainPuddles = snapshot?.rainPuddles.orEmpty(),
+                        activeEvent = activeEvent
                     )
                 }
             } else {
                 val zoom = (minOf(viewW, viewH) / 860f).coerceIn(0.75f, 1.5f)
                 withTransform({
-                    translate(viewW / 2f - camX * zoom, viewH / 2f - camY * zoom)
-                    scale(zoom, zoom, androidx.compose.ui.geometry.Offset.Zero)
+                    translate(viewW / 2f - camX * zoom + shakeX, viewH / 2f - camY * zoom + shakeY)
+                    scale(zoom, zoom, Offset.Zero)
                 }) {
                     drawTrackWorld(
                         track = track,
@@ -276,9 +313,20 @@ fun RaceScreen(
                         hazards = snapshot?.hazards.orEmpty(),
                         racers = racersToDraw,
                         animTimeSec = animTimeSec,
-                        hardBoundary = rules.hardTrackBoundary
+                        hardBoundary = rules.hardTrackBoundary,
+                        rainPuddles = snapshot?.rainPuddles.orEmpty(),
+                        activeEvent = activeEvent
                     )
                 }
+            }
+
+            if (snapshot?.phase == RacePhase.RACING.name && activeEvent != ExternalEventType.NONE) {
+                drawWeatherScreenOverlay(
+                    activeEvent = activeEvent,
+                    animTimeSec = animTimeSec,
+                    windAngleRad = snapshot.windAngleRad,
+                    windStrength = snapshot.windStrength
+                )
             }
         }
 
@@ -291,41 +339,105 @@ fun RaceScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Top
         ) {
-            // Left telemetry pill
-            Surface(
-                color = CarbonBg.copy(alpha = 0.86f),
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, PaddockOutline)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Surface(
+                    color = CarbonBg.copy(alpha = 0.86f),
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(1.dp, PaddockOutline)
                 ) {
-                    Column {
-                        Text("POS", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                        Text(
-                            text = "${ordinal(localRacer?.rank ?: 1)}/${snapshot?.racers?.size ?: 1}",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = GoldTrophy
-                        )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Column {
+                            Text("POS", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                            Text(
+                                text = "${ordinal(localRacer?.rank ?: 1)}/${snapshot?.racers?.size ?: 1}",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = GoldTrophy
+                            )
+                        }
+                        if (winCond == WinCondition.TIME_TRIAL_DISTANCE) {
+                            val totalMs = ((snapshot?.timeLimitSec ?: rules.timeLimitSec) * 1000L)
+                            val remMs = (totalMs - (snapshot?.raceTimeMs ?: 0L)).coerceAtLeast(0L)
+                            Column {
+                                Text("LEFT", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                Text(
+                                    text = formatRaceTime(remMs),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = if (remMs < 15000L) AlertRed else ElectricCyan
+                                )
+                            }
+                            Column {
+                                Text("LAP", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                Text(
+                                    text = "${localRacer?.lap ?: 1}",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = Color.White
+                                )
+                            }
+                        } else {
+                            Column {
+                                Text("LAP", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                Text(
+                                    text = "${localRacer?.lap ?: 1}/${snapshot?.totalLaps ?: 3}",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = Color.White
+                                )
+                            }
+                            if (winCond == WinCondition.CHAMPIONSHIP_POINTS) {
+                                Column {
+                                    Text("PTS", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                    Text(
+                                        text = "${localRacer?.racePoints ?: 0}",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        color = AcidLime
+                                    )
+                                }
+                            } else {
+                                Column {
+                                    Text("TIME", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                    val curLapMs = ((snapshot?.raceTimeMs ?: 0L) - (localRacer?.currentLapStartMs ?: 0L)).coerceAtLeast(0L)
+                                    Text(
+                                        text = formatRaceTime(curLapMs),
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = ElectricCyan
+                                    )
+                                }
+                            }
+                        }
                     }
-                    Column {
-                        Text("LAP", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                        Text(
-                            text = "${localRacer?.lap ?: 1}/${snapshot?.totalLaps ?: 3}",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = Color.White
-                        )
+                }
+
+                // Weather / Quake active pill
+                if (activeEvent != ExternalEventType.NONE && snapshot?.phase == RacePhase.RACING.name) {
+                    val (evIcon, evColor) = when (activeEvent) {
+                        ExternalEventType.RAIN -> Icons.Default.WaterDrop to ElectricCyan
+                        ExternalEventType.EARTHQUAKE -> Icons.Default.Vibration to SignalOrange
+                        ExternalEventType.WIND -> Icons.Default.Air to AcidLime
+                        ExternalEventType.SNOW -> Icons.Default.AcUnit to Color.White
+                        ExternalEventType.NONE -> Icons.Default.WaterDrop to ElectricCyan
                     }
-                    Column {
-                        Text("TIME", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
-                        val curLapMs = ((snapshot?.raceTimeMs ?: 0L) - (localRacer?.currentLapStartMs ?: 0L)).coerceAtLeast(0L)
-                        Text(
-                            text = formatRaceTime(curLapMs),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = ElectricCyan
-                        )
+                    val remSec = ((snapshot.eventRemainingMs + 999L) / 1000L).coerceAtLeast(1L)
+                    Surface(
+                        color = CarbonBg.copy(alpha = 0.86f),
+                        shape = RoundedCornerShape(50),
+                        border = BorderStroke(1.dp, evColor),
+                        modifier = Modifier.testTag("active_weather_badge")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(evIcon, contentDescription = null, tint = evColor, modifier = Modifier.size(14.dp))
+                            Text(
+                                text = "${activeEvent.displayName.uppercase()} ${remSec}s",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = evColor
+                            )
+                        }
                     }
                 }
             }
@@ -395,7 +507,7 @@ fun RaceScreen(
             }
         }
 
-        // Countdown or Event Banner
+        // Countdown, Finished Grace Notice, or Event Banner
         if (snapshot?.phase == RacePhase.COUNTDOWN.name) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -415,6 +527,24 @@ fun RaceScreen(
                         )
                     }
                 }
+            }
+        } else if (localRacer?.finished == true && snapshot?.phase == RacePhase.RACING.name) {
+            val graceSec = ((snapshot.postFinishGraceMs + 999L) / 1000L).coerceAtLeast(1L)
+            Surface(
+                color = CarbonBg.copy(alpha = 0.88f),
+                shape = RoundedCornerShape(50),
+                border = BorderStroke(1.5.dp, GoldTrophy),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(top = 86.dp)
+            ) {
+                Text(
+                    text = "FINISHED ${ordinal(localRacer.rank)}! Waiting for rivals (${graceSec}s)",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = GoldTrophy,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                )
             }
         } else if (!snapshot?.eventBanner.isNullOrBlank()) {
             Surface(
@@ -448,13 +578,11 @@ fun RaceScreen(
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Active status pills + Power-Up button row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Bottom
             ) {
-                // Buff status badges
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if ((localRacer?.jumpZ ?: 0f) > 0.1f) StatusChip("AIRBORNE!", GoldTrophy)
                     if ((localRacer?.boostMs ?: 0L) > 0L) StatusChip("TURBO", SignalOrange)
@@ -463,7 +591,6 @@ fun RaceScreen(
                     if ((localRacer?.stunnedMs ?: 0L) > 0L) StatusChip("ZAPPED!", AlertRed)
                 }
 
-                // Power-up Trigger
                 val powerUpColor = heldPowerUp?.let { Color(it.colorHex) } ?: PaddockOutline
                 Surface(
                     color = if (heldPowerUp != null) powerUpColor.copy(alpha = 0.92f) else CarbonBg.copy(alpha = 0.65f),
@@ -498,7 +625,6 @@ fun RaceScreen(
                 }
             }
 
-            // Steering + Pedals Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -528,7 +654,6 @@ fun RaceScreen(
                         )
                     }
                 } else {
-                    // Tilt Gauge + Zero Calibration Button
                     Surface(
                         color = CarbonBg.copy(alpha = 0.84f),
                         shape = RoundedCornerShape(16.dp),
@@ -577,7 +702,6 @@ fun RaceScreen(
                     }
                 }
 
-                // Brake + Gas Pedals (when Auto-Accelerate host rule is active, only Brake pedal is shown)
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -636,11 +760,14 @@ fun RaceScreen(
     if (showPauseDialog) {
         AlertDialog(
             onDismissRequest = { showPauseDialog = false },
-            containerColor = PaddockSurface,
-            title = { Text("Race Controls & Menu", style = MaterialTheme.typography.titleLarge) },
+            title = { Text("Race Controls & Audio", style = MaterialTheme.typography.titleLarge) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Switch Steering Mode Live:", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                    Text(
+                        text = "Switch Steering Mode Live:",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ControlMode.entries.forEach { mode ->
                             val active = profile.controlMode == mode
@@ -648,22 +775,47 @@ fun RaceScreen(
                                 onClick = {
                                     onSwitchControlMode(mode, profile.tiltSensitivity, profile.autoGasInTilt)
                                 },
-                                border = BorderStroke(1.5.dp, if (active) ElectricCyan else PaddockOutline),
+                                border = BorderStroke(
+                                    1.5.dp,
+                                    if (active) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outlineVariant
+                                ),
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Icon(
                                     if (mode == ControlMode.TILT_SENSOR) Icons.Default.PhoneAndroid else Icons.Default.TouchApp,
                                     contentDescription = null,
-                                    tint = if (active) ElectricCyan else TextSecondary,
                                     modifier = Modifier.size(16.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = if (mode == ControlMode.TILT_SENSOR) "Tilt" else "Touch",
-                                    color = if (active) ElectricCyan else Color.White
-                                )
+                                Text(if (mode == ControlMode.TILT_SENSOR) "Tilt" else "Touch")
                             }
                         }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Guitar Riff BGM", style = MaterialTheme.typography.bodyMedium)
+                        Switch(
+                            checked = audioSettings.musicEnabled,
+                            onCheckedChange = {
+                                onUpdateAudioSettings(audioSettings.copy(musicEnabled = it))
+                            }
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("RC Car Motor SFX", style = MaterialTheme.typography.bodyMedium)
+                        Switch(
+                            checked = audioSettings.carSfxEnabled,
+                            onCheckedChange = {
+                                onUpdateAudioSettings(audioSettings.copy(carSfxEnabled = it))
+                            }
+                        )
                     }
                     if (profile.controlMode == ControlMode.TILT_SENSOR) {
                         Row(
@@ -697,7 +849,7 @@ fun RaceScreen(
                         showPauseDialog = false
                         onLeaveRace()
                     }
-                ) { Text("Exit Race", color = AlertRed) }
+                ) { Text("Exit Race", color = MaterialTheme.colorScheme.error) }
             }
         )
     }
@@ -714,6 +866,15 @@ private fun HoldControlPad(
 ) {
     var pressed by remember { mutableStateOf(false) }
 
+    DisposableEffect(Unit) {
+        onDispose {
+            if (pressed) {
+                pressed = false
+                onPressedChange(false)
+            }
+        }
+    }
+
     Surface(
         color = if (pressed) activeColor.copy(alpha = 0.85f) else CarbonBg.copy(alpha = 0.72f),
         shape = RoundedCornerShape(18.dp),
@@ -726,12 +887,6 @@ private fun HoldControlPad(
                     if (isDown != pressed) {
                         pressed = isDown
                         onPressedChange(isDown)
-                    }
-                    if (event.type == PointerEventType.Release || !isDown) {
-                        if (pressed) {
-                            pressed = false
-                            onPressedChange(false)
-                        }
                     }
                     event.changes.forEach { it.consume() }
                 }
