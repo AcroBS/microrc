@@ -9,16 +9,21 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.network.RaceNavEvent
+import com.example.network.SessionRole
 import com.example.ui.screens.GarageScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.JoinBrowserScreen
 import com.example.ui.screens.LobbyScreen
 import com.example.ui.screens.RaceScreen
 import com.example.ui.screens.ResultsScreen
+import com.example.ui.screens.SettingsScreen
+import com.example.ui.screens.TrackEditorScreen
 
 object Routes {
     const val HOME = "home"
     const val GARAGE = "garage"
+    const val SETTINGS = "settings"
+    const val TRACK_EDITOR = "track_editor"
     const val BROWSER = "browser"
     const val LOBBY = "lobby"
     const val RACE = "race"
@@ -30,13 +35,18 @@ fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
     val navController = rememberNavController()
 
     val profile by viewModel.profile.collectAsState()
+    val rules by viewModel.rules.collectAsState()
+    val customTracks by viewModel.customTracks.collectAsState()
     val discoveredLobbies by viewModel.discoveredLobbies.collectAsState()
     val sessionRole by viewModel.sessionRole.collectAsState()
     val lobbyState by viewModel.lobbyState.collectAsState()
     val raceSnapshot by viewModel.raceSnapshot.collectAsState()
     val lastResults by viewModel.lastResults.collectAsState()
+    val activeTrack by viewModel.activeTrack.collectAsState()
     val connectionError by viewModel.connectionError.collectAsState()
     val overviewCamera by viewModel.overviewCamera.collectAsState()
+
+    val effectiveRules = lobbyState?.rules ?: rules
 
     LaunchedEffect(Unit) {
         viewModel.navEvents.collect { event ->
@@ -83,6 +93,8 @@ fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
                 onJoinRace = { navController.navigate(Routes.BROWSER) },
                 onSoloRace = { viewModel.startSolo() },
                 onOpenGarage = { navController.navigate(Routes.GARAGE) },
+                onOpenTrackEditor = { navController.navigate(Routes.TRACK_EDITOR) },
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 onUpdateDriverName = viewModel::updateDriverName
             )
         }
@@ -93,6 +105,34 @@ fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
                 tiltController = viewModel.tiltController,
                 onSaveCarAndColors = viewModel::updateCarAndColors,
                 onSaveControlSettings = viewModel::updateControlSettings,
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(Routes.SETTINGS) {
+            val canEdit = sessionRole == SessionRole.None ||
+                sessionRole == SessionRole.Host ||
+                sessionRole == SessionRole.Solo
+            SettingsScreen(
+                rules = effectiveRules,
+                canEditRules = canEdit,
+                inSession = sessionRole != SessionRole.None,
+                onUpdateRules = viewModel::updateRaceRules,
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(Routes.TRACK_EDITOR) {
+            val canApplyToLobby = sessionRole == SessionRole.Host || sessionRole == SessionRole.Solo
+            TrackEditorScreen(
+                initialTrack = lobbyState?.activeCustomTrack ?: customTracks.firstOrNull(),
+                savedTracks = customTracks,
+                canApplyToLobby = canApplyToLobby,
+                onSaveTrack = { track, apply ->
+                    viewModel.saveCustomTrack(track, apply)
+                    navController.popBackStack()
+                },
+                onDeleteTrack = viewModel::deleteCustomTrack,
                 onBack = { navController.popBackStack() }
             )
         }
@@ -115,7 +155,12 @@ fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
                 role = sessionRole,
                 localPlayerId = profile.playerId,
                 lobby = lobbyState,
+                customTracks = customTracks,
                 onSelectTrack = viewModel::selectTrack,
+                onSelectCustomTrack = viewModel::selectCustomTrack,
+                onGenerateRandomTrack = viewModel::generateRandomTrackForLobby,
+                onOpenTrackEditor = { navController.navigate(Routes.TRACK_EDITOR) },
+                onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 onSelectLaps = viewModel::setTotalLaps,
                 onAddBot = viewModel::addBot,
                 onRemoveBot = viewModel::removeBot,
@@ -134,6 +179,8 @@ fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
             RaceScreen(
                 profile = profile,
                 snapshot = raceSnapshot,
+                activeTrack = activeTrack,
+                rules = effectiveRules,
                 overviewCamera = overviewCamera,
                 tiltController = viewModel.tiltController,
                 onToggleOverviewCamera = viewModel::toggleOverviewCamera,

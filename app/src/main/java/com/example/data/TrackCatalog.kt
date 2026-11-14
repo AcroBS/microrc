@@ -1,12 +1,14 @@
 package com.example.data
 
 import com.example.model.BoostPad
+import com.example.model.CustomTrackData
 import com.example.model.ItemBoxSpawn
 import com.example.model.PropShape
 import com.example.model.TrackDefinition
 import com.example.model.TrackId
 import com.example.model.TrackPoint
 import com.example.model.TrackProp
+import com.example.model.TrackRamp
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -58,6 +60,10 @@ object TrackCatalog {
                     itemAt(spline, 118, 3),
                     itemAt(spline, 138, 4)
                 )
+                val ramps = listOf(
+                    rampAt(spline, 38),
+                    rampAt(spline, 108)
+                )
                 val props = listOf(
                     TrackProp(780f, 620f, 62f, PropShape.CIRCLE, 0xFFE65100, 0xFFFFCC80, isSolidObstacle = false),
                     TrackProp(1480f, 540f, 44f, PropShape.CRATE, 0xFF8D6E63, 0xFFD7CCC8, isSolidObstacle = true),
@@ -66,7 +72,7 @@ object TrackCatalog {
                     TrackProp(200f, 200f, 52f, PropShape.CRATE, 0xFF6D4C41, 0xFFBCAAA4, isSolidObstacle = false),
                     TrackProp(2010f, 1320f, 56f, PropShape.CIRCLE, 0xFFD84315, 0xFFFFAB91, isSolidObstacle = false)
                 )
-                TrackDefinition(id, worldW, worldH, spline, boosts, items, props)
+                TrackDefinition(id, worldW, worldH, spline, boosts, items, props, ramps = ramps)
             }
 
             TrackId.BACKYARD_DIRT -> {
@@ -93,6 +99,10 @@ object TrackCatalog {
                     itemAt(spline, 108, 3),
                     itemAt(spline, 128, 4)
                 )
+                val ramps = listOf(
+                    rampAt(spline, 34),
+                    rampAt(spline, 96)
+                )
                 val props = listOf(
                     TrackProp(1060f, 680f, 68f, PropShape.TREE, 0xFF2E7D32, 0xFF81C784, isSolidObstacle = true),
                     TrackProp(1400f, 740f, 56f, PropShape.TREE, 0xFF388E3C, 0xFFA5D6A7, isSolidObstacle = true),
@@ -101,7 +111,7 @@ object TrackCatalog {
                     TrackProp(2020f, 240f, 54f, PropShape.TREE, 0xFF2E7D32, 0xFF81C784, isSolidObstacle = false),
                     TrackProp(1990f, 1290f, 60f, PropShape.TREE, 0xFF33691E, 0xFF9CCC65, isSolidObstacle = false)
                 )
-                TrackDefinition(id, worldW, worldH, spline, boosts, items, props)
+                TrackDefinition(id, worldW, worldH, spline, boosts, items, props, ramps = ramps)
             }
 
             TrackId.NEON_ROOFTOP -> {
@@ -131,6 +141,11 @@ object TrackCatalog {
                     itemAt(spline, 104, 3),
                     itemAt(spline, 134, 4)
                 )
+                val ramps = listOf(
+                    rampAt(spline, 34),
+                    rampAt(spline, 92),
+                    rampAt(spline, 124)
+                )
                 val props = listOf(
                     TrackProp(960f, 680f, 44f, PropShape.PYLON, 0xFF00E5FF, 0xFFE040FB, isSolidObstacle = true),
                     TrackProp(1700f, 960f, 40f, PropShape.PYLON, 0xFFE040FB, 0xFF00E5FF, isSolidObstacle = true),
@@ -138,7 +153,7 @@ object TrackCatalog {
                     TrackProp(2050f, 150f, 44f, PropShape.CRATE, 0xFF1A233A, 0xFFE040FB, isSolidObstacle = false),
                     TrackProp(820f, 1040f, 36f, PropShape.PYLON, 0xFF00E5FF, 0xFFFFFFFF, isSolidObstacle = true)
                 )
-                TrackDefinition(id, worldW, worldH, spline, boosts, items, props)
+                TrackDefinition(id, worldW, worldH, spline, boosts, items, props, ramps = ramps)
             }
 
             TrackId.SANDBOX_DUNES -> {
@@ -165,6 +180,10 @@ object TrackCatalog {
                     itemAt(spline, 112, 3),
                     itemAt(spline, 132, 4)
                 )
+                val ramps = listOf(
+                    rampAt(spline, 40),
+                    rampAt(spline, 100)
+                )
                 val props = listOf(
                     TrackProp(1040f, 680f, 52f, PropShape.MUD_POOL, 0xFF0288D1, 0xFF81D4FA, isSolidObstacle = false),
                     TrackProp(640f, 660f, 42f, PropShape.CACTUS, 0xFF2E7D32, 0xFFA5D6A7, isSolidObstacle = true),
@@ -172,7 +191,7 @@ object TrackCatalog {
                     TrackProp(180f, 210f, 44f, PropShape.CACTUS, 0xFF2E7D32, 0xFFA5D6A7, isSolidObstacle = false),
                     TrackProp(2020f, 1300f, 50f, PropShape.CACTUS, 0xFF1B5E20, 0xFF81C784, isSolidObstacle = false)
                 )
-                TrackDefinition(id, worldW, worldH, spline, boosts, items, props)
+                TrackDefinition(id, worldW, worldH, spline, boosts, items, props, ramps = ramps)
             }
 
             TrackId.WAREHOUSE_DRIFT -> {
@@ -201,6 +220,10 @@ object TrackCatalog {
                     itemAt(spline, 98, 3),
                     itemAt(spline, 136, 4)
                 )
+                val ramps = listOf(
+                    rampAt(spline, 36),
+                    rampAt(spline, 122)
+                )
                 val props = listOf(
                     TrackProp(760f, 760f, 64f, PropShape.CRATE, 0xFF455A64, 0xFFFFAB00, isSolidObstacle = true),
                     TrackProp(1540f, 790f, 44f, PropShape.CRATE, 0xFF37474F, 0xFFFFAB00, isSolidObstacle = true),
@@ -208,12 +231,219 @@ object TrackCatalog {
                     TrackProp(760f, 1000f, 42f, PropShape.PYLON, 0xFFFF6D00, 0xFFFFFFFF, isSolidObstacle = true),
                     TrackProp(160f, 180f, 48f, PropShape.CRATE, 0xFF263238, 0xFF90A4AE, isSolidObstacle = false)
                 )
-                TrackDefinition(id, worldW, worldH, spline, boosts, items, props)
+                TrackDefinition(id, worldW, worldH, spline, boosts, items, props, ramps = ramps)
             }
         }
     }
 
-    private fun boostAt(spline: List<TrackPoint>, index: Int): BoostPad {
+    fun buildCustomTrack(data: CustomTrackData): TrackDefinition {
+        val worldW = 2200f
+        val worldH = 1500f
+        val theme = runCatching { TrackId.valueOf(data.themeId) }.getOrDefault(TrackId.NEON_ROOFTOP)
+        val safeControl = if (data.controlPoints.size >= 4) {
+            data.controlPoints.map { it.copy(halfWidth = data.roadHalfWidth.coerceIn(88f, 140f)) }
+        } else {
+            defaultEditorOval(theme).controlPoints
+        }
+        val spline = subdivideClosedSpline(safeControl, samplesPerSegment = 14)
+
+        val boosts = data.boostPads.ifEmpty {
+            listOf(
+                boostAt(spline, (spline.size * 0.14).toInt()),
+                boostAt(spline, (spline.size * 0.64).toInt())
+            )
+        }
+        val items = data.itemSpawns.ifEmpty {
+            listOf(0.22f, 0.44f, 0.68f, 0.86f).mapIndexed { idx, frac ->
+                itemAt(spline, (spline.size * frac).toInt(), idx)
+            }
+        }
+        val ramps = data.ramps
+        return TrackDefinition(
+            id = theme,
+            worldWidth = worldW,
+            worldHeight = worldH,
+            centerline = spline,
+            boostPads = boosts,
+            itemSpawns = items,
+            props = data.props,
+            ramps = ramps,
+            customId = data.id,
+            customName = data.name
+        )
+    }
+
+    fun toCustomTrackData(track: TrackDefinition): CustomTrackData {
+        // Sample ~11 evenly spaced points back if coming from a built-in track
+        val step = (track.centerline.size / 11).coerceAtLeast(1)
+        val ctrl = track.centerline.filterIndexed { index, _ -> index % step == 0 }.take(12)
+        return CustomTrackData(
+            id = track.customId ?: "track_${track.id.name.lowercase()}",
+            name = track.displayTitle,
+            themeId = track.id.name,
+            roadHalfWidth = track.centerline.firstOrNull()?.halfWidth ?: 112f,
+            controlPoints = ctrl,
+            boostPads = track.boostPads,
+            itemSpawns = track.itemSpawns,
+            ramps = track.ramps,
+            props = track.props
+        )
+    }
+
+    fun withRandomJumps(
+        track: TrackDefinition,
+        enabled: Boolean,
+        seed: Long = System.currentTimeMillis()
+    ): TrackDefinition {
+        if (!enabled) return track.copy(ramps = emptyList())
+        val rng = kotlin.random.Random(seed)
+        val n = track.centerline.size
+        if (n < 40) return track
+        val targetCount = rng.nextInt(2, 5) // 2..4 random jumps per race
+        val chosen = mutableListOf<com.example.model.TrackRamp>()
+        val minSpacing = 240f
+        var attempts = 0
+        while (chosen.size < targetCount && attempts < 60) {
+            attempts++
+            // Avoid start/finish line neighborhood (first 10% and last 12%)
+            val idx = rng.nextInt((n * 0.12f).toInt(), (n * 0.88f).toInt())
+            val cand = rampAt(track.centerline, idx, impulse = rng.nextFloat() * 0.25f + 0.95f)
+            val nearBoost = track.boostPads.any { distance(it.x, it.y, cand.x, cand.y) < 150f }
+            val nearItem = track.itemSpawns.any { distance(it.x, it.y, cand.x, cand.y) < 120f }
+            val nearRamp = chosen.any { distance(it.x, it.y, cand.x, cand.y) < minSpacing }
+            if (!nearBoost && !nearItem && !nearRamp) {
+                chosen.add(cand)
+            }
+        }
+        return track.copy(ramps = chosen.ifEmpty { track.ramps })
+    }
+
+    fun defaultEditorOval(theme: TrackId = TrackId.NEON_ROOFTOP): CustomTrackData {
+        val w = 110f
+        val ctrl = listOf(
+            TrackPoint(520f, 340f, w),
+            TrackPoint(1100f, 290f, w),
+            TrackPoint(1680f, 340f, w),
+            TrackPoint(1860f, 750f, w),
+            TrackPoint(1680f, 1160f, w),
+            TrackPoint(1100f, 1210f, w),
+            TrackPoint(520f, 1160f, w),
+            TrackPoint(340f, 750f, w)
+        )
+        val spline = subdivideClosedSpline(ctrl, samplesPerSegment = 14)
+        return CustomTrackData(
+            id = "custom_${System.currentTimeMillis()}",
+            name = "Custom Circuit",
+            themeId = theme.name,
+            roadHalfWidth = w,
+            controlPoints = ctrl,
+            boostPads = listOf(boostAt(spline, 14), boostAt(spline, 68)),
+            itemSpawns = listOf(0, 1, 2, 3).map { itemAt(spline, (it * spline.size / 4) + 18, it) },
+            ramps = listOf(rampAt(spline, 34), rampAt(spline, 88)),
+            props = emptyList()
+        )
+    }
+
+    fun generateRandomTrack(
+        seed: Long = System.currentTimeMillis(),
+        preferredTheme: TrackId? = null,
+        roadHalfWidth: Float = 112f
+    ): CustomTrackData {
+        val rng = kotlin.random.Random(seed)
+        val theme = preferredTheme ?: TrackId.entries[rng.nextInt(TrackId.entries.size)]
+        val adjectives = listOf("Hyper", "Turbo", "Apex", "Drift", "Nitro", "Volt", "Micro", "Ridge")
+        val nouns = listOf("Circuit", "Loop", "Speedway", "Chicane", "Run", "Grand Prix", "Sprint")
+        val trackName = "${adjectives[rng.nextInt(adjectives.size)]} ${nouns[rng.nextInt(nouns.size)]} #${(seed % 90 + 10)}"
+
+        val pointCount = rng.nextInt(9, 13)
+        val cx = 1100f
+        val cy = 750f
+        val rxBase = 740f
+        val ryBase = 460f
+        val phase1 = rng.nextFloat() * 6.28f
+        val phase2 = rng.nextFloat() * 6.28f
+        val freq1 = rng.nextInt(2, 4)
+        val freq2 = rng.nextInt(3, 6)
+
+        val ctrl = (0 until pointCount).map { i ->
+            val theta = (i.toFloat() / pointCount.toFloat()) * (2f * Math.PI.toFloat())
+            val wave = 1f +
+                0.22f * sin(theta * freq1 + phase1) +
+                0.15f * cos(theta * freq2 + phase2) +
+                (rng.nextFloat() - 0.5f) * 0.14f
+            val rScale = wave.coerceIn(0.62f, 1.18f)
+            val x = (cx + cos(theta) * rxBase * rScale).coerceIn(270f, 1930f)
+            val y = (cy + sin(theta) * ryBase * rScale).coerceIn(240f, 1260f)
+            TrackPoint(x, y, roadHalfWidth)
+        }
+
+        val spline = subdivideClosedSpline(ctrl, samplesPerSegment = 14)
+        val n = spline.size
+        val boosts = listOf(
+            boostAt(spline, (n * 0.14f).toInt()),
+            boostAt(spline, (n * 0.58f).toInt())
+        )
+        val items = listOf(0.24f, 0.46f, 0.72f, 0.90f).mapIndexed { id, frac ->
+            itemAt(spline, (n * frac).toInt(), id)
+        }
+        val rampFracs = listOf(0.34f, 0.66f, 0.80f).take(rng.nextInt(2, 4))
+        val ramps = rampFracs.map { frac ->
+            rampAt(spline, (n * frac).toInt(), impulse = 1.0f + rng.nextFloat() * 0.15f)
+        }
+
+        // Place safe decorative props away from the track centerline
+        val props = mutableListOf<TrackProp>()
+        var attempts = 0
+        while (props.size < 5 && attempts < 80) {
+            attempts++
+            val px = rng.nextFloat() * 1900f + 150f
+            val py = rng.nextFloat() * 1200f + 150f
+            val minRoadDist = spline.minOf { distance(px, py, it.x, it.y) }
+            if (minRoadDist > roadHalfWidth + 85f) {
+                val shape = when (theme) {
+                    TrackId.BACKYARD_DIRT -> PropShape.TREE
+                    TrackId.SANDBOX_DUNES -> PropShape.CACTUS
+                    TrackId.NEON_ROOFTOP -> PropShape.PYLON
+                    TrackId.WAREHOUSE_DRIFT -> PropShape.CRATE
+                    TrackId.LIVING_ROOM_GP -> PropShape.CIRCLE
+                }
+                props.add(
+                    TrackProp(
+                        x = px,
+                        y = py,
+                        radius = rng.nextFloat() * 18f + 38f,
+                        shape = shape,
+                        colorHex = theme.kerbPrimaryHex,
+                        accentHex = theme.kerbSecondaryHex,
+                        isSolidObstacle = false
+                    )
+                )
+            }
+        }
+
+        return CustomTrackData(
+            id = "rand_$seed",
+            name = trackName,
+            themeId = theme.name,
+            roadHalfWidth = roadHalfWidth,
+            controlPoints = ctrl,
+            boostPads = boosts,
+            itemSpawns = items,
+            ramps = ramps,
+            props = props
+        )
+    }
+
+    fun rampAt(spline: List<TrackPoint>, index: Int, impulse: Float = 1.0f): TrackRamp {
+        val i = index.mod(spline.size)
+        val next = (index + 1).mod(spline.size)
+        val p = spline[i]
+        val n = spline[next]
+        val angle = atan2(n.y - p.y, n.x - p.x)
+        return TrackRamp(p.x, p.y, angle, radius = 48f, impulse = impulse)
+    }
+
+    fun boostAt(spline: List<TrackPoint>, index: Int): BoostPad {
         val i = index.mod(spline.size)
         val next = (index + 1).mod(spline.size)
         val p = spline[i]
@@ -222,12 +452,12 @@ object TrackCatalog {
         return BoostPad(p.x, p.y, angle)
     }
 
-    private fun itemAt(spline: List<TrackPoint>, index: Int, id: Int): ItemBoxSpawn {
+    fun itemAt(spline: List<TrackPoint>, index: Int, id: Int): ItemBoxSpawn {
         val p = spline[index.mod(spline.size)]
         return ItemBoxSpawn(id = id, x = p.x, y = p.y)
     }
 
-    private fun subdivideClosedSpline(
+    fun subdivideClosedSpline(
         points: List<TrackPoint>,
         samplesPerSegment: Int
     ): List<TrackPoint> {

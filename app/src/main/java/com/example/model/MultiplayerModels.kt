@@ -54,6 +54,13 @@ data class ControlInput(
 )
 
 @JsonClass(generateAdapter = true)
+data class RaceRulesSettings(
+    val autoAccelerate: Boolean = false,
+    val hardTrackBoundary: Boolean = false,
+    val randomJumpsEnabled: Boolean = true
+)
+
+@JsonClass(generateAdapter = true)
 data class RacerState(
     val playerId: String,
     val name: String,
@@ -68,6 +75,7 @@ data class RacerState(
     val vy: Float = 0f,
     val speed: Float = 0f,
     val steerVisual: Float = 0f,
+    val jumpZ: Float = 0f,
     val lap: Int = 1,
     val checkpointIndex: Int = 0,
     val sectorMask: Int = 0,
@@ -111,7 +119,9 @@ data class LobbyStatePayload(
     val totalLaps: Int,
     val players: List<LobbyPlayer>,
     val chatHistory: List<ChatMessage>,
-    val inRace: Boolean
+    val inRace: Boolean,
+    val rules: RaceRulesSettings = RaceRulesSettings(),
+    val activeCustomTrack: CustomTrackData? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -126,6 +136,9 @@ data class NetworkMessage(
     val trackId: String? = null,
     val totalLaps: Int? = null,
     val isReady: Boolean? = null,
+    val rules: RaceRulesSettings? = null,
+    val customTrack: CustomTrackData? = null,
+    val ramps: List<TrackRamp>? = null,
     val errorReason: String? = null
 )
 

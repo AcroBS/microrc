@@ -70,8 +70,10 @@ import com.example.model.ControlMode
 import com.example.model.PlayerProfile
 import com.example.model.PowerUpType
 import com.example.model.RacePhase
+import com.example.model.RaceRulesSettings
 import com.example.model.RaceSnapshot
 import com.example.model.RacerState
+import com.example.model.TrackDefinition
 import com.example.sensors.TiltSteeringController
 import com.example.ui.components.drawTrackMiniMap
 import com.example.ui.components.drawTrackWorld
@@ -92,6 +94,8 @@ import kotlin.math.sin
 fun RaceScreen(
     profile: PlayerProfile,
     snapshot: RaceSnapshot?,
+    activeTrack: TrackDefinition? = null,
+    rules: RaceRulesSettings = RaceRulesSettings(),
     overviewCamera: Boolean,
     tiltController: TiltSteeringController,
     onToggleOverviewCamera: () -> Unit,
@@ -131,6 +135,7 @@ fun RaceScreen(
     LaunchedEffect(
         profile.controlMode,
         profile.autoGasInTilt,
+        rules.autoAccelerate,
         steerLeftPressed,
         steerRightPressed,
         gasPressed,
@@ -144,6 +149,7 @@ fun RaceScreen(
         }
         val throttle = when {
             brakePressed -> -1f
+            rules.autoAccelerate -> 1f
             gasPressed -> 1f
             profile.controlMode == ControlMode.TILT_SENSOR && profile.autoGasInTilt -> 0.92f
             else -> 0f
@@ -159,7 +165,7 @@ fun RaceScreen(
     var lastFrameNanos by remember { mutableLongStateOf(0L) }
     var lastSnapshotArrivalNanos by remember { mutableLongStateOf(0L) }
     var smoothedRacers by remember { mutableStateOf<List<RacerState>>(emptyList()) }
-    val smoothPoseMap = remember { mutableMapOf<String, FloatArray>() } // [x, y, angle]
+    val smoothPoseMap = remember { mutableMapOf<String, FloatArray>() } // [x, y, angle, jumpZ]
 
     val localRacer = snapshot?.racers?.find { it.playerId == profile.playerId }
         ?: snapshot?.racers?.firstOrNull()
@@ -194,14 +200,15 @@ fun RaceScreen(
                         val predY = r.y + r.vy * sinceSnapSec
                         val cur = smoothPoseMap[r.playerId]
                         if (cur == null || hypot(predX - cur[0], predY - cur[1]) > 220f) {
-                            smoothPoseMap[r.playerId] = floatArrayOf(predX, predY, r.angleRad)
+                            smoothPoseMap[r.playerId] = floatArrayOf(predX, predY, r.angleRad, r.jumpZ)
                             r.copy(x = predX, y = predY)
                         } else {
                             cur[0] += (predX - cur[0]) * posLerp
                             cur[1] += (predY - cur[1]) * posLerp
                             val angDiff = RacePhysicsEngine.normalizeAngle(r.angleRad - cur[2])
                             cur[2] = RacePhysicsEngine.normalizeAngle(cur[2] + angDiff * angLerp)
-                            r.copy(x = cur[0], y = cur[1], angleRad = cur[2])
+                            cur[3] += (r.jumpZ - cur[3]) * posLerp
+                            r.copy(x = cur[0], y = cur[1], angleRad = cur[2], jumpZ = cur[3])
                         }
                     }
                     smoothedRacers = rendered
@@ -225,7 +232,7 @@ fun RaceScreen(
         }
     }
 
-    val track = remember(snapshot?.trackId) {
+    val track = activeTrack ?: remember(snapshot?.trackId) {
         TrackCatalog.getTrack(snapshot?.trackId ?: "LIVING_ROOM_GP")
     }
     val racersToDraw = smoothedRacers.ifEmpty { snapshot?.racers.orEmpty() }
@@ -253,7 +260,8 @@ fun RaceScreen(
                         itemBoxes = snapshot?.itemBoxes.orEmpty(),
                         hazards = snapshot?.hazards.orEmpty(),
                         racers = racersToDraw,
-                        animTimeSec = animTimeSec
+                        animTimeSec = animTimeSec,
+                        hardBoundary = rules.hardTrackBoundary
                     )
                 }
             } else {
@@ -267,7 +275,8 @@ fun RaceScreen(
                         itemBoxes = snapshot?.itemBoxes.orEmpty(),
                         hazards = snapshot?.hazards.orEmpty(),
                         racers = racersToDraw,
-                        animTimeSec = animTimeSec
+                        animTimeSec = animTimeSec,
+                        hardBoundary = rules.hardTrackBoundary
                     )
                 }
             }
@@ -447,6 +456,7 @@ fun RaceScreen(
             ) {
                 // Buff status badges
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if ((localRacer?.jumpZ ?: 0f) > 0.1f) StatusChip("AIRBORNE!", GoldTrophy)
                     if ((localRacer?.boostMs ?: 0L) > 0L) StatusChip("TURBO", SignalOrange)
                     if ((localRacer?.shieldMs ?: 0L) > 0L) StatusChip("SHIELD", AcidLime)
                     if ((localRacer?.overdriveMs ?: 0L) > 0L) StatusChip("OVERDRIVE", Color(0xFFE040FB))
@@ -567,28 +577,57 @@ fun RaceScreen(
                     }
                 }
 
-                // Brake + Gas Pedals
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    HoldControlPad(
-                        label = "BRK",
-                        icon = null,
-                        contentDesc = "Brake or Reverse",
-                        activeColor = AlertRed,
-                        modifier = Modifier
-                            .size(width = 68.dp, height = 78.dp)
-                            .testTag("brake_button"),
-                        onPressedChange = { brakePressed = it }
-                    )
-                    HoldControlPad(
-                        label = if (profile.controlMode == ControlMode.TILT_SENSOR && profile.autoGasInTilt) "AUTO" else "GAS",
-                        icon = null,
-                        contentDesc = "Accelerate",
-                        activeColor = AcidLime,
-                        modifier = Modifier
-                            .size(width = 88.dp, height = 78.dp)
-                            .testTag("gas_button"),
-                        onPressedChange = { gasPressed = it }
-                    )
+                // Brake + Gas Pedals (when Auto-Accelerate host rule is active, only Brake pedal is shown)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (rules.autoAccelerate) {
+                        Surface(
+                            color = AcidLime.copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(12.dp),
+                            border = BorderStroke(1.dp, AcidLime.copy(alpha = 0.6f)),
+                            modifier = Modifier.testTag("auto_gas_badge")
+                        ) {
+                            Text(
+                                text = "AUTO\nGAS",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AcidLime,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp)
+                            )
+                        }
+                        HoldControlPad(
+                            label = "BRAKE",
+                            icon = null,
+                            contentDesc = "Brake or Reverse",
+                            activeColor = AlertRed,
+                            modifier = Modifier
+                                .size(width = 108.dp, height = 78.dp)
+                                .testTag("brake_button"),
+                            onPressedChange = { brakePressed = it }
+                        )
+                    } else {
+                        HoldControlPad(
+                            label = "BRK",
+                            icon = null,
+                            contentDesc = "Brake or Reverse",
+                            activeColor = AlertRed,
+                            modifier = Modifier
+                                .size(width = 68.dp, height = 78.dp)
+                                .testTag("brake_button"),
+                            onPressedChange = { brakePressed = it }
+                        )
+                        HoldControlPad(
+                            label = if (profile.controlMode == ControlMode.TILT_SENSOR && profile.autoGasInTilt) "AUTO" else "GAS",
+                            icon = null,
+                            contentDesc = "Accelerate",
+                            activeColor = AcidLime,
+                            modifier = Modifier
+                                .size(width = 88.dp, height = 78.dp)
+                                .testTag("gas_button"),
+                            onPressedChange = { gasPressed = it }
+                        )
+                    }
                 }
             }
         }

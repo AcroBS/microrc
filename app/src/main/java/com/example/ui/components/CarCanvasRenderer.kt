@@ -28,23 +28,54 @@ fun DrawScope.drawRcCar(
     isStunned: Boolean = false,
     hasOverdrive: Boolean = false,
     spinVisualOffset: Float = 0f,
+    jumpZ: Float = 0f,
     scale: Float = 1f,
     animTimeSec: Float = 0f
 ) {
     val deg = ((angleRad + spinVisualOffset) * 180f / PI.toFloat())
     val frontWheelAngle = steerVisual * 22f
+    val airElevation = jumpZ.coerceIn(0f, 1.4f)
+    val airScale = scale * (1f + airElevation * 0.44f)
+    val shadowDx = airElevation * 38f * scale
+    val shadowDy = airElevation * 44f * scale
+    val shadowScale = scale * (1f - airElevation * 0.14f)
 
+    // Detached ground shadow (shifts away as car launches airborne)
     withTransform({
-        translate(left = x, top = y)
-        scale(scaleX = scale, scaleY = scale, pivot = Offset.Zero)
+        translate(left = x + shadowDx, top = y + shadowDy)
+        scale(scaleX = shadowScale, scaleY = shadowScale, pivot = Offset.Zero)
         rotate(degrees = deg, pivot = Offset.Zero)
     }) {
-        // Soft drop shadow
         drawOval(
-            color = Color.Black.copy(alpha = 0.36f),
+            color = Color.Black.copy(alpha = (0.38f - airElevation * 0.12f).coerceIn(0.14f, 0.4f)),
             topLeft = Offset(-24f, -15f),
             size = Size(48f, 34f)
         )
+    }
+
+    withTransform({
+        translate(left = x, top = y)
+        scale(scaleX = airScale, scaleY = airScale, pivot = Offset.Zero)
+        rotate(degrees = deg, pivot = Offset.Zero)
+    }) {
+        // Airborne wind streaks
+        if (airElevation > 0.10f) {
+            val windAlpha = (airElevation * 0.55f).coerceIn(0.1f, 0.65f)
+            drawLine(
+                color = Color.White.copy(alpha = windAlpha),
+                start = Offset(-26f, -19f),
+                end = Offset(6f, -19f),
+                strokeWidth = 2.2f,
+                cap = StrokeCap.Round
+            )
+            drawLine(
+                color = Color.White.copy(alpha = windAlpha),
+                start = Offset(-26f, 19f),
+                end = Offset(6f, 19f),
+                strokeWidth = 2.2f,
+                cap = StrokeCap.Round
+            )
+        }
 
         // Boost exhaust flame
         if (isBoosting) {

@@ -38,4 +38,22 @@ class ExampleRobolectricTest {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("car_option_APEX_FORMULA").performScrollTo().assertIsDisplayed()
     }
+
+    @Test
+    fun homeScreen_navigatesToSettingsAndTrackStudio() {
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("open_settings_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("setting_auto_accel_switch").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setting_hard_boundary_switch").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setting_random_jumps_switch").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("settings_back_button").performClick()
+
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("open_track_editor_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("editor_random_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("editor_random_button").performClick()
+        composeTestRule.onNodeWithTag("editor_save_button").assertIsDisplayed()
+    }
 }

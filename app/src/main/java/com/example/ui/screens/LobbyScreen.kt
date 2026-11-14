@@ -35,11 +35,14 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -67,6 +70,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.TrackCatalog
+import com.example.model.CustomTrackData
 import com.example.model.LobbyStatePayload
 import com.example.model.RcCarType
 import com.example.model.TrackId
@@ -88,7 +92,12 @@ fun LobbyScreen(
     role: SessionRole,
     localPlayerId: String,
     lobby: LobbyStatePayload?,
+    customTracks: List<CustomTrackData>,
     onSelectTrack: (TrackId) -> Unit,
+    onSelectCustomTrack: (CustomTrackData) -> Unit,
+    onGenerateRandomTrack: () -> Unit,
+    onOpenTrackEditor: () -> Unit,
+    onOpenSettings: () -> Unit,
     onSelectLaps: (Int) -> Unit,
     onAddBot: () -> Unit,
     onRemoveBot: () -> Unit,
@@ -157,17 +166,31 @@ fun LobbyScreen(
                         )
                     }
                 }
-                OutlinedButton(
-                    onClick = onOpenGarage,
-                    border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.6f)),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    modifier = Modifier
-                        .height(40.dp)
-                        .testTag("lobby_garage_button")
-                ) {
-                    Icon(Icons.Default.Build, contentDescription = null, tint = ElectricCyan, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Car", color = ElectricCyan, style = MaterialTheme.typography.labelMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onOpenSettings,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("lobby_settings_button")
+                    ) {
+                        Icon(
+                            Icons.Default.Tune,
+                            contentDescription = "Match Rules & Settings",
+                            tint = SignalOrange
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = onOpenGarage,
+                        border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.6f)),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier
+                            .height(48.dp)
+                            .testTag("lobby_garage_button")
+                    ) {
+                        Icon(Icons.Default.Build, contentDescription = null, tint = ElectricCyan, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Car", color = ElectricCyan, style = MaterialTheme.typography.labelMedium)
+                    }
                 }
             }
 
@@ -179,7 +202,24 @@ fun LobbyScreen(
                     .padding(horizontal = 14.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // 5-Track Selector
+                // Active Match Rules Badges
+                val activeRules = lobby?.rules
+                if (activeRules != null) {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (activeRules.autoAccelerate) {
+                            item { LobbyRuleBadge("AUTO-GAS (ALL)", AcidLime, onOpenSettings) }
+                        }
+                        if (activeRules.hardTrackBoundary) {
+                            item { LobbyRuleBadge("BOUNCE WALLS", SignalOrange, onOpenSettings) }
+                        }
+                        if (activeRules.randomJumpsEnabled) {
+                            item { LobbyRuleBadge("RANDOM JUMPS", ElectricCyan, onOpenSettings) }
+                        }
+                    }
+                }
+
+                // Track Selector + Laps
+                val activeCustom = lobby?.activeCustomTrack
                 val selectedTrack = runCatching {
                     TrackId.valueOf(lobby?.trackId ?: TrackId.LIVING_ROOM_GP.name)
                 }.getOrDefault(TrackId.LIVING_ROOM_GP)
@@ -190,7 +230,7 @@ fun LobbyScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (isHostOrSolo) "SELECT TRACK (5)" else "SELECTED TRACK",
+                        text = if (isHostOrSolo) "SELECT TRACK" else "SELECTED TRACK",
                         style = MaterialTheme.typography.labelLarge,
                         color = TextSecondary
                     )
@@ -212,11 +252,99 @@ fun LobbyScreen(
                     }
                 }
 
+                if (isHostOrSolo) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = onGenerateRandomTrack,
+                            border = BorderStroke(1.dp, SignalOrange.copy(alpha = 0.65f)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("lobby_random_track_button")
+                        ) {
+                            Icon(Icons.Default.Casino, contentDescription = null, tint = SignalOrange, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Random Track", color = SignalOrange, style = MaterialTheme.typography.labelMedium)
+                        }
+                        OutlinedButton(
+                            onClick = onOpenTrackEditor,
+                            border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.65f)),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("lobby_track_editor_button")
+                        ) {
+                            Icon(Icons.Default.Map, contentDescription = null, tint = ElectricCyan, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Track Editor", color = ElectricCyan, style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+
+                val carouselCustomTracks = remember(customTracks, activeCustom) {
+                    if (activeCustom != null && customTracks.none { it.id == activeCustom.id }) {
+                        listOf(activeCustom) + customTracks
+                    } else {
+                        customTracks
+                    }
+                }
+
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
+                    items(carouselCustomTracks, key = { "custom_${it.id}" }) { cTrack ->
+                        val previewDef = remember(cTrack) { TrackCatalog.buildCustomTrack(cTrack) }
+                        val active = activeCustom?.id == cTrack.id
+                        Surface(
+                            color = if (active) Color(previewDef.id.roadColorHex).copy(alpha = 0.7f) else PaddockSurface,
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(
+                                width = if (active) 2.dp else 1.dp,
+                                color = if (active) ElectricCyan else PaddockOutline
+                            ),
+                            modifier = Modifier
+                                .width(156.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable(enabled = isHostOrSolo) { onSelectCustomTrack(cTrack) }
+                                .testTag("custom_track_card_${cTrack.id}")
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(66.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color(previewDef.id.baseBgColorHex).copy(alpha = 0.85f))
+                                ) {
+                                    Canvas(modifier = Modifier.fillMaxSize()) {
+                                        drawTrackMiniMap(previewDef)
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = cTrack.name,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "Custom • ${previewDef.ramps.size} Jumps",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (active) ElectricCyan else TextSecondary,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+
                     items(TrackCatalog.allTracks(), key = { it.id.name }) { track ->
-                        val active = track.id == selectedTrack
+                        val active = activeCustom == null && track.id == selectedTrack
                         Surface(
                             color = if (active) Color(track.id.roadColorHex).copy(alpha = 0.7f) else PaddockSurface,
                             shape = RoundedCornerShape(16.dp),
@@ -538,5 +666,28 @@ fun LobbyScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun LobbyRuleBadge(
+    label: String,
+    color: Color,
+    onClick: () -> Unit
+) {
+    Surface(
+        color = color.copy(alpha = 0.16f),
+        shape = RoundedCornerShape(50),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.55f)),
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .clickable(onClick = onClick)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+        )
     }
 }

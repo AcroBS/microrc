@@ -4,12 +4,16 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.PreferencesRepository
+import com.example.data.TrackCatalog
 import com.example.model.ControlMode
+import com.example.model.CustomTrackData
 import com.example.model.DiscoveredLobby
 import com.example.model.LobbyStatePayload
 import com.example.model.PlayerProfile
+import com.example.model.RaceRulesSettings
 import com.example.model.RaceSnapshot
 import com.example.model.RcCarType
+import com.example.model.TrackDefinition
 import com.example.model.TrackId
 import com.example.network.RaceNavEvent
 import com.example.network.SessionRole
@@ -35,11 +39,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         initialValue = PlayerProfile(playerId = "rc_init")
     )
 
+    val rules: StateFlow<RaceRulesSettings> = prefsRepo.rulesFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = RaceRulesSettings()
+    )
+
+    val customTracks: StateFlow<List<CustomTrackData>> = prefsRepo.customTracksFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyList()
+    )
+
     val discoveredLobbies: StateFlow<List<DiscoveredLobby>> = raceManager.discovery.discoveredLobbies
     val sessionRole: StateFlow<SessionRole> = raceManager.role
     val lobbyState: StateFlow<LobbyStatePayload?> = raceManager.lobbyState
     val raceSnapshot: StateFlow<RaceSnapshot?> = raceManager.raceSnapshot
     val lastResults: StateFlow<RaceSnapshot?> = raceManager.lastResults
+    val activeTrack: StateFlow<TrackDefinition?> = raceManager.activeTrack
     val connectionError: StateFlow<String?> = raceManager.connectionError
     val navEvents: SharedFlow<RaceNavEvent> = raceManager.navEvents
 
@@ -83,16 +100,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateRaceRules(newRules: RaceRulesSettings) {
+        viewModelScope.launch {
+            prefsRepo.updateRaceRules(newRules)
+            if (sessionRole.value == SessionRole.Host || sessionRole.value == SessionRole.Solo) {
+                raceManager.updateRules(newRules)
+            }
+        }
+    }
+
+    fun saveCustomTrack(track: CustomTrackData, applyToLobby: Boolean) {
+        viewModelScope.launch {
+            prefsRepo.saveCustomTrack(track)
+            if (applyToLobby && (sessionRole.value == SessionRole.Host || sessionRole.value == SessionRole.Solo)) {
+                raceManager.selectCustomTrack(track)
+            }
+        }
+    }
+
+    fun deleteCustomTrack(trackId: String) {
+        viewModelScope.launch {
+            prefsRepo.deleteCustomTrack(trackId)
+        }
+    }
+
     fun toggleOverviewCamera() {
         _overviewCamera.value = !_overviewCamera.value
     }
 
     fun startHosting() {
-        raceManager.hostLobby(profile.value)
+        raceManager.hostLobby(profile.value, initialRules = rules.value)
     }
 
     fun startSolo() {
-        raceManager.startSoloSession(profile.value)
+        raceManager.startSoloSession(profile.value, initialRules = rules.value)
     }
 
     fun startBrowsing() {
@@ -114,6 +155,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectTrack(trackId: TrackId) = raceManager.selectTrack(trackId)
+    fun selectCustomTrack(customTrack: CustomTrackData) = raceManager.selectCustomTrack(customTrack)
+    fun generateRandomTrackForLobby() {
+        val randomTrack = TrackCatalog.generateRandomTrack(seed = System.currentTimeMillis())
+        raceManager.selectCustomTrack(randomTrack)
+    }
+
     fun setTotalLaps(laps: Int) = raceManager.setTotalLaps(laps)
     fun addBot() = raceManager.addBot()
     fun removeBot() = raceManager.removeBot()

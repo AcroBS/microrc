@@ -124,4 +124,68 @@ class RaceEngineUnitTest {
         assertEquals("Guest", decodedSnap?.snapshot?.racers?.get(1)?.name)
         assertEquals(RcCarType.DRIFT_PHANTOM.name, decodedSnap?.snapshot?.racers?.get(1)?.carType)
     }
+
+    @Test
+    fun randomTrackGenerator_createsValidTrackWithJumpsAndBuildsSpline() {
+        val custom = TrackCatalog.generateRandomTrack(seed = 123456L)
+        assertTrue(custom.controlPoints.size >= 8)
+        assertTrue(custom.ramps.isNotEmpty())
+        val built = TrackCatalog.buildCustomTrack(custom)
+        assertTrue(built.centerline.size >= 100)
+        assertTrue(built.itemSpawns.isNotEmpty())
+        assertTrue(built.boostPads.isNotEmpty())
+        assertEquals(custom.ramps.size, built.ramps.size)
+    }
+
+    @Test
+    fun hardTrackBoundary_keepsCarInsideKerbCorridor() {
+        val track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP)
+        val players = listOf(
+            LobbyPlayer("p1", "Tester", isHost = true, isBot = false, carType = RcCarType.VOLT_BUGGY.name)
+        )
+        val engine = RacePhysicsEngine(
+            track = track,
+            totalLaps = 3,
+            players = players,
+            rules = com.example.model.RaceRulesSettings(hardTrackBoundary = true)
+        )
+        var snap = engine.step(0.016f)
+        // Drive sharply outward to test hard boundary bounce clamp
+        repeat(260) {
+            engine.submitInput("p1", ControlInput(throttle = 1f, steer = 1f))
+            snap = engine.step(0.016f)
+        }
+        val r = snap.racers.first()
+        val (idx, dist) = TrackCatalog.nearestTrackPoint(track, r.x, r.y)
+        val maxAllowed = track.centerline[idx].halfWidth + 5f
+        assertTrue("Car should stay bounded inside kerb ($dist <= $maxAllowed)", dist <= maxAllowed)
+    }
+
+    @Test
+    fun jumpRamps_launchCarAirborneAndSyncJumpZ() {
+        val track = TrackCatalog.getTrack(TrackId.NEON_ROOFTOP)
+        assertTrue("Track should have default ramps", track.ramps.isNotEmpty())
+        val withRandJumps = TrackCatalog.withRandomJumps(track, enabled = true, seed = 777L)
+        assertTrue("Randomized jumps should spawn", withRandJumps.ramps.size in 2..4)
+
+        val players = listOf(
+            LobbyPlayer("p1", "Jumper", isHost = true, isBot = false, carType = RcCarType.APEX_FORMULA.name)
+        )
+        // Place a jump right ahead of starting grid so car hits it after countdown
+        val start = TrackCatalog.gridStartTransform(track, 0)
+        val aheadIdx = (track.centerline.size - 1)
+        val rampTrack = track.copy(
+            ramps = listOf(TrackCatalog.rampAt(track.centerline, aheadIdx))
+        )
+        val engine = RacePhysicsEngine(rampTrack, totalLaps = 3, players = players)
+        var maxJumpZ = 0f
+        var snap = engine.step(0.016f)
+        repeat(280) {
+            engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+            snap = engine.step(0.016f)
+            val z = snap.racers.first().jumpZ
+            if (z > maxJumpZ) maxJumpZ = z
+        }
+        assertTrue("Car should become airborne on ramp ($maxJumpZ > 0.1f)", maxJumpZ > 0.1f)
+    }
 }

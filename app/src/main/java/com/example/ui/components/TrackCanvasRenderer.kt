@@ -30,7 +30,8 @@ fun DrawScope.drawTrackWorld(
     itemBoxes: List<ItemBoxState>,
     hazards: List<TrackHazard>,
     racers: List<RacerState>,
-    animTimeSec: Float
+    animTimeSec: Float,
+    hardBoundary: Boolean = false
 ) {
     // 1. Background floor
     drawRect(
@@ -55,6 +56,20 @@ fun DrawScope.drawTrackWorld(
 
     val avgHalfW = pts[0].halfWidth
     val roadWidth = avgHalfW * 2f
+
+    // Optional solid guardrail wall when Hard Track Boundary is active
+    if (hardBoundary) {
+        drawPath(
+            path = roadPath,
+            color = Color(0xFF0E131B),
+            style = Stroke(width = roadWidth + 36f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        drawPath(
+            path = roadPath,
+            color = Color(0xFFFF6D00),
+            style = Stroke(width = roadWidth + 30f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+    }
 
     // Outer kerb / shoulder
     drawPath(
@@ -138,6 +153,66 @@ fun DrawScope.drawTrackWorld(
                     path = chev,
                     color = Color(0xFF00E5FF).copy(alpha = 0.55f + 0.45f * pulse),
                     style = Stroke(width = 5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                )
+            }
+        }
+    }
+
+    // 5b. Jump Ramps (top-down 2.5D sloped deck + launch shadow)
+    for (ramp in track.ramps) {
+        val deg = ramp.angleRad * 180f / PI.toFloat()
+        withTransform({
+            translate(ramp.x, ramp.y)
+            rotate(deg, Offset.Zero)
+        }) {
+            // Drop shadow under raised takeoff lip
+            drawRoundRect(
+                color = Color.Black.copy(alpha = 0.48f),
+                topLeft = Offset(-28f, -24f),
+                size = Size(82f, 54f),
+                cornerRadius = CornerRadius(8f, 8f)
+            )
+            // Ramp base deck (dark-to-light slope toward launch edge)
+            drawRoundRect(
+                color = Color(0xFF4E342E),
+                topLeft = Offset(-42f, -26f),
+                size = Size(44f, 52f),
+                cornerRadius = CornerRadius(6f, 6f)
+            )
+            drawRoundRect(
+                color = Color(0xFF8D6E63),
+                topLeft = Offset(-2f, -26f),
+                size = Size(42f, 52f),
+                cornerRadius = CornerRadius(6f, 6f)
+            )
+            // Bright amber takeoff lip & rails
+            drawRect(
+                color = Color(0xFFFFAB00),
+                topLeft = Offset(30f, -27f),
+                size = Size(12f, 54f)
+            )
+            drawRect(
+                color = Color(0xFFFFEA00),
+                topLeft = Offset(-42f, -28f),
+                size = Size(84f, 5f)
+            )
+            drawRect(
+                color = Color(0xFFFFEA00),
+                topLeft = Offset(-42f, 23f),
+                size = Size(84f, 5f)
+            )
+            // Launch chevrons
+            for (c in -1..1) {
+                val cx = c * 18f - 4f
+                val chev = Path().apply {
+                    moveTo(cx - 7f, -13f)
+                    lineTo(cx + 8f, 0f)
+                    lineTo(cx - 7f, 13f)
+                }
+                drawPath(
+                    path = chev,
+                    color = Color(0xFFFFEA00),
+                    style = Stroke(width = 4.5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
                 )
             }
         }
@@ -237,8 +312,9 @@ fun DrawScope.drawTrackWorld(
         }
     }
 
-    // 9. Draw all RC cars
-    for (r in racers) {
+    // 9. Draw all RC cars (grounded first, airborne cars rendered on top)
+    val orderedRacers = racers.sortedBy { it.jumpZ }
+    for (r in orderedRacers) {
         val carType = runCatching { RcCarType.valueOf(r.carType) }.getOrDefault(RcCarType.VOLT_BUGGY)
         drawRcCar(
             x = r.x,
@@ -253,6 +329,7 @@ fun DrawScope.drawTrackWorld(
             isStunned = r.stunnedMs > 0L,
             hasOverdrive = r.overdriveMs > 0L,
             spinVisualOffset = r.spinVisualOffset,
+            jumpZ = r.jumpZ,
             scale = 1f,
             animTimeSec = animTimeSec
         )

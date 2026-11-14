@@ -7,6 +7,7 @@ import com.example.data.TrackCatalog
 import com.example.engine.RacePhysicsEngine
 import com.example.model.ChatMessage
 import com.example.model.ControlInput
+import com.example.model.CustomTrackData
 import com.example.model.DiscoveredLobby
 import com.example.model.LobbyPlayer
 import com.example.model.LobbyStatePayload
@@ -14,9 +15,11 @@ import com.example.model.NetworkMessage
 import com.example.model.PacketType
 import com.example.model.PlayerProfile
 import com.example.model.RacePhase
+import com.example.model.RaceRulesSettings
 import com.example.model.RaceSnapshot
 import com.example.model.RcCarType
 import com.example.model.RcColorPresets
+import com.example.model.TrackDefinition
 import com.example.model.TrackId
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -91,6 +94,9 @@ class WifiP2pRaceManager(
     private val _lastResults = MutableStateFlow<RaceSnapshot?>(null)
     val lastResults: StateFlow<RaceSnapshot?> = _lastResults.asStateFlow()
 
+    private val _activeTrack = MutableStateFlow<TrackDefinition?>(null)
+    val activeTrack: StateFlow<TrackDefinition?> = _activeTrack.asStateFlow()
+
     private val _connectionError = MutableStateFlow<String?>(null)
     val connectionError: StateFlow<String?> = _connectionError.asStateFlow()
 
@@ -144,6 +150,8 @@ class WifiP2pRaceManager(
     private val chatLog = mutableListOf<ChatMessage>()
     private val playersList = mutableListOf<LobbyPlayer>()
     private var currentTrackId: TrackId = TrackId.LIVING_ROOM_GP
+    private var currentCustomTrack: CustomTrackData? = null
+    private var currentRules: RaceRulesSettings = RaceRulesSettings()
     private var currentTotalLaps: Int = 3
     private var inRace: Boolean = false
     private var tcpPort: Int = DEFAULT_TCP_PORT
@@ -181,9 +189,18 @@ class WifiP2pRaceManager(
         }
     }
 
-    fun startSoloSession(profile: PlayerProfile) {
+    fun startSoloSession(
+        profile: PlayerProfile,
+        initialRules: RaceRulesSettings = RaceRulesSettings(),
+        initialCustomTrack: CustomTrackData? = null
+    ) {
         leaveSession()
         localPlayerId = profile.playerId
+        currentRules = initialRules
+        currentCustomTrack = initialCustomTrack
+        if (initialCustomTrack != null) {
+            currentTrackId = runCatching { TrackId.valueOf(initialCustomTrack.themeId) }.getOrDefault(TrackId.NEON_ROOFTOP)
+        }
         _role.value = SessionRole.Solo
         inRace = false
         chatLog.clear()
@@ -211,9 +228,18 @@ class WifiP2pRaceManager(
         _navEvents.tryEmit(RaceNavEvent.EnterLobby)
     }
 
-    fun hostLobby(profile: PlayerProfile) {
+    fun hostLobby(
+        profile: PlayerProfile,
+        initialRules: RaceRulesSettings = RaceRulesSettings(),
+        initialCustomTrack: CustomTrackData? = null
+    ) {
         leaveSession()
         localPlayerId = profile.playerId
+        currentRules = initialRules
+        currentCustomTrack = initialCustomTrack
+        if (initialCustomTrack != null) {
+            currentTrackId = runCatching { TrackId.valueOf(initialCustomTrack.themeId) }.getOrDefault(TrackId.NEON_ROOFTOP)
+        }
         _role.value = SessionRole.Host
         inRace = false
         chatLog.clear()
@@ -374,6 +400,10 @@ class WifiP2pRaceManager(
                                 PacketType.LOBBY_STATE -> {
                                     val payload = msg.lobbyState ?: continue
                                     _lobbyState.value = payload
+                                    currentRules = payload.rules
+                                    _activeTrack.value = payload.activeCustomTrack?.let {
+                                        TrackCatalog.buildCustomTrack(it)
+                                    } ?: TrackCatalog.getTrack(payload.trackId)
                                     if (payload.udpPort > 0) {
                                         clientHostUdpPort = payload.udpPort
                                         sendClientUdpHello()
@@ -393,7 +423,21 @@ class WifiP2pRaceManager(
                                 PacketType.RACE_START -> {
                                     lastReceivedUdpStateSeq = -1L
                                     clientFinishEmitted.set(false)
-                                    _raceSnapshot.value = msg.raceSnapshot
+                                    msg.rules?.let { r ->
+                                        currentRules = r
+                                        _lobbyState.value = _lobbyState.value?.copy(rules = r)
+                                    }
+                                    val startSnap = msg.raceSnapshot
+                                    val baseTrack = msg.customTrack?.let {
+                                        TrackCatalog.buildCustomTrack(it)
+                                    } ?: TrackCatalog.getTrack(startSnap?.trackId ?: TrackId.LIVING_ROOM_GP.name)
+                                    val syncedTrack = if (msg.ramps != null) {
+                                        baseTrack.copy(ramps = msg.ramps)
+                                    } else {
+                                        baseTrack
+                                    }
+                                    _activeTrack.value = syncedTrack
+                                    _raceSnapshot.value = startSnap
                                     sendClientUdpHello()
                                     startClientUdpInputHeartbeat()
                                     _navEvents.tryEmit(RaceNavEvent.StartRace)
@@ -447,7 +491,8 @@ class WifiP2pRaceManager(
                     val decoded = RaceTelemetryCodec.decodeSnapshot(
                         text = msg,
                         roster = roster,
-                        previousSnapshot = _raceSnapshot.value
+                        previousSnapshot = _raceSnapshot.value,
+                        activeTrack = _activeTrack.value
                     ) ?: continue
 
                     if (decoded.seq > lastReceivedUdpStateSeq) {
@@ -699,7 +744,30 @@ class WifiP2pRaceManager(
     fun selectTrack(trackId: TrackId) {
         if (_role.value != SessionRole.Host && _role.value != SessionRole.Solo) return
         currentTrackId = trackId
+        currentCustomTrack = null
+        _activeTrack.value = TrackCatalog.getTrack(trackId)
         addSystemChat("Track set to ${trackId.displayName}")
+        if (_role.value == SessionRole.Host) broadcastLobbyState() else publishLocalLobbyState()
+    }
+
+    fun selectCustomTrack(customTrack: CustomTrackData) {
+        if (_role.value != SessionRole.Host && _role.value != SessionRole.Solo) return
+        currentCustomTrack = customTrack
+        currentTrackId = runCatching { TrackId.valueOf(customTrack.themeId) }.getOrDefault(TrackId.NEON_ROOFTOP)
+        _activeTrack.value = TrackCatalog.buildCustomTrack(customTrack)
+        addSystemChat("Custom track set: ${customTrack.name}")
+        if (_role.value == SessionRole.Host) broadcastLobbyState() else publishLocalLobbyState()
+    }
+
+    fun updateRules(rules: RaceRulesSettings) {
+        if (_role.value != SessionRole.Host && _role.value != SessionRole.Solo) return
+        currentRules = rules
+        val summary = buildList {
+            if (rules.autoAccelerate) add("Auto-Gas")
+            if (rules.hardTrackBoundary) add("Bounce Walls")
+            if (rules.randomJumpsEnabled) add("Jumps")
+        }.joinToString(" • ").ifEmpty { "Standard Rules" }
+        addSystemChat("Match settings updated: $summary")
         if (_role.value == SessionRole.Host) broadcastLobbyState() else publishLocalLobbyState()
     }
 
@@ -778,8 +846,24 @@ class WifiP2pRaceManager(
         inRace = true
         pointsAwardedForCurrentRace = false
         hostStateSeq.set(0L)
-        val track = TrackCatalog.getTrack(currentTrackId)
-        val engine = RacePhysicsEngine(track, currentTotalLaps, snapshotPlayers)
+        val customData = currentCustomTrack
+        val baseTrack = if (customData != null) {
+            TrackCatalog.buildCustomTrack(customData)
+        } else {
+            TrackCatalog.getTrack(currentTrackId)
+        }
+        val track = if (customData == null) {
+            TrackCatalog.withRandomJumps(baseTrack, enabled = currentRules.randomJumpsEnabled)
+        } else if (!currentRules.randomJumpsEnabled) {
+            baseTrack.copy(ramps = emptyList())
+        } else if (baseTrack.ramps.isEmpty()) {
+            TrackCatalog.withRandomJumps(baseTrack, enabled = true)
+        } else {
+            baseTrack
+        }
+        _activeTrack.value = track
+
+        val engine = RacePhysicsEngine(track, currentTotalLaps, snapshotPlayers, currentRules)
         physicsEngine = engine
 
         val initialSnap = engine.step(0.016f)
@@ -791,7 +875,10 @@ class WifiP2pRaceManager(
                 NetworkMessage(
                     type = PacketType.RACE_START,
                     senderId = localPlayerId,
-                    raceSnapshot = initialSnap
+                    raceSnapshot = initialSnap,
+                    rules = currentRules,
+                    customTrack = customData,
+                    ramps = track.ramps
                 )
             )
         }
@@ -1019,6 +1106,8 @@ class WifiP2pRaceManager(
         _role.value = SessionRole.None
         _lobbyState.value = null
         _raceSnapshot.value = null
+        _activeTrack.value = null
+        currentCustomTrack = null
     }
 
     private fun addSystemChat(text: String) {
@@ -1065,7 +1154,9 @@ class WifiP2pRaceManager(
             totalLaps = currentTotalLaps,
             players = playersCopy,
             chatHistory = chatCopy,
-            inRace = inRace
+            inRace = inRace,
+            rules = currentRules,
+            activeCustomTrack = currentCustomTrack
         )
     }
 

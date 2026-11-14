@@ -35,10 +35,12 @@ import androidx.compose.material.icons.automirrored.filled.DirectionsRun
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -88,6 +90,8 @@ fun HomeScreen(
     onJoinRace: () -> Unit,
     onSoloRace: () -> Unit,
     onOpenGarage: () -> Unit,
+    onOpenTrackEditor: () -> Unit,
+    onOpenSettings: () -> Unit,
     onUpdateDriverName: (String) -> Unit
 ) {
     var showNameDialog by remember { mutableStateOf(false) }
@@ -408,6 +412,40 @@ fun HomeScreen(
                     Icon(Icons.Default.Speed, contentDescription = null, tint = AcidLime)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Solo Practice vs AI Bots", color = AcidLime, style = MaterialTheme.typography.labelLarge)
+                }
+
+                // Track Studio + Match Settings Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onOpenTrackEditor,
+                        border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.55f)),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp)
+                            .testTag("open_track_editor_button")
+                    ) {
+                        Icon(Icons.Default.Map, contentDescription = null, tint = ElectricCyan, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Track Studio", color = ElectricCyan, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                    }
+
+                    OutlinedButton(
+                        onClick = onOpenSettings,
+                        border = BorderStroke(1.dp, SignalOrange.copy(alpha = 0.55f)),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(52.dp)
+                            .testTag("open_settings_button")
+                    ) {
+                        Icon(Icons.Default.Tune, contentDescription = null, tint = SignalOrange, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Match Rules", color = SignalOrange, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                    }
                 }
 
                 // Offline Wi-Fi / Hotspot Tip Card

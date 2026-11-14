@@ -93,6 +93,14 @@ data class BoostPad(
     val radius: Float = 44f
 )
 
+data class TrackRamp(
+    val x: Float,
+    val y: Float,
+    val angleRad: Float,
+    val radius: Float = 48f,
+    val impulse: Float = 1.0f
+)
+
 data class ItemBoxSpawn(
     val id: Int,
     val x: Float,
@@ -118,6 +126,18 @@ enum class PropShape {
     MUD_POOL
 }
 
+data class CustomTrackData(
+    val id: String,
+    val name: String,
+    val themeId: String = TrackId.NEON_ROOFTOP.name,
+    val roadHalfWidth: Float = 112f,
+    val controlPoints: List<TrackPoint>,
+    val boostPads: List<BoostPad> = emptyList(),
+    val itemSpawns: List<ItemBoxSpawn> = emptyList(),
+    val ramps: List<TrackRamp> = emptyList(),
+    val props: List<TrackProp> = emptyList()
+)
+
 data class TrackDefinition(
     val id: TrackId,
     val worldWidth: Float,
@@ -126,5 +146,10 @@ data class TrackDefinition(
     val boostPads: List<BoostPad>,
     val itemSpawns: List<ItemBoxSpawn>,
     val props: List<TrackProp>,
-    val defaultLaps: Int = 3
-)
+    val ramps: List<TrackRamp> = emptyList(),
+    val defaultLaps: Int = 3,
+    val customId: String? = null,
+    val customName: String? = null
+) {
+    val displayTitle: String get() = customName ?: id.displayName
+}

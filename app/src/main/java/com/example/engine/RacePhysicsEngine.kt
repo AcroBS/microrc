@@ -8,6 +8,7 @@ import com.example.model.PowerUpType
 import com.example.model.PropShape
 import com.example.model.RacePhase
 import com.example.model.RaceSnapshot
+import com.example.model.RaceRulesSettings
 import com.example.model.RacerState
 import com.example.model.RcCarType
 import com.example.model.TrackDefinition
@@ -26,7 +27,8 @@ import kotlin.random.Random
 class RacePhysicsEngine(
     private val track: TrackDefinition,
     private val totalLaps: Int,
-    players: List<LobbyPlayer>
+    players: List<LobbyPlayer>,
+    private val rules: RaceRulesSettings = RaceRulesSettings()
 ) {
     private data class MutableRacer(
         val playerId: String,
@@ -56,6 +58,9 @@ class RacePhysicsEngine(
         var stunnedMs: Long = 0L,
         var overdriveMs: Long = 0L,
         var spinVisualOffset: Float = 0f,
+        var jumpZ: Float = 0f,
+        var vz: Float = 0f,
+        var jumpCooldownMs: Long = 0L,
         var powerUpHits: Int = 0,
         var botLaneOffset: Float = 0f,
         var botPowerUpDelayMs: Long = 0L
@@ -182,6 +187,7 @@ class RacePhysicsEngine(
             handleWorldAndPropCollisions(racer)
             if (phase == RacePhase.RACING && !racer.finished) {
                 handleBoostPads(racer)
+                handleRamps(racer)
                 handleItemPickups(racer)
                 handleHazards(racer)
                 updateLapProgress(racer)
@@ -225,6 +231,15 @@ class RacePhysicsEngine(
             racer.spinVisualOffset = 0f
         }
         if (racer.overdriveMs > 0L) racer.overdriveMs = (racer.overdriveMs - dtMs).coerceAtLeast(0L)
+        if (racer.jumpCooldownMs > 0L) racer.jumpCooldownMs = (racer.jumpCooldownMs - dtMs).coerceAtLeast(0L)
+        if (racer.jumpZ > 0f || racer.vz > 0f) {
+            racer.vz -= 6.5f * dt
+            racer.jumpZ += racer.vz * dt
+            if (racer.jumpZ <= 0f) {
+                racer.jumpZ = 0f
+                racer.vz = 0f
+            }
+        }
         if (racer.botPowerUpDelayMs > 0L) {
             racer.botPowerUpDelayMs = (racer.botPowerUpDelayMs - dtMs).coerceAtLeast(0L)
         }
@@ -233,7 +248,8 @@ class RacePhysicsEngine(
     private fun integrateCarPhysics(racer: MutableRacer, input: ControlInput, dt: Float) {
         val (closestIdx, distToCenter) = TrackCatalog.nearestTrackPoint(track, racer.x, racer.y)
         val trackPt = track.centerline[closestIdx]
-        val isOffRoad = distToCenter > trackPt.halfWidth
+        val isAirborne = racer.jumpZ > 0.08f
+        val isOffRoad = !isAirborne && distToCenter > trackPt.halfWidth
 
         val hasBoost = racer.boostMs > 0L
         val hasOverdrive = racer.overdriveMs > 0L
@@ -268,35 +284,40 @@ class RacePhysicsEngine(
         val steer = if (isStunned) 0f else input.steer.coerceIn(-1f, 1f)
         racer.steerVisual = steer
 
-        // Forward acceleration / braking
-        if (throttle > 0.05f) {
-            forwardVel += throttle * accel * dt
-        } else if (throttle < -0.05f) {
-            val brakeMult = if (forwardVel > 0f) 1.55f else 0.72f
-            forwardVel += throttle * accel * brakeMult * dt
-        } else {
-            // Natural rolling drag
-            val drag = 2.1f
-            forwardVel *= max(0f, 1f - drag * dt)
+        if (!isAirborne) {
+            // Forward acceleration / braking
+            if (throttle > 0.05f) {
+                forwardVel += throttle * accel * dt
+            } else if (throttle < -0.05f) {
+                val brakeMult = if (forwardVel > 0f) 1.55f else 0.72f
+                forwardVel += throttle * accel * brakeMult * dt
+            } else {
+                // Natural rolling drag
+                val drag = 2.1f
+                forwardVel *= max(0f, 1f - drag * dt)
+            }
+
+            // Clamp forward speed
+            forwardVel = forwardVel.coerceIn(-maxSpeed * 0.42f, maxSpeed)
         }
 
-        // Clamp forward speed
-        forwardVel = forwardVel.coerceIn(-maxSpeed * 0.42f, maxSpeed)
-
-        // Steering scales smoothly with speed
+        // Steering scales smoothly with speed (minimal mid-air authority)
         val speedNorm = (abs(forwardVel) / 220f).coerceIn(0.18f, 1.0f)
         val reverseFlip = if (forwardVel < -15f) -1f else 1f
         val gripTurnBoost = if (hasOverdrive) 1.18f else 1.0f
+        val airSteerFactor = if (isAirborne) 0.25f else 1.0f
         racer.angleRad = normalizeAngle(
-            racer.angleRad + steer * racer.carType.turnRateRad * gripTurnBoost * speedNorm * reverseFlip * dt
+            racer.angleRad + steer * racer.carType.turnRateRad * gripTurnBoost * airSteerFactor * speedNorm * reverseFlip * dt
         )
 
-        // Lateral grip cancels sideways drift
-        val grip = racer.carType.lateralGrip *
-            track.id.surfaceGripMultiplier *
-            (if (hasOverdrive) 1.5f else 1.0f) *
-            (if (isOffRoad) 0.85f else 1.0f)
-        lateralVel *= max(0f, 1f - grip * dt)
+        // Lateral grip cancels sideways drift while grounded
+        if (!isAirborne) {
+            val grip = racer.carType.lateralGrip *
+                track.id.surfaceGripMultiplier *
+                (if (hasOverdrive) 1.5f else 1.0f) *
+                (if (isOffRoad) 0.85f else 1.0f)
+            lateralVel *= max(0f, 1f - grip * dt)
+        }
 
         // Reconstruct world velocity using updated heading
         val nCos = cos(racer.angleRad)
@@ -310,8 +331,13 @@ class RacePhysicsEngine(
         racer.x += racer.vx * dt
         racer.y += racer.vy * dt
 
-        // Soft outer corridor wall so cars can run slightly off-road on kerbs/grass but never escape track zone
-        val maxCorridor = trackPt.halfWidth + 130f
+        // Track boundary: either Hard Track Boundary (cars bounce cleanly off kerbs)
+        // or soft wide outer corridor allowing off-road grass/sand shortcuts
+        val maxCorridor = if (rules.hardTrackBoundary) {
+            (trackPt.halfWidth - racer.carType.radiusPx * 0.45f).coerceAtLeast(42f)
+        } else {
+            trackPt.halfWidth + 130f
+        }
         if (distToCenter > maxCorridor) {
             val dx = racer.x - trackPt.x
             val dy = racer.y - trackPt.y
@@ -320,13 +346,13 @@ class RacePhysicsEngine(
             val ny = dy / d
             racer.x = trackPt.x + nx * maxCorridor
             racer.y = trackPt.y + ny * maxCorridor
-            // Reflect outward velocity component gently
+            // Reflect outward velocity component
             val vn = racer.vx * nx + racer.vy * ny
             if (vn > 0f) {
-                racer.vx -= 1.35f * vn * nx
-                racer.vy -= 1.35f * vn * ny
-                racer.vx *= 0.85f
-                racer.vy *= 0.85f
+                val restitution = if (rules.hardTrackBoundary) 1.65f else 1.35f
+                val retention = if (rules.hardTrackBoundary) 0.84f else 0.85f
+                racer.vx = (racer.vx - restitution * vn * nx) * retention
+                racer.vy = (racer.vy - restitution * vn * ny) * retention
             }
         }
     }
@@ -348,7 +374,7 @@ class RacePhysicsEngine(
             val dx = racer.x - prop.x
             val dy = racer.y - prop.y
             val dist = hypot(dx, dy)
-            if (prop.isSolidObstacle) {
+            if (prop.isSolidObstacle && racer.jumpZ < 0.25f) {
                 val minDist = prop.radius + racer.carType.radiusPx
                 if (dist < minDist && dist > 0.01f) {
                     val nx = dx / dist
@@ -361,7 +387,7 @@ class RacePhysicsEngine(
                         racer.vy -= 1.5f * vn * ny
                     }
                 }
-            } else if (prop.shape == PropShape.MUD_POOL && dist < prop.radius) {
+            } else if (prop.shape == PropShape.MUD_POOL && dist < prop.radius && racer.jumpZ <= 0.05f) {
                 if (racer.shieldMs == 0L && racer.overdriveMs == 0L) {
                     racer.vx *= 0.94f
                     racer.vy *= 0.94f
@@ -371,6 +397,7 @@ class RacePhysicsEngine(
     }
 
     private fun handleBoostPads(racer: MutableRacer) {
+        if (racer.jumpZ > 0.1f) return
         for (pad in track.boostPads) {
             if (TrackCatalog.distance(racer.x, racer.y, pad.x, pad.y) <= pad.radius + 10f) {
                 if (racer.boostMs < 900L) {
@@ -379,6 +406,22 @@ class RacePhysicsEngine(
                     racer.vx = cos(racer.angleRad) * boostSpeed
                     racer.vy = sin(racer.angleRad) * boostSpeed
                 }
+            }
+        }
+    }
+
+    private fun handleRamps(racer: MutableRacer) {
+        if (racer.jumpZ > 0.01f || racer.jumpCooldownMs > 0L) return
+        val speed = hypot(racer.vx, racer.vy)
+        if (speed < 130f) return
+        for (ramp in track.ramps) {
+            if (TrackCatalog.distance(racer.x, racer.y, ramp.x, ramp.y) <= ramp.radius + 10f) {
+                racer.vz = 3.15f * ramp.impulse
+                racer.jumpZ = 0.02f
+                racer.jumpCooldownMs = 680L
+                racer.vx *= 1.12f
+                racer.vy *= 1.12f
+                break
             }
         }
     }
@@ -466,6 +509,7 @@ class RacePhysicsEngine(
     }
 
     private fun handleHazards(racer: MutableRacer) {
+        if (racer.jumpZ > 0.12f) return
         val it = hazards.iterator()
         while (it.hasNext()) {
             val h = it.next()
@@ -496,6 +540,7 @@ class RacePhysicsEngine(
             for (j in i + 1 until racers.size) {
                 val a = racers[i]
                 val b = racers[j]
+                if (abs(a.jumpZ - b.jumpZ) > 0.28f) continue
                 val dx = b.x - a.x
                 val dy = b.y - a.y
                 val dist = hypot(dx, dy)
@@ -651,6 +696,7 @@ class RacePhysicsEngine(
                     vy = r.vy,
                     speed = hypot(r.vx, r.vy),
                     steerVisual = r.steerVisual,
+                    jumpZ = r.jumpZ,
                     lap = r.lap,
                     checkpointIndex = r.checkpointIndex,
                     sectorMask = r.sectorMask,

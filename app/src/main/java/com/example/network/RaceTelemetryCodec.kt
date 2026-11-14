@@ -8,6 +8,7 @@ import com.example.model.PowerUpType
 import com.example.model.RacePhase
 import com.example.model.RaceSnapshot
 import com.example.model.RacerState
+import com.example.model.TrackDefinition
 import com.example.model.TrackHazard
 import com.example.model.TrackId
 import java.util.Locale
@@ -53,7 +54,7 @@ object RaceTelemetryCodec {
     }
 
     fun encodeSnapshot(seq: Long, snap: RaceSnapshot): ByteArray {
-        val sb = StringBuilder(320)
+        val sb = StringBuilder(340)
         val phaseOrd = runCatching { RacePhase.valueOf(snap.phase).ordinal }.getOrDefault(0)
         val trackOrd = runCatching { TrackId.valueOf(snap.trackId).ordinal }.getOrDefault(0)
         val banner = (snap.eventBanner ?: "").replace("|", "").replace("\n", "")
@@ -93,7 +94,8 @@ object RaceTelemetryCodec {
                 .append(r.finishTimeMs ?: -1L).append(',')
                 .append(r.bestLapMs ?: -1L).append(',')
                 .append(r.currentLapStartMs).append(',')
-                .append(r.lapTimesMs.joinToString("-"))
+                .append(r.lapTimesMs.joinToString("-")).append(',')
+                .append(String.format(Locale.US, "%.2f", r.jumpZ))
         }
         sb.append('|')
 
@@ -119,7 +121,8 @@ object RaceTelemetryCodec {
     fun decodeSnapshot(
         text: String,
         roster: List<LobbyPlayer>,
-        previousSnapshot: RaceSnapshot?
+        previousSnapshot: RaceSnapshot?,
+        activeTrack: TrackDefinition? = null
     ): DecodedSnapshot? {
         if (!text.startsWith("S|")) return null
         val parts = text.split('|')
@@ -158,6 +161,7 @@ object RaceTelemetryCodec {
                 } else {
                     f[20].split('-').mapNotNull { it.toLongOrNull() }
                 }
+                val jumpZ = f.getOrNull(21)?.toFloatOrNull() ?: 0f
 
                 val vx = f[4].toFloatOrNull() ?: 0f
                 val vy = f[5].toFloatOrNull() ?: 0f
@@ -175,6 +179,7 @@ object RaceTelemetryCodec {
                     vy = vy,
                     speed = kotlin.math.hypot(vx, vy),
                     steerVisual = f[6].toFloatOrNull() ?: 0f,
+                    jumpZ = jumpZ,
                     lap = f[7].toIntOrNull() ?: 1,
                     rank = f[8].toIntOrNull() ?: 1,
                     heldPowerUp = heldName,
@@ -193,7 +198,7 @@ object RaceTelemetryCodec {
             }
         }
 
-        val trackDef = TrackCatalog.getTrack(trackId)
+        val trackDef = activeTrack ?: TrackCatalog.getTrack(trackId)
         val mask = parts[9]
         val boxes = trackDef.itemSpawns.mapIndexed { idx, spawn ->
             ItemBoxState(
