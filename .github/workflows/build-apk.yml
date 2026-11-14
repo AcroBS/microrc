@@ -5,13 +5,12 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
   build:
     name: Build & Test Debug APK
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -68,15 +67,50 @@ jobs:
       - name: Build installable debug APK
         run: |
           gradle assembleDebug --no-daemon
-          cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/MicroRC-debug.apk
+          cp app/build/outputs/apk/debug/app-debug.apk MicroRC.apk
 
       - name: Run unit and Robolectric tests
         run: gradle testDebugUnitTest --no-daemon
 
-      - name: Upload Debug APK artifact
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MicroRC-debug-apk-${{ github.run_number }}
-          path: app/build/outputs/apk/debug/MicroRC-debug.apk
+          name: MicroRC-apk
+          path: MicroRC.apk
           if-no-files-found: error
           retention-days: 30
+
+  release:
+    name: Publish GitHub Release APK
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download built APK
+        uses: actions/download-artifact@v4
+        with:
+          name: MicroRC-apk
+
+      - name: Create GitHub Release with APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="v1.0.${GITHUB_RUN_NUMBER}"
+          fi
+          NOTES="Automated MicroRC APK build from commit ${GITHUB_SHA::7} (${GITHUB_REF_NAME}). Download and install MicroRC.apk on Android 7.0+."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" MicroRC.apk --clobber
+          else
+            gh release create "$TAG" MicroRC.apk \
+              --title "MicroRC ${TAG}" \
+              --notes "$NOTES" \
+              --target "$GITHUB_SHA" \
+              --latest
+          fi
