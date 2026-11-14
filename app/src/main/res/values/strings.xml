@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">MicroRC</string>
+    <string name="tagline">LOCAL WI-FI RC CHAMPIONSHIP</string>
+    <string name="host_race">Host Race</string>
+    <string name="join_race">Join Race</string>
+    <string name="solo_practice">Solo vs Bots</string>
+    <string name="garage_title">RC Garage</string>
+    <string name="lobby_title">Race Paddock</string>
+    <string name="results_title">Checkered Flag</string>
+</resources>
