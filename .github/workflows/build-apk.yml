@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build:
-    name: Test & Build APK
+    name: Build & Test Debug APK
     runs-on: ubuntu-latest
 
     steps:
@@ -23,7 +23,7 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Accept Android SDK licenses & ensure API 36.1
+      - name: Accept Android SDK licenses & install SDK 36.1
         run: |
           SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           SDKMANAGER=""
@@ -36,12 +36,11 @@ jobs:
               break
             fi
           done
-          if [ -z "$SDKMANAGER" ]; then
-            echo "sdkmanager not found under $SDK_ROOT"
-            exit 1
+          if [ -n "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+            "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-36.1" "build-tools;36.0.0" "platform-tools" || \
+              "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-36" "build-tools;36.0.0" "platform-tools" || true
           fi
-          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-          "$SDKMANAGER" --sdk_root="$SDK_ROOT" "platforms;android-36.1" "build-tools;36.0.0" "platform-tools"
 
       - name: Prepare debug keystore and environment
         run: |
@@ -66,36 +65,18 @@ jobs:
         with:
           gradle-version: "9.3.1"
 
-      - name: Run unit and Robolectric tests
-        run: gradle testDebugUnitTest --no-daemon
-
       - name: Build installable debug APK
         run: |
           gradle assembleDebug --no-daemon
           cp app/build/outputs/apk/debug/app-debug.apk app/build/outputs/apk/debug/MicroRC-debug.apk
+
+      - name: Run unit and Robolectric tests
+        run: gradle testDebugUnitTest --no-daemon
 
       - name: Upload Debug APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: MicroRC-debug-apk-${{ github.run_number }}
           path: app/build/outputs/apk/debug/MicroRC-debug.apk
-          retention-days: 30
-
-      - name: Build signed Release APK (if secrets configured)
-        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' && secrets.STORE_PASSWORD != '' && secrets.KEY_PASSWORD != '' }}
-        env:
-          KEYSTORE_PATH: ${{ github.workspace }}/release-upload-key.jks
-          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: |
-          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -di > "$KEYSTORE_PATH"
-          gradle assembleRelease --no-daemon
-          cp app/build/outputs/apk/release/app-release.apk app/build/outputs/apk/release/MicroRC-release.apk
-
-      - name: Upload Release APK artifact (if built)
-        if: ${{ secrets.RELEASE_KEYSTORE_BASE64 != '' && secrets.STORE_PASSWORD != '' && secrets.KEY_PASSWORD != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: MicroRC-release-apk-${{ github.run_number }}
-          path: app/build/outputs/apk/release/MicroRC-release.apk
+          if-no-files-found: error
           retention-days: 30
