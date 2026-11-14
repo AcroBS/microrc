@@ -106,6 +106,7 @@ data class LobbyStatePayload(
     val lobbyName: String,
     val hostIp: String,
     val tcpPort: Int,
+    val udpPort: Int = 0,
     val trackId: String,
     val totalLaps: Int,
     val players: List<LobbyPlayer>,

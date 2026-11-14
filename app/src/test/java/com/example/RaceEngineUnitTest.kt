@@ -91,4 +91,37 @@ class RaceEngineUnitTest {
         assertEquals("192.168.43.1", decoded?.lobbyState?.hostIp)
         assertEquals("Ready to drift!", decoded?.lobbyState?.chatHistory?.firstOrNull()?.text)
     }
+
+    @Test
+    fun telemetryCodec_roundTripInputAndSnapshot() {
+        val encodedInput = com.example.network.RaceTelemetryCodec.encodeInput(
+            playerId = "rc_player2",
+            seq = 42L,
+            input = ControlInput(throttle = 0.95f, steer = -0.375f, usePowerUp = true)
+        )
+        val decodedInput = com.example.network.RaceTelemetryCodec.decodeInput(String(encodedInput, Charsets.UTF_8))
+        assertNotNull(decodedInput)
+        assertEquals("rc_player2", decodedInput?.playerId)
+        assertEquals(42L, decodedInput?.seq)
+        assertTrue(decodedInput?.input?.usePowerUp == true)
+
+        val track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP)
+        val roster = listOf(
+            LobbyPlayer("p1", "Host", isHost = true, carType = RcCarType.VOLT_BUGGY.name),
+            LobbyPlayer("p2", "Guest", isHost = false, carType = RcCarType.DRIFT_PHANTOM.name)
+        )
+        val engine = RacePhysicsEngine(track, totalLaps = 3, players = roster)
+        val snap = engine.step(0.016f)
+        val encodedSnap = com.example.network.RaceTelemetryCodec.encodeSnapshot(seq = 12L, snap = snap)
+        val decodedSnap = com.example.network.RaceTelemetryCodec.decodeSnapshot(
+            text = String(encodedSnap, Charsets.UTF_8),
+            roster = roster,
+            previousSnapshot = null
+        )
+        assertNotNull(decodedSnap)
+        assertEquals(12L, decodedSnap?.seq)
+        assertEquals(2, decodedSnap?.snapshot?.racers?.size)
+        assertEquals("Guest", decodedSnap?.snapshot?.racers?.get(1)?.name)
+        assertEquals(RcCarType.DRIFT_PHANTOM.name, decodedSnap?.snapshot?.racers?.get(1)?.carType)
+    }
 }

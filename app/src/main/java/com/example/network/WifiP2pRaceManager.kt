@@ -1,6 +1,8 @@
 package com.example.network
 
 import android.content.Context
+import android.net.wifi.WifiManager
+import android.os.Build
 import com.example.data.TrackCatalog
 import com.example.engine.RacePhysicsEngine
 import com.example.model.ChatMessage
@@ -31,15 +33,23 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketAddress
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.abs
 
 sealed interface SessionRole {
     data object None : SessionRole
@@ -57,7 +67,7 @@ sealed interface RaceNavEvent {
 }
 
 class WifiP2pRaceManager(
-    context: Context,
+    private val context: Context,
     private val scope: CoroutineScope
 ) {
     companion object {
@@ -87,25 +97,47 @@ class WifiP2pRaceManager(
     private val _navEvents = MutableSharedFlow<RaceNavEvent>(extraBufferCapacity = 8)
     val navEvents: SharedFlow<RaceNavEvent> = _navEvents.asSharedFlow()
 
+    private var wifiLock: WifiManager.WifiLock? = null
+
     private var serverSocket: ServerSocket? = null
     private var acceptJob: Job? = null
     private var physicsJob: Job? = null
+
+    private var hostUdpSocket: DatagramSocket? = null
+    private var hostUdpReadJob: Job? = null
+    private var hostUdpPort: Int = 0
+    private val hostStateSeq = AtomicLong(0L)
+
     private var clientSocket: Socket? = null
     private var clientReadJob: Job? = null
     private var clientWriteJob: Job? = null
     private var clientSendChannel: Channel<String>? = null
 
+    private var clientUdpSocket: DatagramSocket? = null
+    private var clientUdpReadJob: Job? = null
+    private var clientUdpSendJob: Job? = null
+    private var clientHostAddr: InetAddress? = null
+    private var clientHostUdpPort: Int = 0
+    private val clientInputSeq = AtomicLong(0L)
+    private var lastReceivedUdpStateSeq = -1L
+    private val clientFinishEmitted = AtomicBoolean(false)
+
     private var localPlayerId: String = ""
     private var localInput = ControlInput()
     private var pendingLocalPowerUp = false
+    private var lastSentThrottle = 0f
+    private var lastSentSteer = 0f
+    private var lastInputSendNs = 0L
 
     private class ConnectedClient(
         val playerId: String,
         val socket: Socket,
-        val writeChannel: Channel<String> = Channel(capacity = 48)
+        val reliableChannel: Channel<String> = Channel(capacity = 32),
+        val snapshotChannel: Channel<String> = Channel(capacity = Channel.CONFLATED)
     ) {
-        var readerJob: Job? = null
         var writerJob: Job? = null
+        @Volatile var udpAddress: SocketAddress? = null
+        @Volatile var lastInputSeq: Long = -1L
     }
 
     private val connectedClients = ConcurrentHashMap<String, ConnectedClient>()
@@ -122,6 +154,33 @@ class WifiP2pRaceManager(
         _connectionError.value = null
     }
 
+    @Suppress("DEPRECATION")
+    private fun acquireLowLatencyWifiLock() {
+        runCatching {
+            if (wifiLock == null) {
+                val wifi = context.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                } else {
+                    WifiManager.WIFI_MODE_FULL_HIGH_PERF
+                }
+                wifiLock = wifi?.createWifiLock(mode, "MicroRCLowLatency")?.apply {
+                    setReferenceCounted(false)
+                    acquire()
+                }
+            }
+        }
+    }
+
+    private fun releaseLowLatencyWifiLock() {
+        runCatching {
+            if (wifiLock?.isHeld == true) {
+                wifiLock?.release()
+            }
+            wifiLock = null
+        }
+    }
+
     fun startSoloSession(profile: PlayerProfile) {
         leaveSession()
         localPlayerId = profile.playerId
@@ -130,7 +189,6 @@ class WifiP2pRaceManager(
         chatLog.clear()
         playersList.clear()
         playersList.add(profile.toLobbyPlayer(isHost = true, isReady = true))
-        // Pre-populate 3 AI rivals for instant fun solo racing
         val botNames = listOf("Volt-AI", "Apex-AI", "Turbo-AI")
         val botCars = listOf(RcCarType.APEX_FORMULA, RcCarType.DRIFT_PHANTOM, RcCarType.TUNDRA_MONSTER)
         botNames.forEachIndexed { idx, botName ->
@@ -162,6 +220,7 @@ class WifiP2pRaceManager(
         playersList.clear()
         playersList.add(profile.toLobbyPlayer(isHost = true, isReady = true))
         addSystemChat("Lobby hosted on local Wi-Fi. Waiting for 2-4 players...")
+        acquireLowLatencyWifiLock()
 
         scope.launch(Dispatchers.IO) {
             try {
@@ -175,6 +234,16 @@ class WifiP2pRaceManager(
                 }
                 serverSocket = ss
                 tcpPort = ss.localPort
+
+                val udpSock = runCatching {
+                    DatagramSocket(tcpPort).apply { trafficClass = 0x10 }
+                }.getOrElse {
+                    DatagramSocket(0).apply { trafficClass = 0x10 }
+                }
+                hostUdpSocket = udpSock
+                hostUdpPort = udpSock.localPort
+
+                startHostUdpReader(udpSock)
                 publishLocalLobbyState()
 
                 discovery.startAdvertising(scope) {
@@ -199,6 +268,7 @@ class WifiP2pRaceManager(
                         try {
                             val socket = ss.accept()
                             socket.tcpNoDelay = true
+                            runCatching { socket.trafficClass = 0x10 }
                             handleIncomingSocket(socket)
                         } catch (_: Exception) {
                             if (ss.isClosed) break
@@ -212,18 +282,51 @@ class WifiP2pRaceManager(
         }
     }
 
+    private fun startHostUdpReader(udpSock: DatagramSocket) {
+        hostUdpReadJob?.cancel()
+        hostUdpReadJob = scope.launch(Dispatchers.IO) {
+            val buf = ByteArray(512)
+            while (isActive && !udpSock.isClosed) {
+                try {
+                    val pkt = DatagramPacket(buf, buf.size)
+                    udpSock.receive(pkt)
+                    val msg = String(pkt.data, 0, pkt.length, Charsets.UTF_8)
+                    val helloId = RaceTelemetryCodec.decodeHello(msg)
+                    if (helloId != null) {
+                        connectedClients[helloId]?.udpAddress = pkt.socketAddress
+                        continue
+                    }
+                    val decoded = RaceTelemetryCodec.decodeInput(msg) ?: continue
+                    val client = connectedClients[decoded.playerId] ?: continue
+                    client.udpAddress = pkt.socketAddress
+                    if (decoded.seq > client.lastInputSeq) {
+                        client.lastInputSeq = decoded.seq
+                        physicsEngine?.submitInput(decoded.playerId, decoded.input)
+                    }
+                } catch (_: Exception) {
+                    if (udpSock.isClosed) break
+                }
+            }
+        }
+    }
+
     fun joinLobby(ip: String, port: Int, profile: PlayerProfile) {
         leaveSession()
         localPlayerId = profile.playerId
         _role.value = SessionRole.Client
         _connectionError.value = null
+        lastReceivedUdpStateSeq = -1L
+        acquireLowLatencyWifiLock()
 
         scope.launch(Dispatchers.IO) {
             try {
+                val targetIp = ip.trim()
                 val socket = Socket()
                 socket.tcpNoDelay = true
-                socket.connect(InetSocketAddress(ip.trim(), port), 4500)
+                runCatching { socket.trafficClass = 0x10 }
+                socket.connect(InetSocketAddress(targetIp, port), 4500)
                 clientSocket = socket
+                clientHostAddr = socket.inetAddress
 
                 val sendChan = Channel<String>(capacity = 48)
                 clientSendChannel = sendChan
@@ -242,7 +345,13 @@ class WifiP2pRaceManager(
                     }
                 }
 
-                // Send JOIN_REQUEST immediately
+                // Open client UDP socket for ultra-low-latency gameplay packets
+                val udpSock = DatagramSocket().apply {
+                    trafficClass = 0x10
+                }
+                clientUdpSocket = udpSock
+                startClientUdpReader(udpSock)
+
                 val joinMsg = NetworkMessage(
                     type = PacketType.JOIN_REQUEST,
                     senderId = profile.playerId,
@@ -265,6 +374,10 @@ class WifiP2pRaceManager(
                                 PacketType.LOBBY_STATE -> {
                                     val payload = msg.lobbyState ?: continue
                                     _lobbyState.value = payload
+                                    if (payload.udpPort > 0) {
+                                        clientHostUdpPort = payload.udpPort
+                                        sendClientUdpHello()
+                                    }
                                     if (!enteredLobby) {
                                         enteredLobby = true
                                         _navEvents.tryEmit(RaceNavEvent.EnterLobby)
@@ -278,18 +391,29 @@ class WifiP2pRaceManager(
                                     )
                                 }
                                 PacketType.RACE_START -> {
+                                    lastReceivedUdpStateSeq = -1L
+                                    clientFinishEmitted.set(false)
                                     _raceSnapshot.value = msg.raceSnapshot
+                                    sendClientUdpHello()
+                                    startClientUdpInputHeartbeat()
                                     _navEvents.tryEmit(RaceNavEvent.StartRace)
                                 }
                                 PacketType.RACE_SNAPSHOT -> {
                                     val snap = msg.raceSnapshot ?: continue
-                                    _raceSnapshot.value = snap
+                                    // Accept TCP snapshot if finished OR if UDP hasn't delivered any frames yet
                                     if (snap.phase == RacePhase.FINISHED.name) {
+                                        _raceSnapshot.value = snap
                                         _lastResults.value = snap
-                                        _navEvents.tryEmit(RaceNavEvent.ShowResults)
+                                        clientUdpSendJob?.cancel()
+                                        if (clientFinishEmitted.compareAndSet(false, true)) {
+                                            _navEvents.tryEmit(RaceNavEvent.ShowResults)
+                                        }
+                                    } else if (lastReceivedUdpStateSeq < 0L) {
+                                        _raceSnapshot.value = snap
                                     }
                                 }
                                 PacketType.RETURN_TO_LOBBY -> {
+                                    clientUdpSendJob?.cancel()
                                     msg.lobbyState?.let { _lobbyState.value = it }
                                     _navEvents.tryEmit(RaceNavEvent.BackToLobby)
                                 }
@@ -305,7 +429,85 @@ class WifiP2pRaceManager(
             } catch (e: Exception) {
                 _connectionError.value = "Could not connect to $ip:$port (${e.localizedMessage ?: "timeout"})"
                 _role.value = SessionRole.None
+                releaseLowLatencyWifiLock()
             }
+        }
+    }
+
+    private fun startClientUdpReader(udpSock: DatagramSocket) {
+        clientUdpReadJob?.cancel()
+        clientUdpReadJob = scope.launch(Dispatchers.IO) {
+            val buf = ByteArray(2048)
+            while (isActive && !udpSock.isClosed) {
+                try {
+                    val pkt = DatagramPacket(buf, buf.size)
+                    udpSock.receive(pkt)
+                    val msg = String(pkt.data, 0, pkt.length, Charsets.UTF_8)
+                    val roster = _lobbyState.value?.players.orEmpty()
+                    val decoded = RaceTelemetryCodec.decodeSnapshot(
+                        text = msg,
+                        roster = roster,
+                        previousSnapshot = _raceSnapshot.value
+                    ) ?: continue
+
+                    if (decoded.seq > lastReceivedUdpStateSeq) {
+                        lastReceivedUdpStateSeq = decoded.seq
+                        _raceSnapshot.value = decoded.snapshot
+                        if (decoded.snapshot.phase == RacePhase.FINISHED.name) {
+                            _lastResults.value = decoded.snapshot
+                            clientUdpSendJob?.cancel()
+                            if (clientFinishEmitted.compareAndSet(false, true)) {
+                                _navEvents.tryEmit(RaceNavEvent.ShowResults)
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    if (udpSock.isClosed) break
+                }
+            }
+        }
+    }
+
+    private fun startClientUdpInputHeartbeat() {
+        clientUdpSendJob?.cancel()
+        clientUdpSendJob = scope.launch(Dispatchers.IO) {
+            while (isActive && _role.value == SessionRole.Client) {
+                sendClientUdpInput(usePowerUp = false)
+                delay(20L) // Steady 50Hz UDP input stream while racing
+            }
+        }
+    }
+
+    private fun sendClientUdpHello() {
+        val sock = clientUdpSocket ?: return
+        val addr = clientHostAddr ?: return
+        val port = clientHostUdpPort
+        if (port <= 0) return
+        scope.launch(Dispatchers.IO) {
+            repeat(3) {
+                runCatching {
+                    val data = RaceTelemetryCodec.encodeHello(localPlayerId)
+                    sock.send(DatagramPacket(data, data.size, addr, port))
+                }
+                delay(40L)
+            }
+        }
+    }
+
+    private fun sendClientUdpInput(usePowerUp: Boolean) {
+        val sock = clientUdpSocket ?: return
+        val addr = clientHostAddr ?: return
+        val port = clientHostUdpPort
+        if (port <= 0) return
+        val inp = synchronized(this) { localInput }
+        val seq = clientInputSeq.incrementAndGet()
+        val data = RaceTelemetryCodec.encodeInput(
+            playerId = localPlayerId,
+            seq = seq,
+            input = inp.copy(usePowerUp = usePowerUp)
+        )
+        runCatching {
+            sock.send(DatagramPacket(data, data.size, addr, port))
         }
     }
 
@@ -332,7 +534,6 @@ class WifiP2pRaceManager(
                         )
                         writer.write(reject + "\n"); writer.flush(); socket.close(); return@launch
                     }
-                    // Replace if same ID reconnecting, or remove a bot to make space for human!
                     playersList.removeAll { it.id == joiningPlayer.id }
                     if (playersList.size >= 4) {
                         val botIndex = playersList.indexOfLast { it.isBot }
@@ -354,7 +555,11 @@ class WifiP2pRaceManager(
 
                 client.writerJob = scope.launch(Dispatchers.IO) {
                     try {
-                        for (line in client.writeChannel) {
+                        while (isActive) {
+                            val line: String? = select<String?> {
+                                client.reliableChannel.onReceiveCatching { it.getOrNull() }
+                                client.snapshotChannel.onReceiveCatching { it.getOrNull() }
+                            } ?: break
                             writer.write(line)
                             writer.write("\n")
                             writer.flush()
@@ -388,6 +593,8 @@ class WifiP2pRaceManager(
                     }
                 }
                 registeredClient?.writerJob?.cancel()
+                registeredClient?.reliableChannel?.close()
+                registeredClient?.snapshotChannel?.close()
                 runCatching { socket.close() }
             }
         }
@@ -570,6 +777,7 @@ class WifiP2pRaceManager(
 
         inRace = true
         pointsAwardedForCurrentRace = false
+        hostStateSeq.set(0L)
         val track = TrackCatalog.getTrack(currentTrackId)
         val engine = RacePhysicsEngine(track, currentTotalLaps, snapshotPlayers)
         physicsEngine = engine
@@ -579,7 +787,7 @@ class WifiP2pRaceManager(
 
         if (_role.value == SessionRole.Host) {
             broadcastLobbyState()
-            broadcastPacket(
+            broadcastReliablePacket(
                 NetworkMessage(
                     type = PacketType.RACE_START,
                     senderId = localPlayerId,
@@ -618,7 +826,7 @@ class WifiP2pRaceManager(
                     }
                     _lastResults.value = snap
                     if (_role.value == SessionRole.Host) {
-                        broadcastPacket(
+                        broadcastReliablePacket(
                             NetworkMessage(
                                 type = PacketType.RACE_SNAPSHOT,
                                 senderId = localPlayerId,
@@ -629,9 +837,34 @@ class WifiP2pRaceManager(
                     _navEvents.tryEmit(RaceNavEvent.ShowResults)
                     inRace = false
                     break
-                } else if (_role.value == SessionRole.Host && tickCounter % 2 == 0) {
-                    // ~30Hz network state sync over local Wi-Fi TCP
-                    broadcastPacket(
+                } else if (_role.value == SessionRole.Host) {
+                    // Send ultra-compact 60Hz UDP state to clients that registered UDP,
+                    // and fallback coalesced 20Hz TCP snapshot only for clients without UDP.
+                    broadcastRaceTelemetry(snap, sendTcpFallback = (tickCounter % 3 == 0))
+                }
+            }
+        }
+    }
+
+    private fun broadcastRaceTelemetry(snap: RaceSnapshot, sendTcpFallback: Boolean) {
+        val udpSock = hostUdpSocket
+        val seq = hostStateSeq.incrementAndGet()
+        var udpBytes: ByteArray? = null
+        var tcpJson: String? = null
+
+        for (client in connectedClients.values) {
+            val udpAddr = client.udpAddress
+            if (udpSock != null && !udpSock.isClosed && udpAddr != null) {
+                if (udpBytes == null) {
+                    udpBytes = RaceTelemetryCodec.encodeSnapshot(seq, snap)
+                }
+                val data = udpBytes
+                runCatching {
+                    udpSock.send(DatagramPacket(data, data.size, udpAddr))
+                }
+            } else if (sendTcpFallback) {
+                if (tcpJson == null) {
+                    tcpJson = msgAdapter.toJson(
                         NetworkMessage(
                             type = PacketType.RACE_SNAPSHOT,
                             senderId = localPlayerId,
@@ -639,6 +872,7 @@ class WifiP2pRaceManager(
                         )
                     )
                 }
+                client.snapshotChannel.trySend(tcpJson)
             }
         }
     }
@@ -648,15 +882,29 @@ class WifiP2pRaceManager(
             localInput = localInput.copy(throttle = throttle, steer = steer)
         }
         if (_role.value == SessionRole.Client) {
-            clientSendChannel?.trySend(
-                msgAdapter.toJson(
-                    NetworkMessage(
-                        type = PacketType.CONTROL_INPUT,
-                        senderId = localPlayerId,
-                        controlInput = ControlInput(throttle = throttle, steer = steer, usePowerUp = false)
-                    )
-                )
-            )
+            val nowNs = System.nanoTime()
+            val changedSignificantly = abs(throttle - lastSentThrottle) > 0.05f ||
+                abs(steer - lastSentSteer) > 0.03f
+            if (changedSignificantly && (nowNs - lastInputSendNs) >= 12_000_000L) {
+                lastSentThrottle = throttle
+                lastSentSteer = steer
+                lastInputSendNs = nowNs
+                scope.launch(Dispatchers.IO) {
+                    if (clientHostUdpPort > 0 && clientUdpSocket != null) {
+                        sendClientUdpInput(usePowerUp = false)
+                    } else {
+                        clientSendChannel?.trySend(
+                            msgAdapter.toJson(
+                                NetworkMessage(
+                                    type = PacketType.CONTROL_INPUT,
+                                    senderId = localPlayerId,
+                                    controlInput = ControlInput(throttle = throttle, steer = steer, usePowerUp = false)
+                                )
+                            )
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -665,12 +913,14 @@ class WifiP2pRaceManager(
             pendingLocalPowerUp = true
         }
         if (_role.value == SessionRole.Client) {
+            // Send power-up reliably over TCP so activation is never dropped
+            val inp = synchronized(this) { localInput }
             clientSendChannel?.trySend(
                 msgAdapter.toJson(
                     NetworkMessage(
                         type = PacketType.CONTROL_INPUT,
                         senderId = localPlayerId,
-                        controlInput = localInput.copy(usePowerUp = true)
+                        controlInput = inp.copy(usePowerUp = true)
                     )
                 )
             )
@@ -684,7 +934,7 @@ class WifiP2pRaceManager(
         inRace = false
         if (_role.value == SessionRole.Host) {
             broadcastLobbyState()
-            broadcastPacket(
+            broadcastReliablePacket(
                 NetworkMessage(
                     type = PacketType.RETURN_TO_LOBBY,
                     senderId = localPlayerId,
@@ -732,13 +982,28 @@ class WifiP2pRaceManager(
         runCatching { serverSocket?.close() }
         serverSocket = null
 
+        hostUdpReadJob?.cancel()
+        hostUdpReadJob = null
+        runCatching { hostUdpSocket?.close() }
+        hostUdpSocket = null
+        hostUdpPort = 0
+
         connectedClients.values.forEach {
-            it.readerJob?.cancel()
             it.writerJob?.cancel()
-            it.writeChannel.close()
+            it.reliableChannel.close()
+            it.snapshotChannel.close()
             runCatching { it.socket.close() }
         }
         connectedClients.clear()
+
+        clientUdpSendJob?.cancel()
+        clientUdpSendJob = null
+        clientUdpReadJob?.cancel()
+        clientUdpReadJob = null
+        runCatching { clientUdpSocket?.close() }
+        clientUdpSocket = null
+        clientHostUdpPort = 0
+        clientHostAddr = null
 
         clientReadJob?.cancel()
         clientReadJob = null
@@ -748,6 +1013,8 @@ class WifiP2pRaceManager(
         clientSendChannel = null
         runCatching { clientSocket?.close() }
         clientSocket = null
+
+        releaseLowLatencyWifiLock()
 
         _role.value = SessionRole.None
         _lobbyState.value = null
@@ -775,7 +1042,9 @@ class WifiP2pRaceManager(
             if (chatLog.size > 50) chatLog.removeAt(0)
         }
         if (_role.value == SessionRole.Host) {
-            broadcastPacket(NetworkMessage(PacketType.CHAT_BROADCAST, senderId = chat.senderId, chatMessage = chat))
+            broadcastReliablePacket(
+                NetworkMessage(PacketType.CHAT_BROADCAST, senderId = chat.senderId, chatMessage = chat)
+            )
             broadcastLobbyState()
         } else {
             publishLocalLobbyState()
@@ -791,6 +1060,7 @@ class WifiP2pRaceManager(
             lobbyName = if (_role.value == SessionRole.Solo) "Solo Paddock" else "$hostName's RC Lobby",
             hostIp = discovery.getPrimaryLocalIp(),
             tcpPort = tcpPort,
+            udpPort = hostUdpPort,
             trackId = currentTrackId.name,
             totalLaps = currentTotalLaps,
             players = playersCopy,
@@ -806,7 +1076,7 @@ class WifiP2pRaceManager(
     private fun broadcastLobbyState() {
         val payload = buildLobbyPayload()
         _lobbyState.value = payload
-        broadcastPacket(
+        broadcastReliablePacket(
             NetworkMessage(
                 type = PacketType.LOBBY_STATE,
                 senderId = localPlayerId,
@@ -815,10 +1085,10 @@ class WifiP2pRaceManager(
         )
     }
 
-    private fun broadcastPacket(msg: NetworkMessage) {
+    private fun broadcastReliablePacket(msg: NetworkMessage) {
         val json = msgAdapter.toJson(msg)
         connectedClients.values.forEach { client ->
-            client.writeChannel.trySend(json)
+            client.reliableChannel.trySend(json)
         }
     }
 

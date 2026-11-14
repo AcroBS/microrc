@@ -65,11 +65,13 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.data.TrackCatalog
+import com.example.engine.RacePhysicsEngine
 import com.example.model.ControlMode
 import com.example.model.PlayerProfile
 import com.example.model.PowerUpType
 import com.example.model.RacePhase
 import com.example.model.RaceSnapshot
+import com.example.model.RacerState
 import com.example.sensors.TiltSteeringController
 import com.example.ui.components.drawTrackMiniMap
 import com.example.ui.components.drawTrackWorld
@@ -83,6 +85,7 @@ import com.example.ui.theme.PaddockSurface
 import com.example.ui.theme.SignalOrange
 import com.example.ui.theme.TextSecondary
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.sin
 
 @Composable
@@ -148,16 +151,25 @@ fun RaceScreen(
         onUpdateControlInput(throttle, steer)
     }
 
-    // Smooth animation clock & camera state
+    // Smooth animation clock, dead-reckoning interpolation & camera state
     var animTimeSec by remember { mutableFloatStateOf(0f) }
     var camX by remember { mutableFloatStateOf(1100f) }
     var camY by remember { mutableFloatStateOf(750f) }
     var camInitialized by remember { mutableStateOf(false) }
     var lastFrameNanos by remember { mutableLongStateOf(0L) }
+    var lastSnapshotArrivalNanos by remember { mutableLongStateOf(0L) }
+    var smoothedRacers by remember { mutableStateOf<List<RacerState>>(emptyList()) }
+    val smoothPoseMap = remember { mutableMapOf<String, FloatArray>() } // [x, y, angle]
 
     val localRacer = snapshot?.racers?.find { it.playerId == profile.playerId }
         ?: snapshot?.racers?.firstOrNull()
-    val latestLocalRacer by androidx.compose.runtime.rememberUpdatedState(localRacer)
+    val latestSnapshot by androidx.compose.runtime.rememberUpdatedState(snapshot)
+
+    LaunchedEffect(snapshot) {
+        if (snapshot != null) {
+            lastSnapshotArrivalNanos = System.nanoTime()
+        }
+    }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -167,18 +179,46 @@ fun RaceScreen(
                 lastFrameNanos = frameNanos
                 animTimeSec += dt
 
-                val target = latestLocalRacer
-                if (target != null) {
-                    val lookX = target.x + cos(target.angleRad) * 40f
-                    val lookY = target.y + sin(target.angleRad) * 40f
-                    if (!camInitialized) {
-                        camX = lookX
-                        camY = lookY
-                        camInitialized = true
+                val snap = latestSnapshot
+                if (snap != null && snap.racers.isNotEmpty()) {
+                    val sinceSnapSec = if (lastSnapshotArrivalNanos > 0L) {
+                        ((frameNanos - lastSnapshotArrivalNanos) / 1_000_000_000f).coerceIn(0f, 0.075f)
                     } else {
-                        val lerp = (dt * 10.5f).coerceIn(0f, 1f)
-                        camX += (lookX - camX) * lerp
-                        camY += (lookY - camY) * lerp
+                        0f
+                    }
+                    val posLerp = (dt * 22f).coerceIn(0f, 1f)
+                    val angLerp = (dt * 20f).coerceIn(0f, 1f)
+
+                    val rendered = snap.racers.map { r ->
+                        val predX = r.x + r.vx * sinceSnapSec
+                        val predY = r.y + r.vy * sinceSnapSec
+                        val cur = smoothPoseMap[r.playerId]
+                        if (cur == null || hypot(predX - cur[0], predY - cur[1]) > 220f) {
+                            smoothPoseMap[r.playerId] = floatArrayOf(predX, predY, r.angleRad)
+                            r.copy(x = predX, y = predY)
+                        } else {
+                            cur[0] += (predX - cur[0]) * posLerp
+                            cur[1] += (predY - cur[1]) * posLerp
+                            val angDiff = RacePhysicsEngine.normalizeAngle(r.angleRad - cur[2])
+                            cur[2] = RacePhysicsEngine.normalizeAngle(cur[2] + angDiff * angLerp)
+                            r.copy(x = cur[0], y = cur[1], angleRad = cur[2])
+                        }
+                    }
+                    smoothedRacers = rendered
+
+                    val target = rendered.find { it.playerId == profile.playerId } ?: rendered.firstOrNull()
+                    if (target != null) {
+                        val lookX = target.x + cos(target.angleRad) * 40f
+                        val lookY = target.y + sin(target.angleRad) * 40f
+                        if (!camInitialized) {
+                            camX = lookX
+                            camY = lookY
+                            camInitialized = true
+                        } else {
+                            val camLerp = (dt * 12f).coerceIn(0f, 1f)
+                            camX += (lookX - camX) * camLerp
+                            camY += (lookY - camY) * camLerp
+                        }
                     }
                 }
             }
@@ -188,6 +228,7 @@ fun RaceScreen(
     val track = remember(snapshot?.trackId) {
         TrackCatalog.getTrack(snapshot?.trackId ?: "LIVING_ROOM_GP")
     }
+    val racersToDraw = smoothedRacers.ifEmpty { snapshot?.racers.orEmpty() }
 
     Box(
         modifier = Modifier
@@ -211,7 +252,7 @@ fun RaceScreen(
                         track = track,
                         itemBoxes = snapshot?.itemBoxes.orEmpty(),
                         hazards = snapshot?.hazards.orEmpty(),
-                        racers = snapshot?.racers.orEmpty(),
+                        racers = racersToDraw,
                         animTimeSec = animTimeSec
                     )
                 }
@@ -225,14 +266,14 @@ fun RaceScreen(
                         track = track,
                         itemBoxes = snapshot?.itemBoxes.orEmpty(),
                         hazards = snapshot?.hazards.orEmpty(),
-                        racers = snapshot?.racers.orEmpty(),
+                        racers = racersToDraw,
                         animTimeSec = animTimeSec
                     )
                 }
             }
         }
 
-        // Top Telemetry HUD
+        // Top Telemetry HUD + Corner Mini-Map
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -243,7 +284,7 @@ fun RaceScreen(
         ) {
             // Left telemetry pill
             Surface(
-                color = CarbonBg.copy(alpha = 0.84f),
+                color = CarbonBg.copy(alpha = 0.86f),
                 shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, PaddockOutline)
             ) {
@@ -280,43 +321,18 @@ fun RaceScreen(
                 }
             }
 
-            // Right Mini-Map & Camera/Pause
-            Row(
-                verticalAlignment = Alignment.Top,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            // Right Pause/Camera buttons + Corner Mini-Map Overlay
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Surface(
-                    color = CarbonBg.copy(alpha = 0.82f),
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, PaddockOutline),
-                    modifier = Modifier.size(width = 104.dp, height = 72.dp)
-                ) {
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        drawTrackMiniMap(
-                            track = track,
-                            racers = snapshot?.racers.orEmpty(),
-                            localPlayerId = profile.playerId
-                        )
-                    }
-                }
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    IconButton(
-                        onClick = { showPauseDialog = true },
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(CarbonBg.copy(alpha = 0.85f))
-                            .border(1.dp, PaddockOutline, CircleShape)
-                            .testTag("race_pause_button")
-                    ) {
-                        Icon(Icons.Default.Pause, contentDescription = "Pause & Controls", tint = Color.White)
-                    }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     IconButton(
                         onClick = onToggleOverviewCamera,
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(48.dp)
                             .clip(CircleShape)
-                            .background(if (overviewCamera) ElectricCyan else CarbonBg.copy(alpha = 0.85f))
+                            .background(if (overviewCamera) ElectricCyan else CarbonBg.copy(alpha = 0.86f))
                             .border(1.dp, PaddockOutline, CircleShape)
                             .testTag("toggle_camera_button")
                     ) {
@@ -325,6 +341,46 @@ fun RaceScreen(
                             contentDescription = "Toggle Camera",
                             tint = if (overviewCamera) CarbonBg else ElectricCyan
                         )
+                    }
+                    IconButton(
+                        onClick = { showPauseDialog = true },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(CarbonBg.copy(alpha = 0.86f))
+                            .border(1.dp, PaddockOutline, CircleShape)
+                            .testTag("race_pause_button")
+                    ) {
+                        Icon(Icons.Default.Pause, contentDescription = "Pause & Controls", tint = Color.White)
+                    }
+                }
+
+                if (!overviewCamera) {
+                    Surface(
+                        color = CarbonBg.copy(alpha = 0.84f),
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.2.dp, ElectricCyan.copy(alpha = 0.55f)),
+                        modifier = Modifier
+                            .size(width = 136.dp, height = 94.dp)
+                            .testTag("race_minimap")
+                    ) {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                drawTrackMiniMap(
+                                    track = track,
+                                    racers = racersToDraw,
+                                    localPlayerId = profile.playerId
+                                )
+                            }
+                            Text(
+                                text = "MAP",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = TextSecondary,
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
                     }
                 }
             }

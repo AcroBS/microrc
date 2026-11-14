@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.unit.dp
 import com.example.model.ItemBoxState
 import com.example.model.PropShape
 import com.example.model.RacerState
@@ -319,9 +320,9 @@ fun DrawScope.drawTrackMiniMap(
     racers: List<RacerState> = emptyList(),
     localPlayerId: String? = null
 ) {
-    val pad = 10f
-    val availW = size.width - pad * 2f
-    val availH = size.height - pad * 2f
+    val pad = 8.dp.toPx()
+    val availW = (size.width - pad * 2f).coerceAtLeast(1f)
+    val availH = (size.height - pad * 2f).coerceAtLeast(1f)
     val scale = minOf(availW / track.worldWidth, availH / track.worldHeight)
     val offsetX = (size.width - track.worldWidth * scale) / 2f
     val offsetY = (size.height - track.worldHeight * scale) / 2f
@@ -339,34 +340,64 @@ fun DrawScope.drawTrackMiniMap(
 
     drawPath(
         path = path,
-        color = Color(track.id.kerbPrimaryHex).copy(alpha = 0.38f),
-        style = Stroke(width = 10f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        color = Color(track.id.kerbPrimaryHex).copy(alpha = 0.55f),
+        style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
     )
     drawPath(
         path = path,
-        color = Color.White.copy(alpha = 0.72f),
-        style = Stroke(width = 4.5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        color = Color(0xFF1F2736),
+        style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+    )
+    drawPath(
+        path = path,
+        color = Color.White.copy(alpha = 0.85f),
+        style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
     )
 
-    // Start marker
+    // Start/Finish tick
     val s = pts[0]
-    drawCircle(
+    val sNext = pts[1]
+    val startAng = atan2(sNext.y - s.y, sNext.x - s.x)
+    val perpX = -sin(startAng) * 4.5.dp.toPx()
+    val perpY = cos(startAng) * 4.5.dp.toPx()
+    val sx = offsetX + s.x * scale
+    val sy = offsetY + s.y * scale
+    drawLine(
         color = Color(0xFFFF5722),
-        radius = 4f,
-        center = Offset(offsetX + s.x * scale, offsetY + s.y * scale)
+        start = Offset(sx - perpX, sy - perpY),
+        end = Offset(sx + perpX, sy + perpY),
+        strokeWidth = 2.2.dp.toPx(),
+        cap = StrokeCap.Round
     )
 
-    // Racer dots
-    for (r in racers) {
+    // Draw rivals first, then local player on top so local car is always clearly visible
+    val ordered = racers.sortedBy { it.playerId == localPlayerId }
+    for (r in ordered) {
         val isLocal = r.playerId == localPlayerId
         val cx = offsetX + r.x * scale
         val cy = offsetY + r.y * scale
+        val dotRadius = if (isLocal) 4.6.dp.toPx() else 3.6.dp.toPx()
         if (isLocal) {
-            drawCircle(Color.White, radius = 6.5f, center = Offset(cx, cy))
+            drawCircle(
+                color = Color(0xFF00E5FF).copy(alpha = 0.4f),
+                radius = 7.2.dp.toPx(),
+                center = Offset(cx, cy)
+            )
+            drawCircle(
+                color = Color.White,
+                radius = dotRadius + 1.5.dp.toPx(),
+                center = Offset(cx, cy)
+            )
+        } else {
+            drawCircle(
+                color = Color(0xFF0B0E14),
+                radius = dotRadius + 1.2.dp.toPx(),
+                center = Offset(cx, cy)
+            )
         }
         drawCircle(
             color = Color(r.primaryColorArgb),
-            radius = if (isLocal) 4.5f else 3.8f,
+            radius = dotRadius,
             center = Offset(cx, cy)
         )
     }
