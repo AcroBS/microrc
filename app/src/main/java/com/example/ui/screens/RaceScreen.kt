@@ -152,10 +152,12 @@ fun RaceScreen(
     var animTimeSec by remember { mutableFloatStateOf(0f) }
     var camX by remember { mutableFloatStateOf(1100f) }
     var camY by remember { mutableFloatStateOf(750f) }
+    var camInitialized by remember { mutableStateOf(false) }
     var lastFrameNanos by remember { mutableLongStateOf(0L) }
 
     val localRacer = snapshot?.racers?.find { it.playerId == profile.playerId }
         ?: snapshot?.racers?.firstOrNull()
+    val latestLocalRacer by androidx.compose.runtime.rememberUpdatedState(localRacer)
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -165,13 +167,19 @@ fun RaceScreen(
                 lastFrameNanos = frameNanos
                 animTimeSec += dt
 
-                val target = localRacer
+                val target = latestLocalRacer
                 if (target != null) {
-                    val lookX = target.x + cos(target.angleRad) * 60f
-                    val lookY = target.y + sin(target.angleRad) * 60f
-                    val lerp = (dt * 7.5f).coerceIn(0f, 1f)
-                    camX += (lookX - camX) * lerp
-                    camY += (lookY - camY) * lerp
+                    val lookX = target.x + cos(target.angleRad) * 40f
+                    val lookY = target.y + sin(target.angleRad) * 40f
+                    if (!camInitialized) {
+                        camX = lookX
+                        camY = lookY
+                        camInitialized = true
+                    } else {
+                        val lerp = (dt * 10.5f).coerceIn(0f, 1f)
+                        camX += (lookX - camX) * lerp
+                        camY += (lookY - camY) * lerp
+                    }
                 }
             }
         }
@@ -208,7 +216,7 @@ fun RaceScreen(
                     )
                 }
             } else {
-                val zoom = (minOf(viewW, viewH) / 760f).coerceIn(0.78f, 1.55f)
+                val zoom = (minOf(viewW, viewH) / 860f).coerceIn(0.75f, 1.5f)
                 withTransform({
                     translate(viewW / 2f - camX * zoom, viewH / 2f - camY * zoom)
                     scale(zoom, zoom, androidx.compose.ui.geometry.Offset.Zero)
