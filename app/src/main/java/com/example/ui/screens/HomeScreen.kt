@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Wifi
@@ -253,10 +254,10 @@ fun HomeScreen(
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 Icon(
-                                    if (profile.controlMode == ControlMode.TILT_SENSOR) {
-                                        Icons.Default.PhoneAndroid
-                                    } else {
-                                        Icons.Default.TouchApp
+                                    when (profile.controlMode) {
+                                        ControlMode.TILT_SENSOR -> Icons.Default.PhoneAndroid
+                                        ControlMode.SPRING_SLIDER -> Icons.Default.SwapHoriz
+                                        ControlMode.TOUCH_OVERLAY -> Icons.Default.TouchApp
                                     },
                                     contentDescription = "Control Mode",
                                     tint = MaterialTheme.colorScheme.onSecondaryContainer,

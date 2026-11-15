@@ -26,10 +26,16 @@ import java.util.Locale
 
 object RaceTelemetryCodec {
 
+    data class DecodedHello(
+        val playerId: String,
+        val ackedHostUdpSeq: Long = -1L
+    )
+
     data class DecodedInput(
         val playerId: String,
         val seq: Long,
-        val input: ControlInput
+        val input: ControlInput,
+        val ackedHostUdpSeq: Long = -1L
     )
 
     data class DecodedSnapshot(
@@ -37,40 +43,79 @@ object RaceTelemetryCodec {
         val snapshot: RaceSnapshot
     )
 
-    fun encodeHello(playerId: String): ByteArray =
-        "H|$playerId".toByteArray(Charsets.UTF_8)
+    private fun sanitizeToken(raw: String): String =
+        raw.replace("|", "")
+            .replace(";", "")
+            .replace(",", "")
+            .replace("\n", "")
+            .replace("\r", "")
 
-    fun decodeHello(text: String): String? {
+    fun encodeHello(playerId: String, ackedHostUdpSeq: Long = -1L): ByteArray =
+        "H|${sanitizeToken(playerId)}|$ackedHostUdpSeq".toByteArray(Charsets.UTF_8)
+
+    fun decodeHelloPacket(text: String): DecodedHello? {
         if (!text.startsWith("H|")) return null
-        return text.removePrefix("H|").trim().ifEmpty { null }
+        val parts = text.split('|')
+        val pid = parts.getOrNull(1)?.trim()?.ifEmpty { null } ?: return null
+        val ackSeq = parts.getOrNull(2)?.trim()?.toLongOrNull() ?: -1L
+        return DecodedHello(pid, ackSeq)
     }
 
-    fun encodeInput(playerId: String, seq: Long, input: ControlInput): ByteArray {
+    fun decodeHello(text: String): String? = decodeHelloPacket(text)?.playerId
+
+    fun encodeUdpAck(seq: Long): ByteArray =
+        "A|$seq".toByteArray(Charsets.UTF_8)
+
+    fun isUdpAck(text: String): Boolean = text.startsWith("A|")
+
+    fun encodeInputLine(
+        playerId: String,
+        seq: Long,
+        input: ControlInput,
+        ackedHostUdpSeq: Long = -1L
+    ): String {
         val t = String.format(Locale.US, "%.2f", input.throttle)
         val s = String.format(Locale.US, "%.3f", input.steer)
         val p = if (input.usePowerUp) "1" else "0"
         val m = if (input.dropMine) "1" else "0"
-        return "I|$playerId|$seq|$t|$s|$p|$m".toByteArray(Charsets.UTF_8)
+        return "I|${sanitizeToken(playerId)}|$seq|$t|$s|$p|$m|$ackedHostUdpSeq"
     }
+
+    fun encodeInput(
+        playerId: String,
+        seq: Long,
+        input: ControlInput,
+        ackedHostUdpSeq: Long = -1L
+    ): ByteArray = encodeInputLine(playerId, seq, input, ackedHostUdpSeq).toByteArray(Charsets.UTF_8)
 
     fun decodeInput(text: String): DecodedInput? {
         if (!text.startsWith("I|")) return null
         val parts = text.split('|')
         if (parts.size < 6) return null
-        val playerId = parts[1]
+        val playerId = parts[1].trim()
+        if (playerId.isEmpty()) return null
         val seq = parts[2].toLongOrNull() ?: return null
         val throttle = parts[3].toFloatOrNull() ?: 0f
         val steer = parts[4].toFloatOrNull() ?: 0f
         val usePower = parts[5] == "1"
         val dropMine = parts.getOrNull(6) == "1"
-        return DecodedInput(playerId, seq, ControlInput(throttle, steer, usePower, dropMine))
+        val ackedHostSeq = parts.getOrNull(7)?.trim()?.toLongOrNull() ?: -1L
+        return DecodedInput(
+            playerId = playerId,
+            seq = seq,
+            input = ControlInput(throttle, steer, usePower, dropMine),
+            ackedHostUdpSeq = ackedHostSeq
+        )
     }
 
     fun encodeSnapshot(seq: Long, snap: RaceSnapshot): ByteArray {
         val sb = StringBuilder(680)
         val phaseOrd = runCatching { RacePhase.valueOf(snap.phase).ordinal }.getOrDefault(0)
         val trackOrd = runCatching { TrackId.valueOf(snap.trackId).ordinal }.getOrDefault(0)
-        val banner = (snap.eventBanner ?: "").replace("|", "").replace("\n", "")
+        val banner = (snap.eventBanner ?: "")
+            .replace("|", "")
+            .replace("\n", "")
+            .replace("\r", "")
         val winOrd = runCatching { WinCondition.valueOf(snap.winCondition).ordinal }.getOrDefault(0)
         val evOrd = runCatching { ExternalEventType.valueOf(snap.activeEvent).ordinal }.getOrDefault(0)
         val modeOrd = runCatching { GameMode.valueOf(snap.gameMode).ordinal }.getOrDefault(0)
@@ -78,7 +123,7 @@ object RaceTelemetryCodec {
             runCatching { ArenaShape.valueOf(it).ordinal }.getOrDefault(-1)
         } ?: -1
         val flag = snap.arenaFlag
-        val flagCarrier = (flag?.carrierId ?: "").replace(",", "").replace("|", "")
+        val flagCarrier = sanitizeToken(flag?.carrierId ?: "")
 
         sb.append("S|")
             .append(seq).append('|')
@@ -95,7 +140,7 @@ object RaceTelemetryCodec {
             val heldOrd = r.heldPowerUp?.let {
                 runCatching { PowerUpType.valueOf(it).ordinal }.getOrDefault(-1)
             } ?: -1
-            sb.append(r.playerId).append(',')
+            sb.append(sanitizeToken(r.playerId)).append(',')
                 .append(String.format(Locale.US, "%.1f", r.x)).append(',')
                 .append(String.format(Locale.US, "%.1f", r.y)).append(',')
                 .append(String.format(Locale.US, "%.3f", r.angleRad)).append(',')
@@ -136,7 +181,7 @@ object RaceTelemetryCodec {
         snap.hazards.forEachIndexed { idx, h ->
             if (idx > 0) sb.append(';')
             sb.append(h.id).append(',')
-                .append(h.ownerId).append(',')
+                .append(sanitizeToken(h.ownerId)).append(',')
                 .append(String.format(Locale.US, "%.1f", h.x)).append(',')
                 .append(String.format(Locale.US, "%.1f", h.y)).append(',')
                 .append(h.remainingMs).append(',')

@@ -1,8 +1,31 @@
 package com.example.model
 
-enum class ControlMode(val label: String, val subtitle: String) {
-    TOUCH_OVERLAY("Touch Pedals", "On-screen steering & throttle buttons"),
-    TILT_SENSOR("Phone Tilt", "Tilt device to steer + touch throttle")
+import kotlin.math.abs
+
+enum class ControlMode(val label: String, val shortLabel: String, val subtitle: String) {
+    TOUCH_OVERLAY("Touch Pedals", "Pedals", "On-screen steering & throttle buttons"),
+    SPRING_SLIDER("Spring Slider", "Slider", "Proportional slider with expo — snaps to neutral"),
+    TILT_SENSOR("Phone Tilt", "Tilt", "Tilt device to steer + touch throttle")
+}
+
+/**
+ * Maps a normalized horizontal slider thumb offset in [-1f, 1f] to proportional steering in [-1f, 1f].
+ * Applies a small center deadzone and a subtle cubic RC transmitter expo curve for smooth precision
+ * around center while preserving full steering lock at +/-1f.
+ */
+fun computeSpringSliderSteer(
+    normalizedOffset: Float,
+    deadzone: Float = 0.03f,
+    expo: Float = 0.28f
+): Float {
+    val clamped = normalizedOffset.coerceIn(-1f, 1f)
+    val mag = abs(clamped)
+    if (mag <= deadzone) return 0f
+    val sign = if (clamped >= 0f) 1f else -1f
+    val rescaled = ((mag - deadzone) / (1f - deadzone).coerceAtLeast(0.001f)).coerceIn(0f, 1f)
+    val u = sign * rescaled
+    val e = expo.coerceIn(0f, 0.85f)
+    return ((1f - e) * u + e * u * u * u).coerceIn(-1f, 1f)
 }
 
 enum class RcCarType(

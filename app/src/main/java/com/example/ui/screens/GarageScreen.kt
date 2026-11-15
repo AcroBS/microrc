@@ -39,6 +39,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -107,6 +108,7 @@ fun GarageScreen(
     }
 
     val liveSteer by tiltController.steerValue.collectAsState()
+    var previewSliderSteer by remember { mutableFloatStateOf(0f) }
 
     val infiniteTransition = rememberInfiniteTransition(label = "garageSpin")
     val turntableAngle by infiniteTransition.animateFloat(
@@ -205,7 +207,11 @@ fun GarageScreen(
                                     carType = selectedCar,
                                     primaryColor = Color(primaryColorArgb),
                                     accentColor = Color(accentColorArgb),
-                                    steerVisual = if (selectedControlMode == ControlMode.TILT_SENSOR) liveSteer else 0.35f,
+                                    steerVisual = when (selectedControlMode) {
+                                        ControlMode.TILT_SENSOR -> liveSteer
+                                        ControlMode.SPRING_SLIDER -> previewSliderSteer
+                                        ControlMode.TOUCH_OVERLAY -> 0.35f
+                                    },
                                     scale = 2.4f
                                 )
                             }
@@ -356,9 +362,9 @@ fun GarageScreen(
                 }
 
                 Text("STEERING CONTROLS", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     ControlMode.entries.forEach { mode ->
                         val active = selectedControlMode == mode
@@ -370,36 +376,96 @@ fun GarageScreen(
                                 if (active) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outlineVariant
                             ),
                             modifier = Modifier
-                                .weight(1f)
+                                .fillMaxWidth()
                                 .clip(RoundedCornerShape(18.dp))
                                 .clickable {
                                     selectedControlMode = mode
+                                    if (mode != ControlMode.SPRING_SLIDER) previewSliderSteer = 0f
                                     onSaveControlSettings(mode, tiltSensitivity, autoGasTilt)
                                 }
                                 .testTag("control_mode_${mode.name}")
                         ) {
-                            Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
                                 Icon(
-                                    if (mode == ControlMode.TILT_SENSOR) Icons.Default.PhoneAndroid else Icons.Default.TouchApp,
+                                    when (mode) {
+                                        ControlMode.TILT_SENSOR -> Icons.Default.PhoneAndroid
+                                        ControlMode.SPRING_SLIDER -> Icons.Default.SwapHoriz
+                                        ControlMode.TOUCH_OVERLAY -> Icons.Default.TouchApp
+                                    },
                                     contentDescription = mode.label,
-                                    tint = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                    tint = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(26.dp)
                                 )
-                                Spacer(modifier = Modifier.height(6.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = mode.label,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = mode.subtitle,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (active) {
+                                            MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.82f)
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                    )
+                                }
+                                if (active) {
+                                    Icon(
+                                        Icons.Default.Check,
+                                        contentDescription = "Selected",
+                                        tint = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (selectedControlMode == ControlMode.SPRING_SLIDER) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Live Spring Slider Preview", style = MaterialTheme.typography.titleMedium)
                                 Text(
-                                    text = mode.label,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = mode.subtitle,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = if (active) {
-                                        MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                    }
+                                    text = "Steer: ${(previewSliderSteer * 100f).toInt()}%",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.secondary
                                 )
                             }
+                            Text(
+                                text = "Slide thumb left/right for proportional RC expo steering. Lift thumb to snap straight back to neutral.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            SpringSteeringSlider(
+                                onSteerChange = { previewSliderSteer = it },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(84.dp)
+                                    .testTag("garage_spring_slider_preview")
+                            )
                         }
                     }
                 }

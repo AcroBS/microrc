@@ -1,6 +1,9 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -10,6 +13,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -33,6 +38,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.Videocam
@@ -62,12 +68,18 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.audio.RaceAudioEngine
@@ -85,6 +97,7 @@ import com.example.model.RaceSnapshot
 import com.example.model.RacerState
 import com.example.model.TrackDefinition
 import com.example.model.WinCondition
+import com.example.model.computeSpringSliderSteer
 import com.example.sensors.RcHapticController
 import com.example.sensors.TiltSteeringController
 import com.example.ui.components.drawTrackMiniMap
@@ -103,6 +116,7 @@ import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun RaceScreen(
     profile: PlayerProfile,
@@ -143,10 +157,21 @@ fun RaceScreen(
 
     var steerLeftPressed by remember { mutableStateOf(false) }
     var steerRightPressed by remember { mutableStateOf(false) }
+    var sliderSteer by remember { mutableFloatStateOf(0f) }
     var gasPressed by remember { mutableStateOf(false) }
     var brakePressed by remember { mutableStateOf(false) }
 
     val tiltSteer by tiltController.steerValue.collectAsState()
+
+    LaunchedEffect(profile.controlMode) {
+        if (profile.controlMode != ControlMode.SPRING_SLIDER) {
+            sliderSteer = 0f
+        }
+        if (profile.controlMode != ControlMode.TOUCH_OVERLAY) {
+            steerLeftPressed = false
+            steerRightPressed = false
+        }
+    }
 
     DisposableEffect(profile.controlMode, profile.tiltSensitivity) {
         if (profile.controlMode == ControlMode.TILT_SENSOR) {
@@ -164,14 +189,15 @@ fun RaceScreen(
         rules.autoAccelerate,
         steerLeftPressed,
         steerRightPressed,
+        sliderSteer,
         gasPressed,
         brakePressed,
         tiltSteer
     ) {
-        val steer = if (profile.controlMode == ControlMode.TILT_SENSOR) {
-            tiltSteer
-        } else {
-            (if (steerRightPressed) 1f else 0f) - (if (steerLeftPressed) 1f else 0f)
+        val steer = when (profile.controlMode) {
+            ControlMode.TILT_SENSOR -> tiltSteer
+            ControlMode.SPRING_SLIDER -> sliderSteer
+            ControlMode.TOUCH_OVERLAY -> (if (steerRightPressed) 1f else 0f) - (if (steerLeftPressed) 1f else 0f)
         }
         val throttle = when {
             brakePressed -> -1f
@@ -308,11 +334,12 @@ fun RaceScreen(
         WinCondition.valueOf(snapshot?.winCondition ?: rules.winCondition)
     }.getOrDefault(WinCondition.FIRST_TO_FINISH)
 
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(track.id.baseBgColorHex))
     ) {
+        val isWideHud = maxWidth >= 560.dp
         // World + Screen Weather Canvas
         Canvas(modifier = Modifier.fillMaxSize()) {
             val viewW = size.width
@@ -657,7 +684,7 @@ fun RaceScreen(
             }
         }
 
-        // Countdown, Finished Grace Notice, or Event Banner
+        // Countdown Ring (only before GO)
         if (snapshot?.phase == RacePhase.COUNTDOWN.name) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -678,79 +705,118 @@ fun RaceScreen(
                     }
                 }
             }
-        } else if (localRacer?.finished == true && snapshot?.phase == RacePhase.RACING.name) {
-            val graceSec = ((snapshot.postFinishGraceMs + 999L) / 1000L).coerceAtLeast(1L)
-            Surface(
-                color = CarbonBg.copy(alpha = 0.88f),
-                shape = RoundedCornerShape(50),
-                border = BorderStroke(1.5.dp, GoldTrophy),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(top = 86.dp)
-            ) {
-                Text(
-                    text = "FINISHED ${ordinal(localRacer.rank)}! Waiting for rivals (${graceSec}s)",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = GoldTrophy,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                )
-            }
-        } else if (!snapshot?.eventBanner.isNullOrBlank()) {
-            Surface(
-                color = CarbonBg.copy(alpha = 0.85f),
-                shape = RoundedCornerShape(50),
-                border = BorderStroke(1.dp, ElectricCyan),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(top = 86.dp)
-            ) {
-                Text(
-                    text = snapshot?.eventBanner ?: "",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = ElectricCyan,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                )
-            }
         }
 
-        // Prominent "INVERTED" Steering Alert Overlay (5 seconds)
+        // Top-Anchored Notification & Status Stack — strictly at the top of the screen so the center car is never covered
         val invertedRemMs = localRacer?.invertedSteerMs ?: 0L
-        if (invertedRemMs > 0L && snapshot?.phase == RacePhase.RACING.name) {
-            val invPulse = 0.5f + 0.5f * sin(animTimeSec * 12f)
-            val invSecText = String.format("%.1fs", invertedRemMs / 1000f)
-            val topOffset = if (!snapshot.eventBanner.isNullOrBlank() || localRacer?.finished == true) {
-                126.dp
-            } else {
-                86.dp
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .padding(
+                    top = if (isWideHud) 8.dp else 64.dp,
+                    start = if (isWideHud) 244.dp else 12.dp,
+                    end = when {
+                        isWideHud -> 154.dp
+                        !overviewCamera -> 154.dp
+                        else -> 12.dp
+                    }
+                ),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            if (invertedRemMs > 0L && snapshot?.phase == RacePhase.RACING.name) {
+                val invPulse = 0.5f + 0.5f * sin(animTimeSec * 12f)
+                val invSecText = String.format("%.1fs", invertedRemMs / 1000f)
+                Surface(
+                    color = Color(0xFF280633).copy(alpha = 0.92f),
+                    shape = RoundedCornerShape(50),
+                    border = BorderStroke(2.dp, Color(0xFFE040FB).copy(alpha = 0.65f + 0.35f * invPulse)),
+                    modifier = Modifier.testTag("inverted_banner")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "INVERTED",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color(0xFFFF80AB)
+                        )
+                        Text(
+                            text = invSecText,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White
+                        )
+                    }
+                }
             }
-            Surface(
-                color = Color(0xFF280633).copy(alpha = 0.90f),
-                shape = RoundedCornerShape(50),
-                border = BorderStroke(2.dp, Color(0xFFE040FB).copy(alpha = 0.65f + 0.35f * invPulse)),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(top = topOffset)
-                    .testTag("inverted_banner")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+
+            if (localRacer?.finished == true && snapshot?.phase == RacePhase.RACING.name) {
+                val graceSec = ((snapshot.postFinishGraceMs + 999L) / 1000L).coerceAtLeast(1L)
+                Surface(
+                    color = CarbonBg.copy(alpha = 0.88f),
+                    shape = RoundedCornerShape(50),
+                    border = BorderStroke(1.5.dp, GoldTrophy),
+                    modifier = Modifier.testTag("top_event_banner")
                 ) {
                     Text(
-                        text = "INVERTED",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color(0xFFFF80AB)
-                    )
-                    Text(
-                        text = invSecText,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = Color.White
+                        text = "FINISHED ${ordinal(localRacer.rank)}! Waiting for rivals (${graceSec}s)",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = GoldTrophy,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
                     )
                 }
+            } else if (!snapshot?.eventBanner.isNullOrBlank() && snapshot?.phase != RacePhase.COUNTDOWN.name) {
+                Surface(
+                    color = CarbonBg.copy(alpha = 0.86f),
+                    shape = RoundedCornerShape(50),
+                    border = BorderStroke(1.dp, ElectricCyan),
+                    modifier = Modifier.testTag("top_event_banner")
+                ) {
+                    Text(
+                        text = snapshot?.eventBanner ?: "",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = ElectricCyan,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
+                    )
+                }
+            }
+
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (rules.autoAccelerate) {
+                    Surface(
+                        color = AcidLime.copy(alpha = 0.22f),
+                        shape = RoundedCornerShape(50),
+                        border = BorderStroke(1.dp, AcidLime.copy(alpha = 0.7f)),
+                        modifier = Modifier.testTag("auto_gas_badge")
+                    ) {
+                        Text(
+                            text = "AUTO GAS",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AcidLime,
+                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+                if (isArenaMode && arenaFlagToDraw?.carrierId == localRacer?.playerId) {
+                    StatusChip("CARRYING FLAG!", GoldTrophy)
+                }
+                if ((localRacer?.jumpZ ?: 0f) > 0.1f) StatusChip("AIRBORNE!", GoldTrophy)
+                if ((localRacer?.boostMs ?: 0L) > 0L) StatusChip("TURBO", SignalOrange)
+                if ((localRacer?.shieldMs ?: 0L) > 0L) StatusChip("SHIELD", AcidLime)
+                if ((localRacer?.overdriveMs ?: 0L) > 0L) StatusChip("OVERDRIVE", Color(0xFFE040FB))
+                if ((localRacer?.stunnedMs ?: 0L) > 0L) StatusChip("ZAPPED!", AlertRed)
             }
         }
 
@@ -773,6 +839,11 @@ fun RaceScreen(
                 maxWidth >= 360.dp -> 100.dp
                 else -> 88.dp
             }
+            val sliderWidth = when {
+                maxWidth >= 560.dp -> 248.dp
+                maxWidth >= 380.dp -> 212.dp
+                else -> 184.dp
+            }
             val controlHeight = when {
                 maxWidth >= 520.dp -> 100.dp
                 maxWidth >= 360.dp -> 94.dp
@@ -784,46 +855,100 @@ fun RaceScreen(
                 else -> 44.dp
             }
 
-            Column(
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Row(
-                        modifier = Modifier.weight(1f, fill = false),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (rules.autoAccelerate) {
-                            Surface(
-                                color = AcidLime.copy(alpha = 0.22f),
-                                shape = RoundedCornerShape(50),
-                                border = BorderStroke(1.dp, AcidLime.copy(alpha = 0.7f)),
-                                modifier = Modifier.testTag("auto_gas_badge")
+                when (profile.controlMode) {
+                    ControlMode.TOUCH_OVERLAY -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            HoldControlPad(
+                                label = null,
+                                icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                contentDesc = "Steer Left",
+                                activeColor = ElectricCyan,
+                                iconSize = steerIconSize,
+                                modifier = Modifier
+                                    .size(width = steerWidth, height = controlHeight)
+                                    .testTag("steer_left_button"),
+                                onPressedChange = { steerLeftPressed = it }
+                            )
+                            HoldControlPad(
+                                label = null,
+                                icon = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDesc = "Steer Right",
+                                activeColor = ElectricCyan,
+                                iconSize = steerIconSize,
+                                modifier = Modifier
+                                    .size(width = steerWidth, height = controlHeight)
+                                    .testTag("steer_right_button"),
+                                onPressedChange = { steerRightPressed = it }
+                            )
+                        }
+                    }
+                    ControlMode.SPRING_SLIDER -> {
+                        SpringSteeringSlider(
+                            onSteerChange = { sliderSteer = it },
+                            modifier = Modifier
+                                .size(width = sliderWidth, height = controlHeight)
+                                .testTag("spring_steering_slider")
+                        )
+                    }
+                    ControlMode.TILT_SENSOR -> {
+                        Surface(
+                            color = CarbonBg.copy(alpha = 0.84f),
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.6f)),
+                            modifier = Modifier.width(172.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Text(
-                                    text = "AUTO GAS",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = AcidLime,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("TILT STEER", style = MaterialTheme.typography.labelSmall, color = ElectricCyan)
+                                    Icon(
+                                        Icons.Default.Refresh,
+                                        contentDescription = "Calibrate Neutral Tilt",
+                                        tint = Color.White,
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .clip(CircleShape)
+                                            .clickable { tiltController.calibrateNeutral() }
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(10.dp)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(PaddockSurface)
+                                ) {
+                                    val frac = ((tiltSteer + 1f) / 2f).coerceIn(0.05f, 0.95f)
+                                    Box(modifier = Modifier.fillMaxWidth(frac).height(10.dp)) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.CenterEnd)
+                                                .size(14.dp, 10.dp)
+                                                .clip(CircleShape)
+                                                .background(ElectricCyan)
+                                        )
+                                    }
+                                }
                             }
                         }
-                        if (isArenaMode && arenaFlagToDraw?.carrierId == localRacer?.playerId) {
-                            StatusChip("CARRYING FLAG!", GoldTrophy)
-                        }
-                        if (invertedRemMs > 0L) StatusChip("INVERTED", Color(0xFFE040FB))
-                        if ((localRacer?.jumpZ ?: 0f) > 0.1f) StatusChip("AIRBORNE!", GoldTrophy)
-                        if ((localRacer?.boostMs ?: 0L) > 0L) StatusChip("TURBO", SignalOrange)
-                        if ((localRacer?.shieldMs ?: 0L) > 0L) StatusChip("SHIELD", AcidLime)
-                        if ((localRacer?.overdriveMs ?: 0L) > 0L) StatusChip("OVERDRIVE", Color(0xFFE040FB))
-                        if ((localRacer?.stunnedMs ?: 0L) > 0L) StatusChip("ZAPPED!", AlertRed)
                     }
+                }
 
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -922,86 +1047,6 @@ fun RaceScreen(
                             }
                         }
                     }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    if (profile.controlMode == ControlMode.TOUCH_OVERLAY) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            HoldControlPad(
-                                label = null,
-                                icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                                contentDesc = "Steer Left",
-                                activeColor = ElectricCyan,
-                                iconSize = steerIconSize,
-                                modifier = Modifier
-                                    .size(width = steerWidth, height = controlHeight)
-                                    .testTag("steer_left_button"),
-                                onPressedChange = { steerLeftPressed = it }
-                            )
-                            HoldControlPad(
-                                label = null,
-                                icon = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDesc = "Steer Right",
-                                activeColor = ElectricCyan,
-                                iconSize = steerIconSize,
-                                modifier = Modifier
-                                    .size(width = steerWidth, height = controlHeight)
-                                    .testTag("steer_right_button"),
-                                onPressedChange = { steerRightPressed = it }
-                            )
-                        }
-                    } else {
-                        Surface(
-                            color = CarbonBg.copy(alpha = 0.84f),
-                            shape = RoundedCornerShape(16.dp),
-                            border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.6f)),
-                            modifier = Modifier.width(172.dp)
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(10.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text("TILT STEER", style = MaterialTheme.typography.labelSmall, color = ElectricCyan)
-                                    Icon(
-                                        Icons.Default.Refresh,
-                                        contentDescription = "Calibrate Neutral Tilt",
-                                        tint = Color.White,
-                                        modifier = Modifier
-                                            .size(22.dp)
-                                            .clip(CircleShape)
-                                            .clickable { tiltController.calibrateNeutral() }
-                                    )
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(10.dp)
-                                        .clip(RoundedCornerShape(50))
-                                        .background(PaddockSurface)
-                                ) {
-                                    val frac = ((tiltSteer + 1f) / 2f).coerceIn(0.05f, 0.95f)
-                                    Box(modifier = Modifier.fillMaxWidth(frac).height(10.dp)) {
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.CenterEnd)
-                                                .size(14.dp, 10.dp)
-                                                .clip(CircleShape)
-                                                .background(ElectricCyan)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
 
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1057,7 +1102,7 @@ fun RaceScreen(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         ControlMode.entries.forEach { mode ->
                             val active = profile.controlMode == mode
                             OutlinedButton(
@@ -1068,15 +1113,22 @@ fun RaceScreen(
                                     1.5.dp,
                                     if (active) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outlineVariant
                                 ),
-                                modifier = Modifier.weight(1f)
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("pause_mode_${mode.name}")
                             ) {
                                 Icon(
-                                    if (mode == ControlMode.TILT_SENSOR) Icons.Default.PhoneAndroid else Icons.Default.TouchApp,
+                                    when (mode) {
+                                        ControlMode.TILT_SENSOR -> Icons.Default.PhoneAndroid
+                                        ControlMode.SPRING_SLIDER -> Icons.Default.SwapHoriz
+                                        ControlMode.TOUCH_OVERLAY -> Icons.Default.TouchApp
+                                    },
                                     contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(15.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text(if (mode == ControlMode.TILT_SENSOR) "Tilt" else "Touch")
+                                Text(mode.shortLabel, maxLines = 1, style = MaterialTheme.typography.labelMedium)
                             }
                         }
                     }
@@ -1218,6 +1270,170 @@ private fun HoldControlPad(
                     text = label,
                     style = MaterialTheme.typography.titleLarge,
                     color = if (pressed) CarbonBg else activeColor
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SpringSteeringSlider(
+    onSteerChange: (Float) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val density = LocalDensity.current
+    val thumbHalfWidthPx = with(density) { 28.dp.toPx() }
+    var sliderWidthPx by remember { mutableFloatStateOf(0f) }
+    var isDragging by remember { mutableStateOf(false) }
+    var rawThumbOffset by remember { mutableFloatStateOf(0f) }
+    val latestOnSteerChange by androidx.compose.runtime.rememberUpdatedState(onSteerChange)
+
+    DisposableEffect(Unit) {
+        onDispose {
+            latestOnSteerChange(0f)
+        }
+    }
+
+    val animatedThumbOffset by animateFloatAsState(
+        targetValue = if (isDragging) rawThumbOffset else 0f,
+        animationSpec = spring(
+            dampingRatio = 0.68f,
+            stiffness = Spring.StiffnessHigh
+        ),
+        label = "springThumbSnap"
+    )
+    val displayOffset = if (isDragging) rawThumbOffset else animatedThumbOffset
+
+    Surface(
+        color = CarbonBg.copy(alpha = 0.80f),
+        shape = RoundedCornerShape(24.dp),
+        border = BorderStroke(
+            2.2.dp,
+            if (isDragging) Color.White else ElectricCyan.copy(alpha = 0.82f)
+        ),
+        modifier = modifier
+            .onSizeChanged { sliderWidthPx = it.width.toFloat() }
+            .pointerInput(thumbHalfWidthPx) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val activePointer = event.changes.firstOrNull { it.pressed }
+                        if (activePointer != null && sliderWidthPx > 0f) {
+                            val maxTravel = (sliderWidthPx / 2f - thumbHalfWidthPx).coerceAtLeast(1f)
+                            val rawNorm = ((activePointer.position.x - sliderWidthPx / 2f) / maxTravel)
+                                .coerceIn(-1f, 1f)
+                            isDragging = true
+                            rawThumbOffset = rawNorm
+                            latestOnSteerChange(computeSpringSliderSteer(rawNorm))
+                        } else if (isDragging || rawThumbOffset != 0f) {
+                            isDragging = false
+                            rawThumbOffset = 0f
+                            latestOnSteerChange(0f)
+                        }
+                        event.changes.forEach { it.consume() }
+                    }
+                }
+            }
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val w = size.width
+                val h = size.height
+                val centerX = w / 2f
+                val centerY = h / 2f
+                val maxTravel = (w / 2f - thumbHalfWidthPx).coerceAtLeast(1f)
+                val thumbCenterX = centerX + displayOffset * maxTravel
+
+                // Center channel groove
+                val railHeight = 10.dp.toPx()
+                val railMargin = thumbHalfWidthPx * 0.65f
+                drawRoundRect(
+                    color = PaddockSurface,
+                    topLeft = Offset(railMargin, centerY - railHeight / 2f),
+                    size = Size((w - railMargin * 2f).coerceAtLeast(4f), railHeight),
+                    cornerRadius = CornerRadius(railHeight / 2f, railHeight / 2f)
+                )
+
+                // Expo tick marks (-75%, -40%, 0%, +40%, +75%)
+                val tickFracs = floatArrayOf(-0.75f, -0.4f, 0f, 0.4f, 0.75f)
+                for (tf in tickFracs) {
+                    val tx = centerX + tf * maxTravel
+                    val isZero = tf == 0f
+                    val tickHalfH = if (isZero) h * 0.34f else h * 0.16f
+                    drawLine(
+                        color = if (isZero) SignalOrange.copy(alpha = 0.85f) else PaddockOutline,
+                        start = Offset(tx, centerY - tickHalfH),
+                        end = Offset(tx, centerY + tickHalfH),
+                        strokeWidth = if (isZero) 2.5.dp.toPx() else 1.5.dp.toPx()
+                    )
+                }
+
+                // Active proportional deflection bar from neutral center to thumb
+                val barLeft = minOf(centerX, thumbCenterX)
+                val barWidth = kotlin.math.abs(thumbCenterX - centerX)
+                if (barWidth > 1f) {
+                    drawRoundRect(
+                        color = ElectricCyan.copy(alpha = 0.85f),
+                        topLeft = Offset(barLeft, centerY - railHeight / 2f),
+                        size = Size(barWidth, railHeight),
+                        cornerRadius = CornerRadius(railHeight / 2f, railHeight / 2f)
+                    )
+                }
+
+                // Spring-loaded RC transmitter thumb puck (>= 48dp touch area)
+                val puckW = (thumbHalfWidthPx * 1.85f).coerceAtLeast(44.dp.toPx())
+                val puckH = (h - 14.dp.toPx()).coerceAtLeast(44.dp.toPx())
+                val puckLeft = thumbCenterX - puckW / 2f
+                val puckTop = centerY - puckH / 2f
+                val puckColor = if (isDragging) ElectricCyan else ElectricCyan.copy(alpha = 0.90f)
+
+                drawRoundRect(
+                    color = puckColor,
+                    topLeft = Offset(puckLeft, puckTop),
+                    size = Size(puckW, puckH),
+                    cornerRadius = CornerRadius(16.dp.toPx(), 16.dp.toPx())
+                )
+
+                // Knurled grip ridges on thumb puck
+                val ridgeColor = CarbonBg.copy(alpha = 0.72f)
+                val ridgeSpacing = 6.dp.toPx()
+                for (ri in -1..1) {
+                    val rx = thumbCenterX + ri * ridgeSpacing
+                    drawLine(
+                        color = ridgeColor,
+                        start = Offset(rx, centerY - puckH * 0.26f),
+                        end = Offset(rx, centerY + puckH * 0.26f),
+                        strokeWidth = 2.dp.toPx()
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .align(Alignment.TopCenter)
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "◄ L",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary.copy(alpha = 0.78f)
+                )
+                Text(
+                    text = if (isDragging) {
+                        val pct = (computeSpringSliderSteer(rawThumbOffset) * 100f).toInt()
+                        if (pct > 0) "+$pct%" else "$pct%"
+                    } else {
+                        "STEER"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isDragging) ElectricCyan else TextSecondary.copy(alpha = 0.78f)
+                )
+                Text(
+                    text = "R ►",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = TextSecondary.copy(alpha = 0.78f)
                 )
             }
         }

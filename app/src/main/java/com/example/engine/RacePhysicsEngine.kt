@@ -25,6 +25,7 @@ import com.example.model.TrackHazard
 import com.example.model.TrackPoint
 import com.example.model.TrackPuddle
 import com.example.model.WinCondition
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
@@ -171,9 +172,9 @@ class RacePhysicsEngine(
     private val rainPuddles: MutableList<TrackPuddle> = mutableListOf()
     private var quakePulseTimerMs: Long = 0L
 
-    private val latestInputs = mutableMapOf<String, ControlInput>()
-    private val pendingPowerUpTrigger = mutableSetOf<String>()
-    private val pendingMineDropTrigger = mutableSetOf<String>()
+    private val latestInputs = ConcurrentHashMap<String, ControlInput>()
+    private val pendingPowerUpTrigger: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    private val pendingMineDropTrigger: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     init {
         if (isArenaMode) {
@@ -704,7 +705,10 @@ class RacePhysicsEngine(
                 }
                 racer.finished && racer.isBot -> ControlInput(throttle = 0f, steer = 0f)
                 racer.isBot -> computeBotInput(racer, dtMs, cruise = false)
-                else -> latestInputs[racer.playerId] ?: ControlInput()
+                else -> latestInputs[racer.playerId] ?: ControlInput(
+                    throttle = if (rules.autoAccelerate) 1f else 0f,
+                    steer = 0f
+                )
             }
 
             if (phase == RacePhase.RACING && !racer.finished) {

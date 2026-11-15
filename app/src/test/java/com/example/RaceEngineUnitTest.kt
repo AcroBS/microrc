@@ -1093,4 +1093,47 @@ class RaceEngineUnitTest {
         assertEquals(votedTrackId, decodedPacket?.rematchState?.leadingOptionId)
         assertEquals(3, decodedPacket?.rematchState?.options?.size)
     }
+
+    @Test
+    fun springSliderSteer_appliesDeadzoneExpoAndFullLockSymmetrically() {
+        // Neutral & inside small center deadzone -> exact 0f
+        assertEquals(0f, com.example.model.computeSpringSliderSteer(0f), 0.0001f)
+        assertEquals(0f, com.example.model.computeSpringSliderSteer(0.02f), 0.0001f)
+        assertEquals(0f, com.example.model.computeSpringSliderSteer(-0.02f), 0.0001f)
+
+        // Full left/right lock -> exact -1f / +1f
+        assertEquals(1f, com.example.model.computeSpringSliderSteer(1f), 0.0001f)
+        assertEquals(-1f, com.example.model.computeSpringSliderSteer(-1f), 0.0001f)
+
+        // Subtle RC expo: mid-travel is smooth and gentler than raw linear deflection, strictly monotonic & symmetric
+        val quarter = com.example.model.computeSpringSliderSteer(0.25f)
+        val half = com.example.model.computeSpringSliderSteer(0.50f)
+        val threeQuarter = com.example.model.computeSpringSliderSteer(0.75f)
+        assertTrue("Quarter deflection ($quarter) should be > 0 and gentler than linear 0.25", quarter in 0.12f..0.22f)
+        assertTrue("Half deflection ($half) should be gentler than linear 0.50 due to expo", half in 0.32f..0.46f)
+        assertTrue("Curve must be strictly monotonic ($quarter < $half < $threeQuarter < 1f)", quarter < half && half < threeQuarter && threeQuarter < 1f)
+        assertEquals("Left/right must be perfectly symmetric", -half, com.example.model.computeSpringSliderSteer(-0.50f), 0.0001f)
+    }
+
+    @Test
+    fun telemetryCodec_roundTripsUdpAckAndSanitizesNewlinesForTcpFallback() {
+        val helloBytes = RaceTelemetryCodec.encodeHello("driver|1\ntest", ackedHostUdpSeq = 33L)
+        val decodedHello = RaceTelemetryCodec.decodeHelloPacket(String(helloBytes, Charsets.UTF_8))
+        assertNotNull(decodedHello)
+        assertEquals("driver1test", decodedHello?.playerId)
+        assertEquals(33L, decodedHello?.ackedHostUdpSeq)
+
+        val inputLine = RaceTelemetryCodec.encodeInputLine(
+            playerId = "client\n2",
+            seq = 19L,
+            input = ControlInput(throttle = 1f, steer = 0.42f),
+            ackedHostUdpSeq = 44L
+        )
+        assertFalse("Compact TCP input line must never contain embedded newlines", inputLine.contains('\n'))
+        val decodedInput = RaceTelemetryCodec.decodeInput(inputLine)
+        assertNotNull(decodedInput)
+        assertEquals(19L, decodedInput?.seq)
+        assertEquals(44L, decodedInput?.ackedHostUdpSeq)
+        assertEquals(0.42f, decodedInput?.input?.steer ?: 0f, 0.002f)
+    }
 }
