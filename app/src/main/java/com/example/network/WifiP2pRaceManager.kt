@@ -5,10 +5,12 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import com.example.data.TrackCatalog
 import com.example.engine.RacePhysicsEngine
+import com.example.model.ArenaShape
 import com.example.model.ChatMessage
 import com.example.model.ControlInput
 import com.example.model.CustomTrackData
 import com.example.model.DiscoveredLobby
+import com.example.model.GameMode
 import com.example.model.LobbyPlayer
 import com.example.model.LobbyStatePayload
 import com.example.model.NetworkMessage
@@ -150,6 +152,7 @@ class WifiP2pRaceManager(
     private val chatLog = mutableListOf<ChatMessage>()
     private val playersList = mutableListOf<LobbyPlayer>()
     private var currentTrackId: TrackId = TrackId.LIVING_ROOM_GP
+    private var currentArenaShape: ArenaShape = ArenaShape.SQUARE
     private var currentCustomTrack: CustomTrackData? = null
     private var currentRules: RaceRulesSettings = RaceRulesSettings()
     private var currentTotalLaps: Int = 3
@@ -199,8 +202,15 @@ class WifiP2pRaceManager(
         currentRules = initialRules
         currentTotalLaps = initialRules.totalLaps.coerceIn(1, 9)
         currentCustomTrack = initialCustomTrack
-        if (initialCustomTrack != null) {
+        if (initialRules.gameModeEnum == GameMode.ARENA) {
+            currentCustomTrack = null
+            currentTrackId = currentArenaShape.themeTrackId
+            _activeTrack.value = TrackCatalog.getArenaTrack(currentArenaShape)
+        } else if (initialCustomTrack != null) {
             currentTrackId = runCatching { TrackId.valueOf(initialCustomTrack.themeId) }.getOrDefault(TrackId.NEON_ROOFTOP)
+            _activeTrack.value = TrackCatalog.buildCustomTrack(initialCustomTrack)
+        } else {
+            _activeTrack.value = TrackCatalog.getTrack(currentTrackId)
         }
         _role.value = SessionRole.Solo
         inRace = false
@@ -239,8 +249,15 @@ class WifiP2pRaceManager(
         currentRules = initialRules
         currentTotalLaps = initialRules.totalLaps.coerceIn(1, 9)
         currentCustomTrack = initialCustomTrack
-        if (initialCustomTrack != null) {
+        if (initialRules.gameModeEnum == GameMode.ARENA) {
+            currentCustomTrack = null
+            currentTrackId = currentArenaShape.themeTrackId
+            _activeTrack.value = TrackCatalog.getArenaTrack(currentArenaShape)
+        } else if (initialCustomTrack != null) {
             currentTrackId = runCatching { TrackId.valueOf(initialCustomTrack.themeId) }.getOrDefault(TrackId.NEON_ROOFTOP)
+            _activeTrack.value = TrackCatalog.buildCustomTrack(initialCustomTrack)
+        } else {
+            _activeTrack.value = TrackCatalog.getTrack(currentTrackId)
         }
         _role.value = SessionRole.Host
         inRace = false
@@ -407,9 +424,13 @@ class WifiP2pRaceManager(
                                     val payload = msg.lobbyState ?: continue
                                     _lobbyState.value = payload
                                     currentRules = payload.rules
-                                    _activeTrack.value = payload.activeCustomTrack?.let {
-                                        TrackCatalog.buildCustomTrack(it)
-                                    } ?: TrackCatalog.getTrack(payload.trackId)
+                                    _activeTrack.value = if (payload.rules.gameModeEnum == GameMode.ARENA) {
+                                        TrackCatalog.getArenaTrack(payload.arenaShape)
+                                    } else {
+                                        payload.activeCustomTrack?.let {
+                                            TrackCatalog.buildCustomTrack(it)
+                                        } ?: TrackCatalog.getTrack(payload.trackId)
+                                    }
                                     if (payload.udpPort > 0) {
                                         clientHostUdpPort = payload.udpPort
                                         sendClientUdpHello()
@@ -434,9 +455,15 @@ class WifiP2pRaceManager(
                                         _lobbyState.value = _lobbyState.value?.copy(rules = r)
                                     }
                                     val startSnap = msg.raceSnapshot
-                                    val baseTrack = msg.customTrack?.let {
-                                        TrackCatalog.buildCustomTrack(it)
-                                    } ?: TrackCatalog.getTrack(startSnap?.trackId ?: TrackId.LIVING_ROOM_GP.name)
+                                    val isArenaMatch = currentRules.gameModeEnum == GameMode.ARENA ||
+                                        startSnap?.gameMode == GameMode.ARENA.name
+                                    val baseTrack = if (isArenaMatch) {
+                                        TrackCatalog.getArenaTrack(msg.arenaShape ?: startSnap?.arenaShape)
+                                    } else {
+                                        msg.customTrack?.let {
+                                            TrackCatalog.buildCustomTrack(it)
+                                        } ?: TrackCatalog.getTrack(startSnap?.trackId ?: TrackId.LIVING_ROOM_GP.name)
+                                    }
                                     val syncedTrack = if (msg.ramps != null) {
                                         baseTrack.copy(ramps = msg.ramps)
                                     } else {
@@ -765,12 +792,31 @@ class WifiP2pRaceManager(
         if (_role.value == SessionRole.Host) broadcastLobbyState() else publishLocalLobbyState()
     }
 
+    fun selectArenaShape(shape: ArenaShape) {
+        if (_role.value != SessionRole.Host && _role.value != SessionRole.Solo) return
+        currentArenaShape = shape
+        currentTrackId = shape.themeTrackId
+        currentCustomTrack = null
+        _activeTrack.value = TrackCatalog.getArenaTrack(shape)
+        addSystemChat("Arena set to ${shape.displayName} (${shape.shapeLabel})")
+        if (_role.value == SessionRole.Host) broadcastLobbyState() else publishLocalLobbyState()
+    }
+
     fun updateRules(rules: RaceRulesSettings) {
         if (_role.value != SessionRole.Host && _role.value != SessionRole.Solo) return
         currentRules = rules
         currentTotalLaps = rules.totalLaps.coerceIn(1, 9)
+        if (rules.gameModeEnum == GameMode.ARENA) {
+            currentCustomTrack = null
+            currentTrackId = currentArenaShape.themeTrackId
+            _activeTrack.value = TrackCatalog.getArenaTrack(currentArenaShape)
+        }
         val summary = buildList {
-            add(rules.winConditionEnum.displayName)
+            if (rules.gameModeEnum == GameMode.ARENA) {
+                add("Arena (${rules.arenaTargetMinutes} min flag)")
+            } else {
+                add(rules.winConditionEnum.displayName)
+            }
             if (rules.autoAccelerate) add("Auto-Gas")
             if (rules.hardTrackBoundary) add("Bounce Walls")
             if (rules.randomJumpsEnabled) add("Jumps")
@@ -857,11 +903,12 @@ class WifiP2pRaceManager(
         inRace = true
         pointsAwardedForCurrentRace = false
         hostStateSeq.set(0L)
-        val customData = currentCustomTrack
-        val baseTrack = if (customData != null) {
-            TrackCatalog.buildCustomTrack(customData)
-        } else {
-            TrackCatalog.getTrack(currentTrackId)
+        val isArenaMode = currentRules.gameModeEnum == GameMode.ARENA
+        val customData = if (isArenaMode) null else currentCustomTrack
+        val baseTrack = when {
+            isArenaMode -> TrackCatalog.getArenaTrack(currentArenaShape)
+            customData != null -> TrackCatalog.buildCustomTrack(customData)
+            else -> TrackCatalog.getTrack(currentTrackId)
         }
         val track = if (customData == null) {
             TrackCatalog.withRandomJumps(baseTrack, enabled = currentRules.randomJumpsEnabled)
@@ -887,6 +934,7 @@ class WifiP2pRaceManager(
                     type = PacketType.RACE_START,
                     senderId = localPlayerId,
                     raceSnapshot = initialSnap,
+                    arenaShape = if (isArenaMode) currentArenaShape.name else null,
                     rules = currentRules,
                     customTrack = customData,
                     ramps = track.ramps
@@ -1163,7 +1211,12 @@ class WifiP2pRaceManager(
             hostIp = discovery.getPrimaryLocalIp(),
             tcpPort = tcpPort,
             udpPort = hostUdpPort,
-            trackId = currentTrackId.name,
+            trackId = if (currentRules.gameModeEnum == GameMode.ARENA) {
+                currentArenaShape.themeTrackId.name
+            } else {
+                currentTrackId.name
+            },
+            arenaShape = currentArenaShape.name,
             totalLaps = currentTotalLaps,
             players = playersCopy,
             chatHistory = chatCopy,

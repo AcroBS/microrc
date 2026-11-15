@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.audio.RaceAudioEngine
 import com.example.data.PreferencesRepository
 import com.example.data.TrackCatalog
+import com.example.model.ArenaShape
 import com.example.model.AudioSettings
 import com.example.model.ControlMode
 import com.example.model.CustomTrackData
@@ -177,10 +178,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectTrack(trackId: TrackId) = raceManager.selectTrack(trackId)
+    fun selectArenaShape(shape: ArenaShape) = raceManager.selectArenaShape(shape)
     fun selectCustomTrack(customTrack: CustomTrackData) = raceManager.selectCustomTrack(customTrack)
     fun generateRandomTrackForLobby() {
         val randomTrack = TrackCatalog.generateRandomTrack(seed = System.currentTimeMillis())
         raceManager.selectCustomTrack(randomTrack)
+    }
+    fun selectRandomArenaForLobby() {
+        val current = lobbyState.value?.arenaShape
+        val choices = ArenaShape.entries.filter { it.name != current }.ifEmpty { ArenaShape.entries }
+        val picked = choices[(System.currentTimeMillis() % choices.size).toInt().coerceAtLeast(0)]
+        raceManager.selectArenaShape(picked)
     }
 
     fun setTotalLaps(laps: Int) = raceManager.setTotalLaps(laps)

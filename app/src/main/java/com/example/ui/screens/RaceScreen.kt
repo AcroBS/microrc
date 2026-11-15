@@ -73,6 +73,7 @@ import com.example.engine.RacePhysicsEngine
 import com.example.model.AudioSettings
 import com.example.model.ControlMode
 import com.example.model.ExternalEventType
+import com.example.model.GameMode
 import com.example.model.PlayerProfile
 import com.example.model.PowerUpType
 import com.example.model.RacePhase
@@ -250,10 +251,29 @@ fun RaceScreen(
         }
     }
 
-    val track = activeTrack ?: remember(snapshot?.trackId) {
-        TrackCatalog.getTrack(snapshot?.trackId ?: "LIVING_ROOM_GP")
+    val isArenaMode = snapshot?.gameMode == GameMode.ARENA.name ||
+        (snapshot == null && rules.gameModeEnum == GameMode.ARENA)
+    val track = activeTrack ?: remember(snapshot?.trackId, snapshot?.arenaShape, isArenaMode) {
+        if (isArenaMode) {
+            TrackCatalog.getArenaTrack(snapshot?.arenaShape)
+        } else {
+            TrackCatalog.getTrack(snapshot?.trackId ?: "LIVING_ROOM_GP")
+        }
     }
     val racersToDraw = smoothedRacers.ifEmpty { snapshot?.racers.orEmpty() }
+    val arenaFlagToDraw = snapshot?.arenaFlag?.let { rawFlag ->
+        val carrierId = rawFlag.carrierId
+        if (carrierId != null) {
+            val carrierPose = racersToDraw.find { it.playerId == carrierId }
+            if (carrierPose != null) {
+                rawFlag.copy(x = carrierPose.x, y = carrierPose.y)
+            } else {
+                rawFlag
+            }
+        } else {
+            rawFlag
+        }
+    }
     val activeEvent = runCatching {
         ExternalEventType.valueOf(snapshot?.activeEvent ?: ExternalEventType.NONE.name)
     }.getOrDefault(ExternalEventType.NONE)
@@ -301,7 +321,8 @@ fun RaceScreen(
                         activeEvent = activeEvent,
                         showPlayerNames = rules.showPlayerNames,
                         localPlayerId = profile.playerId,
-                        isOverview = true
+                        isOverview = true,
+                        arenaFlag = arenaFlagToDraw
                     )
                 }
             } else {
@@ -321,7 +342,8 @@ fun RaceScreen(
                         activeEvent = activeEvent,
                         showPlayerNames = rules.showPlayerNames,
                         localPlayerId = profile.playerId,
-                        isOverview = false
+                        isOverview = false,
+                        arenaFlag = arenaFlagToDraw
                     )
                 }
             }
@@ -364,7 +386,37 @@ fun RaceScreen(
                                 color = GoldTrophy
                             )
                         }
-                        if (winCond == WinCondition.TIME_TRIAL_DISTANCE) {
+                        if (isArenaMode) {
+                            val targetMs = snapshot?.arenaTargetMs ?: (rules.arenaTargetMinutes * 60_000L)
+                            val myHoldMs = localRacer?.flagCarryMs ?: 0L
+                            val carrierId = arenaFlagToDraw?.carrierId
+                            val iHaveFlag = carrierId != null && carrierId == localRacer?.playerId
+                            val carrierRacer = snapshot?.racers?.find { it.playerId == carrierId }
+                            Column {
+                                Text("FLAG HOLD", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                Text(
+                                    text = "${formatArenaHoldClock(myHoldMs)}/${formatArenaHoldClock(targetMs)}",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = if (iHaveFlag) GoldTrophy else ElectricCyan
+                                )
+                            }
+                            Column {
+                                Text("FLAG", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                Text(
+                                    text = when {
+                                        iHaveFlag -> "YOU!"
+                                        carrierRacer != null -> carrierRacer.name.take(8)
+                                        else -> "LOOSE"
+                                    },
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = when {
+                                        iHaveFlag -> GoldTrophy
+                                        carrierRacer != null -> SignalOrange
+                                        else -> AcidLime
+                                    }
+                                )
+                            }
+                        } else if (winCond == WinCondition.TIME_TRIAL_DISTANCE) {
                             val totalMs = ((snapshot?.timeLimitSec ?: rules.timeLimitSec) * 1000L)
                             val remMs = (totalMs - (snapshot?.raceTimeMs ?: 0L)).coerceAtLeast(0L)
                             Column {
@@ -496,7 +548,8 @@ fun RaceScreen(
                                 drawTrackMiniMap(
                                     track = track,
                                     racers = racersToDraw,
-                                    localPlayerId = profile.playerId
+                                    localPlayerId = profile.playerId,
+                                    arenaFlag = arenaFlagToDraw
                                 )
                             }
                             Text(
@@ -590,6 +643,9 @@ fun RaceScreen(
                 verticalAlignment = Alignment.Bottom
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (isArenaMode && arenaFlagToDraw?.carrierId == localRacer?.playerId) {
+                        StatusChip("CARRYING FLAG!", GoldTrophy)
+                    }
                     if ((localRacer?.jumpZ ?: 0f) > 0.1f) StatusChip("AIRBORNE!", GoldTrophy)
                     if ((localRacer?.boostMs ?: 0L) > 0L) StatusChip("TURBO", SignalOrange)
                     if ((localRacer?.shieldMs ?: 0L) > 0L) StatusChip("SHIELD", AcidLime)
@@ -940,6 +996,13 @@ fun formatRaceTime(ms: Long): String {
     val secs = (clamped % 60000L) / 1000L
     val hundredths = (clamped % 1000L) / 10L
     return String.format("%02d:%02d.%02d", mins, secs, hundredths)
+}
+
+fun formatArenaHoldClock(ms: Long): String {
+    val totalSecs = (ms.coerceAtLeast(0L)) / 1000L
+    val mins = totalSecs / 60L
+    val secs = totalSecs % 60L
+    return String.format("%d:%02d", mins, secs)
 }
 
 fun ordinal(rank: Int): String = when (rank) {

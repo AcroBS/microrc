@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
+import com.example.model.ArenaFlagState
 import com.example.model.ExternalEventType
 import com.example.model.ItemBoxState
 import com.example.model.PropShape
@@ -48,7 +49,8 @@ fun DrawScope.drawTrackWorld(
     activeEvent: ExternalEventType = ExternalEventType.NONE,
     showPlayerNames: Boolean = false,
     localPlayerId: String? = null,
-    isOverview: Boolean = false
+    isOverview: Boolean = false,
+    arenaFlag: ArenaFlagState? = null
 ) {
     // 1. Background floor
     drawRect(
@@ -60,9 +62,10 @@ fun DrawScope.drawTrackWorld(
     // 2. Subtle themed background texture
     drawEnvironmentDetails(track)
 
-    // 3. Build closed centerline path
-    val pts = track.centerline
+    // 3. Render either Open Arena Floor or Closed Circuit Road
+    val pts = if (track.isArena) track.arenaBoundary.ifEmpty { track.centerline } else track.centerline
     if (pts.isEmpty()) return
+
     val roadPath = Path().apply {
         moveTo(pts[0].x, pts[0].y)
         for (i in 1 until pts.size) {
@@ -71,65 +74,155 @@ fun DrawScope.drawTrackWorld(
         close()
     }
 
-    val avgHalfW = pts[0].halfWidth
-    val roadWidth = avgHalfW * 2f
+    if (track.isArena) {
+        if (hardBoundary) {
+            drawPath(
+                path = roadPath,
+                color = Color(0xFF0E131B),
+                style = Stroke(width = 44f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
+            drawPath(
+                path = roadPath,
+                color = Color(0xFFFF6D00),
+                style = Stroke(width = 34f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
+        }
+        drawPath(
+            path = roadPath,
+            color = Color(track.id.kerbSecondaryHex),
+            style = Stroke(width = 24f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        drawPath(
+            path = roadPath,
+            color = Color(track.id.kerbPrimaryHex),
+            style = Stroke(
+                width = 24f,
+                cap = StrokeCap.Butt,
+                join = StrokeJoin.Round,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(40f, 40f), 0f)
+            )
+        )
+        // Single large open Arena floor fill
+        drawPath(
+            path = roadPath,
+            color = Color(track.id.roadColorHex)
+        )
+        if (activeEvent == ExternalEventType.SNOW) {
+            drawPath(
+                path = roadPath,
+                color = Color(0xFFE3F2FD).copy(alpha = 0.22f)
+            )
+        }
 
-    // Optional solid guardrail wall when Hard Track Boundary is active
-    if (hardBoundary) {
+        // Tactical Arena center rings & crosshairs
+        val cx = track.worldWidth * 0.5f
+        val cy = track.worldHeight * 0.5f
+        drawCircle(
+            color = Color.White.copy(alpha = 0.10f),
+            radius = 270f,
+            center = Offset(cx, cy),
+            style = Stroke(
+                width = 3.5f,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(26f, 22f), 0f)
+            )
+        )
+        drawCircle(
+            color = Color(track.id.kerbPrimaryHex).copy(alpha = 0.22f),
+            radius = 125f,
+            center = Offset(cx, cy),
+            style = Stroke(width = 4f)
+        )
+        drawLine(
+            color = Color.White.copy(alpha = 0.10f),
+            start = Offset(cx - 170f, cy),
+            end = Offset(cx + 170f, cy),
+            strokeWidth = 3f
+        )
+        drawLine(
+            color = Color.White.copy(alpha = 0.10f),
+            start = Offset(cx, cy - 170f),
+            end = Offset(cx, cy + 170f),
+            strokeWidth = 3f
+        )
+    } else {
+        val avgHalfW = pts[0].halfWidth
+        val roadWidth = avgHalfW * 2f
+
+        if (hardBoundary) {
+            drawPath(
+                path = roadPath,
+                color = Color(0xFF0E131B),
+                style = Stroke(width = roadWidth + 36f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
+            drawPath(
+                path = roadPath,
+                color = Color(0xFFFF6D00),
+                style = Stroke(width = roadWidth + 30f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
+        }
+
         drawPath(
             path = roadPath,
-            color = Color(0xFF0E131B),
-            style = Stroke(width = roadWidth + 36f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            color = Color(track.id.kerbSecondaryHex),
+            style = Stroke(width = roadWidth + 24f, cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
         drawPath(
             path = roadPath,
-            color = Color(0xFFFF6D00),
-            style = Stroke(width = roadWidth + 30f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            color = Color(track.id.kerbPrimaryHex),
+            style = Stroke(
+                width = roadWidth + 24f,
+                cap = StrokeCap.Butt,
+                join = StrokeJoin.Round,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(38f, 38f), 0f)
+            )
         )
+
+        drawPath(
+            path = roadPath,
+            color = Color(track.id.roadColorHex),
+            style = Stroke(width = roadWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+
+        if (activeEvent == ExternalEventType.SNOW) {
+            drawPath(
+                path = roadPath,
+                color = Color(0xFFE3F2FD).copy(alpha = 0.24f),
+                style = Stroke(width = roadWidth - 8f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
+        }
+
+        drawPath(
+            path = roadPath,
+            color = Color.White.copy(alpha = 0.13f),
+            style = Stroke(
+                width = 4f,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(28f, 32f), 0f)
+            )
+        )
+
+        // 4. Start / Finish checkered gantry (Circuit mode only)
+        val p0 = pts[0]
+        val p1 = pts[1]
+        val startAngle = atan2(p1.y - p0.y, p1.x - p0.x) * 180f / PI.toFloat()
+        withTransform({
+            translate(p0.x, p0.y)
+            rotate(startAngle, Offset.Zero)
+        }) {
+            val cells = 10
+            val cellSize = roadWidth / cells
+            val startY = -roadWidth / 2f
+            for (row in 0 until 2) {
+                for (col in 0 until cells) {
+                    val isWhite = (row + col) % 2 == 0
+                    drawRect(
+                        color = if (isWhite) Color.White else Color(0xFF11141B),
+                        topLeft = Offset(-cellSize + row * cellSize, startY + col * cellSize),
+                        size = Size(cellSize, cellSize)
+                    )
+                }
+            }
+        }
     }
-
-    // Outer kerb / shoulder
-    drawPath(
-        path = roadPath,
-        color = Color(track.id.kerbSecondaryHex),
-        style = Stroke(width = roadWidth + 24f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-    )
-    drawPath(
-        path = roadPath,
-        color = Color(track.id.kerbPrimaryHex),
-        style = Stroke(
-            width = roadWidth + 24f,
-            cap = StrokeCap.Butt,
-            join = StrokeJoin.Round,
-            pathEffect = PathEffect.dashPathEffect(floatArrayOf(38f, 38f), 0f)
-        )
-    )
-
-    // Main track surface
-    drawPath(
-        path = roadPath,
-        color = Color(track.id.roadColorHex),
-        style = Stroke(width = roadWidth, cap = StrokeCap.Round, join = StrokeJoin.Round)
-    )
-
-    // Frosty glaze on track surface during Snowfall
-    if (activeEvent == ExternalEventType.SNOW) {
-        drawPath(
-            path = roadPath,
-            color = Color(0xFFE3F2FD).copy(alpha = 0.24f),
-            style = Stroke(width = roadWidth - 8f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-        )
-    }
-
-    // Subtle racing groove / centerline dashes
-    drawPath(
-        path = roadPath,
-        color = Color.White.copy(alpha = 0.13f),
-        style = Stroke(
-            width = 4f,
-            pathEffect = PathEffect.dashPathEffect(floatArrayOf(28f, 32f), 0f)
-        )
-    )
 
     // Rain puddles on road surface (glossy blue with animated ripples)
     for (i in rainPuddles.indices) {
@@ -152,29 +245,6 @@ fun DrawScope.drawTrackWorld(
             center = Offset(p.x, p.y),
             style = Stroke(width = 2.5f)
         )
-    }
-
-    // 4. Start / Finish checkered gantry
-    val p0 = pts[0]
-    val p1 = pts[1]
-    val startAngle = atan2(p1.y - p0.y, p1.x - p0.x) * 180f / PI.toFloat()
-    withTransform({
-        translate(p0.x, p0.y)
-        rotate(startAngle, Offset.Zero)
-    }) {
-        val cells = 10
-        val cellSize = roadWidth / cells
-        val startY = -roadWidth / 2f
-        for (row in 0 until 2) {
-            for (col in 0 until cells) {
-                val isWhite = (row + col) % 2 == 0
-                drawRect(
-                    color = if (isWhite) Color.White else Color(0xFF11141B),
-                    topLeft = Offset(-cellSize + row * cellSize, startY + col * cellSize),
-                    size = Size(cellSize, cellSize)
-                )
-            }
-        }
     }
 
     // 5. Boost pads
@@ -214,14 +284,12 @@ fun DrawScope.drawTrackWorld(
             translate(ramp.x, ramp.y)
             rotate(deg, Offset.Zero)
         }) {
-            // Drop shadow under raised takeoff lip
             drawRoundRect(
                 color = Color.Black.copy(alpha = 0.48f),
                 topLeft = Offset(-28f, -24f),
                 size = Size(82f, 54f),
                 cornerRadius = CornerRadius(8f, 8f)
             )
-            // Ramp base deck (dark-to-light slope toward launch edge)
             drawRoundRect(
                 color = Color(0xFF4E342E),
                 topLeft = Offset(-42f, -26f),
@@ -234,7 +302,6 @@ fun DrawScope.drawTrackWorld(
                 size = Size(42f, 52f),
                 cornerRadius = CornerRadius(6f, 6f)
             )
-            // Bright amber takeoff lip & rails
             drawRect(
                 color = Color(0xFFFFAB00),
                 topLeft = Offset(30f, -27f),
@@ -250,7 +317,6 @@ fun DrawScope.drawTrackWorld(
                 topLeft = Offset(-42f, 23f),
                 size = Size(84f, 5f)
             )
-            // Launch chevrons
             for (c in -1..1) {
                 val cx = c * 18f - 4f
                 val chev = Path().apply {
@@ -267,7 +333,7 @@ fun DrawScope.drawTrackWorld(
         }
     }
 
-    // 6. Props & obstacles
+    // 6. Props & obstacles (including Arena Oil Slicks!)
     for (prop in track.props) {
         when (prop.shape) {
             PropShape.CIRCLE -> {
@@ -308,15 +374,23 @@ fun DrawScope.drawTrackWorld(
             }
             PropShape.MUD_POOL -> {
                 drawOval(
-                    Color(prop.colorHex).copy(alpha = 0.75f),
-                    Offset(prop.x - prop.radius, prop.y - prop.radius * 0.75f),
-                    Size(prop.radius * 2f, prop.radius * 1.5f)
+                    Color(prop.colorHex).copy(alpha = if (track.isArena) 0.86f else 0.75f),
+                    Offset(prop.x - prop.radius, prop.y - prop.radius * 0.78f),
+                    Size(prop.radius * 2f, prop.radius * 1.56f)
                 )
                 drawOval(
-                    Color(prop.accentHex).copy(alpha = 0.4f),
-                    Offset(prop.x - prop.radius * 0.6f, prop.y - prop.radius * 0.4f),
-                    Size(prop.radius * 1.2f, prop.radius * 0.8f)
+                    Color(prop.accentHex).copy(alpha = 0.42f),
+                    Offset(prop.x - prop.radius * 0.62f, prop.y - prop.radius * 0.42f),
+                    Size(prop.radius * 1.24f, prop.radius * 0.84f)
                 )
+                if (track.isArena) {
+                    // Oil-slick rainbow sheen highlight
+                    drawOval(
+                        Color(0xFFE040FB).copy(alpha = 0.32f),
+                        Offset(prop.x - prop.radius * 0.35f, prop.y - prop.radius * 0.2f),
+                        Size(prop.radius * 0.78f, prop.radius * 0.48f)
+                    )
+                }
             }
         }
     }
@@ -361,6 +435,49 @@ fun DrawScope.drawTrackWorld(
         }
     }
 
+    // 8b. Loose Arena Flag on the map (when nobody is carrying it)
+    if (arenaFlag != null && arenaFlag.carrierId == null) {
+        val fx = arenaFlag.x
+        val fy = arenaFlag.y
+        val pulse = 42f + 6f * sin(animTimeSec * 6f)
+        drawCircle(
+            color = Color(0xFFFFD54F).copy(alpha = 0.22f),
+            radius = pulse,
+            center = Offset(fx, fy)
+        )
+        drawCircle(
+            color = Color(0xFFFFD54F),
+            radius = 46f,
+            center = Offset(fx, fy),
+            style = Stroke(
+                width = 3f,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 10f), animTimeSec * 40f)
+            )
+        )
+        // Pedestal shadow + pole + waving flag banner
+        drawCircle(Color.Black.copy(alpha = 0.45f), radius = 14f, center = Offset(fx + 4f, fy + 5f))
+        drawCircle(Color(0xFF263238), radius = 12f, center = Offset(fx, fy))
+        drawCircle(Color(0xFFFFD54F), radius = 8f, center = Offset(fx, fy), style = Stroke(width = 2.5f))
+        drawLine(
+            color = Color.White,
+            start = Offset(fx, fy),
+            end = Offset(fx, fy - 48f),
+            strokeWidth = 4.5f,
+            cap = StrokeCap.Round
+        )
+        val wave = sin(animTimeSec * 10f) * 6f
+        val banner = Path().apply {
+            moveTo(fx + 1f, fy - 47f)
+            lineTo(fx + 38f, fy - 38f + wave)
+            lineTo(fx + 30f, fy - 28f + wave * 0.6f)
+            lineTo(fx + 39f, fy - 19f + wave)
+            lineTo(fx + 1f, fy - 20f)
+            close()
+        }
+        drawPath(banner, Color(0xFFFFAB00))
+        drawPath(banner, Color(0xFFFFF8E1), style = Stroke(width = 2f))
+    }
+
     // 9. Draw all RC cars (grounded first, airborne cars rendered on top)
     val orderedRacers = racers.sortedBy { it.jumpZ }
     for (r in orderedRacers) {
@@ -380,72 +497,89 @@ fun DrawScope.drawTrackWorld(
             spinVisualOffset = r.spinVisualOffset,
             jumpZ = r.jumpZ,
             scale = 1f,
-            animTimeSec = animTimeSec
+            animTimeSec = animTimeSec,
+            isCarryingFlag = arenaFlag?.carrierId == r.playerId
         )
     }
 
-    // 10. Optional server-controlled player name tags drawn above/next to each car
-    if (showPlayerNames) {
-        val textScale = if (isOverview) 1.65f else 1f
-        racerNamePaint.textSize = 15f * textScale
-        val fm = racerNamePaint.fontMetrics
-        val textHeight = fm.descent - fm.ascent
+    // 10. Player name tags + Arena Flag Carrier live timer pill
+    val textScale = if (isOverview) 1.65f else 1f
+    racerNamePaint.textSize = 15f * textScale
+    val fm = racerNamePaint.fontMetrics
+    val textHeight = fm.descent - fm.ascent
 
-        for (r in orderedRacers) {
-            val label = r.name.trim().take(12).ifEmpty { "Racer" }
-            val isLocal = r.playerId == localPlayerId
-            val labelX = r.x
-            val labelY = r.y - (38f * textScale) - (r.jumpZ * 26f)
-            val textWidth = racerNamePaint.measureText(label)
-            val padX = 8f * textScale
-            val padY = 3.5f * textScale
-            val pillW = textWidth + padX * 2f
-            val pillH = textHeight + padY * 2f
-            val pillLeft = labelX - pillW / 2f
-            val pillTop = labelY - pillH / 2f
+    for (r in orderedRacers) {
+        val isFlagCarrier = arenaFlag?.carrierId == r.playerId
+        if (!showPlayerNames && !isFlagCarrier) continue
 
-            drawRoundRect(
-                color = Color(0xFF0B0E14).copy(alpha = 0.80f),
-                topLeft = Offset(pillLeft, pillTop),
-                size = Size(pillW, pillH),
-                cornerRadius = CornerRadius(7f * textScale, 7f * textScale)
-            )
-            drawRoundRect(
-                color = if (isLocal) Color(0xFF00E5FF) else Color(r.primaryColorArgb).copy(alpha = 0.9f),
-                topLeft = Offset(pillLeft, pillTop),
-                size = Size(pillW, pillH),
-                cornerRadius = CornerRadius(7f * textScale, 7f * textScale),
-                style = Stroke(width = 1.6f * textScale)
-            )
-
-            racerNamePaint.color = if (isLocal) {
-                Color(0xFF00E5FF).toArgb()
-            } else {
-                Color.White.toArgb()
-            }
-            val baselineY = labelY - (fm.ascent + fm.descent) / 2f
-            drawContext.canvas.nativeCanvas.drawText(label, labelX, baselineY, racerNamePaint)
+        val baseName = r.name.trim().take(12).ifEmpty { "Racer" }
+        val carrySec = r.flagCarryMs / 1000L
+        val label = when {
+            isFlagCarrier && showPlayerNames -> "⚑ $baseName • ${carrySec}s"
+            isFlagCarrier -> "⚑ FLAG • ${carrySec}s"
+            else -> baseName
         }
+        val isLocal = r.playerId == localPlayerId
+        val labelX = r.x
+        val labelY = r.y - (if (isFlagCarrier) 44f else 38f) * textScale - (r.jumpZ * 26f)
+        val textWidth = racerNamePaint.measureText(label)
+        val padX = 8f * textScale
+        val padY = 3.5f * textScale
+        val pillW = textWidth + padX * 2f
+        val pillH = textHeight + padY * 2f
+        val pillLeft = labelX - pillW / 2f
+        val pillTop = labelY - pillH / 2f
+
+        drawRoundRect(
+            color = if (isFlagCarrier) {
+                Color(0xFF281A00).copy(alpha = 0.92f)
+            } else {
+                Color(0xFF0B0E14).copy(alpha = 0.80f)
+            },
+            topLeft = Offset(pillLeft, pillTop),
+            size = Size(pillW, pillH),
+            cornerRadius = CornerRadius(7f * textScale, 7f * textScale)
+        )
+        val borderColor = when {
+            isFlagCarrier -> Color(0xFFFFD54F)
+            isLocal -> Color(0xFF00E5FF)
+            else -> Color(r.primaryColorArgb).copy(alpha = 0.9f)
+        }
+        drawRoundRect(
+            color = borderColor,
+            topLeft = Offset(pillLeft, pillTop),
+            size = Size(pillW, pillH),
+            cornerRadius = CornerRadius(7f * textScale, 7f * textScale),
+            style = Stroke(width = if (isFlagCarrier) 2.2f * textScale else 1.6f * textScale)
+        )
+
+        racerNamePaint.color = when {
+            isFlagCarrier -> Color(0xFFFFD54F).toArgb()
+            isLocal -> Color(0xFF00E5FF).toArgb()
+            else -> Color.White.toArgb()
+        }
+        val baselineY = labelY - (fm.ascent + fm.descent) / 2f
+        drawContext.canvas.nativeCanvas.drawText(label, labelX, baselineY, racerNamePaint)
     }
 }
 
 private fun DrawScope.drawEnvironmentDetails(track: TrackDefinition) {
     when (track.id) {
         TrackId.LIVING_ROOM_GP -> {
-            // Hardwood floor planks
             val plankColor = Color.Black.copy(alpha = 0.14f)
             var y = 0f
             while (y < track.worldHeight) {
                 drawLine(plankColor, Offset(0f, y), Offset(track.worldWidth, y), strokeWidth = 2f)
                 y += 72f
             }
-            // Decorative living room area rug in center
-            drawRoundRect(
-                color = Color(0xFF283593).copy(alpha = 0.35f),
-                topLeft = Offset(580f, 480f),
-                size = Size(440f, 360f),
-                cornerRadius = CornerRadius(18f, 18f)
-            )
+            if (!track.isArena) {
+                drawRoundRect(
+                    color = Color(0xFF283593).copy(alpha = 0.35f),
+                    topLeft = Offset(580f, 480f),
+                    size = Size(440f, 360f),
+                    cornerRadius = CornerRadius(18f, 18f)
+                )
+            }
         }
         TrackId.NEON_ROOFTOP -> {
             val gridColor = Color(0xFF00E5FF).copy(alpha = 0.08f)
@@ -474,7 +608,6 @@ private fun DrawScope.drawEnvironmentDetails(track: TrackDefinition) {
             }
         }
         TrackId.BACKYARD_DIRT, TrackId.SANDBOX_DUNES -> {
-            // Subtle organic terrain dots
             val dotColor = Color.Black.copy(alpha = 0.07f)
             for (i in 0 until 36) {
                 val px = ((i * 397) % 2100) + 50f
@@ -488,7 +621,8 @@ private fun DrawScope.drawEnvironmentDetails(track: TrackDefinition) {
 fun DrawScope.drawTrackMiniMap(
     track: TrackDefinition,
     racers: List<RacerState> = emptyList(),
-    localPlayerId: String? = null
+    localPlayerId: String? = null,
+    arenaFlag: ArenaFlagState? = null
 ) {
     val pad = 8.dp.toPx()
     val availW = (size.width - pad * 2f).coerceAtLeast(1f)
@@ -497,7 +631,7 @@ fun DrawScope.drawTrackMiniMap(
     val offsetX = (size.width - track.worldWidth * scale) / 2f
     val offsetY = (size.height - track.worldHeight * scale) / 2f
 
-    val pts = track.centerline
+    val pts = if (track.isArena) track.arenaBoundary.ifEmpty { track.centerline } else track.centerline
     if (pts.isEmpty()) return
 
     val path = Path().apply {
@@ -508,45 +642,82 @@ fun DrawScope.drawTrackMiniMap(
         close()
     }
 
-    drawPath(
-        path = path,
-        color = Color(track.id.kerbPrimaryHex).copy(alpha = 0.55f),
-        style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-    )
-    drawPath(
-        path = path,
-        color = Color(0xFF1F2736),
-        style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-    )
-    drawPath(
-        path = path,
-        color = Color.White.copy(alpha = 0.85f),
-        style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-    )
+    if (track.isArena) {
+        drawPath(
+            path = path,
+            color = Color(track.id.roadColorHex).copy(alpha = 0.92f)
+        )
+        drawPath(
+            path = path,
+            color = Color(track.id.kerbPrimaryHex),
+            style = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+    } else {
+        drawPath(
+            path = path,
+            color = Color(track.id.kerbPrimaryHex).copy(alpha = 0.55f),
+            style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        drawPath(
+            path = path,
+            color = Color(0xFF1F2736),
+            style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        drawPath(
+            path = path,
+            color = Color.White.copy(alpha = 0.85f),
+            style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
 
-    // Start/Finish tick
-    val s = pts[0]
-    val sNext = pts[1]
-    val startAng = atan2(sNext.y - s.y, sNext.x - s.x)
-    val perpX = -sin(startAng) * 4.5.dp.toPx()
-    val perpY = cos(startAng) * 4.5.dp.toPx()
-    val sx = offsetX + s.x * scale
-    val sy = offsetY + s.y * scale
-    drawLine(
-        color = Color(0xFFFF5722),
-        start = Offset(sx - perpX, sy - perpY),
-        end = Offset(sx + perpX, sy + perpY),
-        strokeWidth = 2.2.dp.toPx(),
-        cap = StrokeCap.Round
-    )
+        // Start/Finish tick
+        val s = pts[0]
+        val sNext = pts[1]
+        val startAng = atan2(sNext.y - s.y, sNext.x - s.x)
+        val perpX = -sin(startAng) * 4.5.dp.toPx()
+        val perpY = cos(startAng) * 4.5.dp.toPx()
+        val sx = offsetX + s.x * scale
+        val sy = offsetY + s.y * scale
+        drawLine(
+            color = Color(0xFFFF5722),
+            start = Offset(sx - perpX, sy - perpY),
+            end = Offset(sx + perpX, sy + perpY),
+            strokeWidth = 2.2.dp.toPx(),
+            cap = StrokeCap.Round
+        )
+    }
+
+    // Loose flag beacon on mini-map
+    if (arenaFlag != null && arenaFlag.carrierId == null) {
+        val fx = offsetX + arenaFlag.x * scale
+        val fy = offsetY + arenaFlag.y * scale
+        drawCircle(
+            color = Color(0xFFFFD54F).copy(alpha = 0.38f),
+            radius = 6.5.dp.toPx(),
+            center = Offset(fx, fy)
+        )
+        drawCircle(
+            color = Color(0xFFFFD54F),
+            radius = 3.6.dp.toPx(),
+            center = Offset(fx, fy)
+        )
+    }
 
     // Draw rivals first, then local player on top so local car is always clearly visible
     val ordered = racers.sortedBy { it.playerId == localPlayerId }
     for (r in ordered) {
         val isLocal = r.playerId == localPlayerId
+        val hasFlag = arenaFlag?.carrierId == r.playerId
         val cx = offsetX + r.x * scale
         val cy = offsetY + r.y * scale
         val dotRadius = if (isLocal) 4.6.dp.toPx() else 3.6.dp.toPx()
+        if (hasFlag) {
+            drawCircle(
+                color = Color(0xFFFFD54F),
+                radius = dotRadius + 3.2.dp.toPx(),
+                center = Offset(cx, cy),
+                style = Stroke(width = 1.8.dp.toPx())
+            )
+        }
         if (isLocal) {
             drawCircle(
                 color = Color(0xFF00E5FF).copy(alpha = 0.4f),
@@ -629,7 +800,6 @@ fun DrawScope.drawWeatherScreenOverlay(
                 Color(0xFFE65100),
                 Color(0xFF9CCC65)
             )
-            // Air gust streaks
             for (i in 0 until 14) {
                 val baseX = ((i * 313 + 89) % 1000) / 1000f
                 val baseY = ((i * 547 + 19) % 1000) / 1000f
@@ -644,7 +814,6 @@ fun DrawScope.drawWeatherScreenOverlay(
                     cap = StrokeCap.Round
                 )
             }
-            // Blowing leaves moving & tumbling in wind direction
             for (i in 0 until 26) {
                 val baseX = ((i * 179 + 31) % 1000) / 1000f
                 val baseY = ((i * 601 + 53) % 1000) / 1000f
@@ -675,10 +844,8 @@ fun DrawScope.drawWeatherScreenOverlay(
             }
         }
         ExternalEventType.EARTHQUAKE -> {
-            // Subtle warm dust haze during tremors
             drawRect(color = Color(0xFF5D4037).copy(alpha = 0.10f))
         }
         ExternalEventType.NONE -> Unit
     }
 }
-

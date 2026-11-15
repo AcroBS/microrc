@@ -30,7 +30,8 @@ fun DrawScope.drawRcCar(
     spinVisualOffset: Float = 0f,
     jumpZ: Float = 0f,
     scale: Float = 1f,
-    animTimeSec: Float = 0f
+    animTimeSec: Float = 0f,
+    isCarryingFlag: Boolean = false
 ) {
     val deg = ((angleRad + spinVisualOffset) * 180f / PI.toFloat())
     val frontWheelAngle = steerVisual * 22f
@@ -124,6 +125,33 @@ fun DrawScope.drawRcCar(
                 center = Offset.Zero,
                 style = Stroke(width = 2.5f)
             )
+        }
+
+        // Arena Flag Carrier aura + roof-mounted waving battle pennant
+        if (isCarryingFlag) {
+            val auraRadius = 33f + 3f * sin(animTimeSec * 9f)
+            drawCircle(
+                color = Color(0xFFFFD54F).copy(alpha = 0.24f),
+                radius = auraRadius,
+                center = Offset.Zero
+            )
+            drawCircle(
+                color = Color(0xFFFFD54F),
+                radius = auraRadius,
+                center = Offset.Zero,
+                style = Stroke(width = 2.8f)
+            )
+            val flutterY = sin(animTimeSec * 18f) * 5.5f
+            val pennant = Path().apply {
+                moveTo(2f, -2f)
+                lineTo(-24f, -15f + flutterY)
+                lineTo(-19f, -2f + flutterY * 0.5f)
+                lineTo(-25f, 11f + flutterY)
+                close()
+            }
+            drawPath(pennant, Color(0xFFFFAB00))
+            drawPath(pennant, Color(0xFFFFF8E1), style = Stroke(width = 1.6f))
+            drawCircle(Color.White, radius = 3.6f, center = Offset(2f, -1f))
         }
 
         // EMP Stun sparks

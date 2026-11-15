@@ -126,6 +126,44 @@ enum class PropShape {
     MUD_POOL
 }
 
+enum class ArenaShape(
+    val displayName: String,
+    val subtitle: String,
+    val shapeLabel: String,
+    val themeTrackId: TrackId
+) {
+    SQUARE(
+        displayName = "Square Colosseum",
+        subtitle = "Wide 90° corners for tactical jukes & ambushes",
+        shapeLabel = "Square",
+        themeTrackId = TrackId.WAREHOUSE_DRIFT
+    ),
+    CIRCLE(
+        displayName = "Circle Thunder Bowl",
+        subtitle = "360° circular basin with non-stop high-speed chases",
+        shapeLabel = "Circle",
+        themeTrackId = TrackId.NEON_ROOFTOP
+    ),
+    STAR(
+        displayName = "Star Citadel",
+        subtitle = "Five-point star alcoves & high-risk central crossfire",
+        shapeLabel = "5-Point Star",
+        themeTrackId = TrackId.LIVING_ROOM_GP
+    ),
+    HEXAGON(
+        displayName = "Hexagon Crater",
+        subtitle = "Six-sided dirt pit built for slides & mid-air steals",
+        shapeLabel = "Hexagon",
+        themeTrackId = TrackId.BACKYARD_DIRT
+    ),
+    CLOVER(
+        displayName = "Diamond Cross",
+        subtitle = "Four sweeping wings converging on a desert arena",
+        shapeLabel = "Diamond",
+        themeTrackId = TrackId.SANDBOX_DUNES
+    )
+}
+
 data class CustomTrackData(
     val id: String,
     val name: String,
@@ -149,7 +187,10 @@ data class TrackDefinition(
     val ramps: List<TrackRamp> = emptyList(),
     val defaultLaps: Int = 3,
     val customId: String? = null,
-    val customName: String? = null
+    val customName: String? = null,
+    val isArena: Boolean = false,
+    val arenaShape: ArenaShape? = null,
+    val arenaBoundary: List<TrackPoint> = emptyList()
 ) {
-    val displayTitle: String get() = customName ?: id.displayName
+    val displayTitle: String get() = customName ?: arenaShape?.displayName ?: id.displayName
 }

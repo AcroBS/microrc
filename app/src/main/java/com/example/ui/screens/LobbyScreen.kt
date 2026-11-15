@@ -37,10 +37,12 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.SportsScore
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
@@ -69,8 +71,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.data.TrackCatalog
+import com.example.model.ArenaFlagState
+import com.example.model.ArenaShape
 import com.example.model.CustomTrackData
+import com.example.model.GameMode
 import com.example.model.LobbyStatePayload
+import com.example.model.RaceRulesSettings
 import com.example.model.RcCarType
 import com.example.model.TrackId
 import com.example.model.WinCondition
@@ -86,8 +92,11 @@ fun LobbyScreen(
     lobby: LobbyStatePayload?,
     customTracks: List<CustomTrackData>,
     onSelectTrack: (TrackId) -> Unit,
+    onSelectArenaShape: (ArenaShape) -> Unit = {},
     onSelectCustomTrack: (CustomTrackData) -> Unit,
     onGenerateRandomTrack: () -> Unit,
+    onSelectRandomArena: () -> Unit = {},
+    onUpdateRules: (RaceRulesSettings) -> Unit = {},
     onOpenTrackEditor: () -> Unit,
     onOpenSettings: () -> Unit,
     onSelectLaps: (Int) -> Unit,
@@ -111,6 +120,9 @@ fun LobbyScreen(
             chatListState.animateScrollToItem(chatHistory.size - 1)
         }
     }
+
+    val activeRules = lobby?.rules
+    val isArenaMode = activeRules?.gameModeEnum == GameMode.ARENA
 
     Surface(
         color = MaterialTheme.colorScheme.background,
@@ -157,7 +169,7 @@ fun LobbyScreen(
                         )
                     } else {
                         Text(
-                            text = "Offline Practice vs AI",
+                            text = if (isArenaMode) "Offline Arena vs AI" else "Offline Practice vs AI",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.tertiary
                         )
@@ -200,14 +212,14 @@ fun LobbyScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 // Active Match Rules Badges
-                val activeRules = lobby?.rules
                 if (activeRules != null) {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         item {
-                            val label = if (activeRules.winConditionEnum == WinCondition.TIME_TRIAL_DISTANCE) {
-                                "${activeRules.timeLimitSec}s LIMIT"
-                            } else {
-                                activeRules.winConditionEnum.displayName.uppercase()
+                            val label = when {
+                                isArenaMode -> "ARENA • ${activeRules.arenaTargetMinutes}M FLAG"
+                                activeRules.winConditionEnum == WinCondition.TIME_TRIAL_DISTANCE ->
+                                    "${activeRules.timeLimitSec}s LIMIT"
+                                else -> activeRules.winConditionEnum.displayName.uppercase()
                             }
                             LobbyRuleBadge(label, MaterialTheme.colorScheme.primary, onOpenSettings)
                         }
@@ -229,181 +241,326 @@ fun LobbyScreen(
                     }
                 }
 
-                // Track Selector + Laps
-                val activeCustom = lobby?.activeCustomTrack
-                val selectedTrack = runCatching {
-                    TrackId.valueOf(lobby?.trackId ?: TrackId.LIVING_ROOM_GP.name)
-                }.getOrDefault(TrackId.LIVING_ROOM_GP)
+                if (isArenaMode) {
+                    // Arena Shape Selector + Flag Hold Minutes
+                    val selectedArena = runCatching {
+                        ArenaShape.valueOf(lobby?.arenaShape ?: ArenaShape.SQUARE.name)
+                    }.getOrDefault(ArenaShape.SQUARE)
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (isHostOrSolo) "SELECT TRACK" else "SELECTED TRACK",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (activeRules?.winConditionEnum == WinCondition.TIME_TRIAL_DISTANCE) {
-                        Text(
-                            text = "TIME: ${activeRules.timeLimitSec}s",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    } else {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(2, 3, 5).forEach { laps ->
-                                val active = (lobby?.totalLaps ?: 3) == laps
-                                FilterChip(
-                                    selected = active,
-                                    onClick = { if (isHostOrSolo) onSelectLaps(laps) },
-                                    enabled = isHostOrSolo,
-                                    label = { Text("${laps}L", style = MaterialTheme.typography.labelSmall) }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                if (isHostOrSolo) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        OutlinedButton(
-                            onClick = onGenerateRandomTrack,
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                                .testTag("lobby_random_track_button")
-                        ) {
-                            Icon(Icons.Default.Casino, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Random Track", style = MaterialTheme.typography.labelMedium)
-                        }
-                        OutlinedButton(
-                            onClick = onOpenTrackEditor,
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp)
-                                .testTag("lobby_track_editor_button")
-                        ) {
-                            Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Track Editor", style = MaterialTheme.typography.labelMedium)
-                        }
-                    }
-                }
-
-                val carouselCustomTracks = remember(customTracks, activeCustom) {
-                    if (activeCustom != null && customTracks.none { it.id == activeCustom.id }) {
-                        listOf(activeCustom) + customTracks
-                    } else {
-                        customTracks
-                    }
-                }
-
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(carouselCustomTracks, key = { "custom_${it.id}" }) { cTrack ->
-                        val previewDef = remember(cTrack) { TrackCatalog.buildCustomTrack(cTrack) }
-                        val active = activeCustom?.id == cTrack.id
-                        Surface(
-                            color = if (active) {
-                                MaterialTheme.colorScheme.primaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.surfaceContainer
-                            },
-                            shape = RoundedCornerShape(16.dp),
-                            border = BorderStroke(
-                                width = if (active) 2.dp else 1.dp,
-                                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-                            ),
-                            modifier = Modifier
-                                .width(156.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .clickable(enabled = isHostOrSolo) { onSelectCustomTrack(cTrack) }
-                                .testTag("custom_track_card_${cTrack.id}")
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(66.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(Color(previewDef.id.baseBgColorHex).copy(alpha = 0.85f))
-                                ) {
-                                    Canvas(modifier = Modifier.fillMaxSize()) {
-                                        drawTrackMiniMap(previewDef)
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = cTrack.name,
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "Custom • ${previewDef.ramps.size} Jumps",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1
+                        Text(
+                            text = if (isHostOrSolo) "SELECT ARENA SHAPE" else "SELECTED ARENA",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(1, 2, 3, 5).forEach { mins ->
+                                val active = (activeRules?.arenaTargetMinutes ?: 2) == mins
+                                FilterChip(
+                                    selected = active,
+                                    onClick = {
+                                        if (isHostOrSolo && activeRules != null) {
+                                            onUpdateRules(activeRules.copy(arenaTargetMinutes = mins))
+                                        }
+                                    },
+                                    enabled = isHostOrSolo,
+                                    label = { Text("${mins}m", style = MaterialTheme.typography.labelSmall) },
+                                    modifier = Modifier.testTag("lobby_arena_min_$mins")
                                 )
                             }
                         }
                     }
 
-                    items(TrackCatalog.allTracks(), key = { it.id.name }) { track ->
-                        val active = activeCustom == null && track.id == selectedTrack
-                        Surface(
-                            color = if (active) {
-                                MaterialTheme.colorScheme.primaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.surfaceContainer
-                            },
-                            shape = RoundedCornerShape(16.dp),
-                            border = BorderStroke(
-                                width = if (active) 2.dp else 1.dp,
-                                color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-                            ),
-                            modifier = Modifier
-                                .width(156.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .clickable(enabled = isHostOrSolo) { onSelectTrack(track.id) }
-                                .testTag("track_card_${track.id.name}")
+                    if (isHostOrSolo) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(66.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(Color(track.id.baseBgColorHex).copy(alpha = 0.85f))
-                                ) {
-                                    Canvas(modifier = Modifier.fillMaxSize()) {
-                                        drawTrackMiniMap(track)
+                            OutlinedButton(
+                                onClick = onSelectRandomArena,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("lobby_random_arena_button")
+                            ) {
+                                Icon(Icons.Default.Casino, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Random Arena", style = MaterialTheme.typography.labelMedium)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    if (activeRules != null) {
+                                        onUpdateRules(activeRules.copy(gameMode = GameMode.RACE.name))
                                     }
+                                },
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("lobby_switch_mode_button")
+                            ) {
+                                Icon(Icons.Default.SportsScore, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Circuit Mode", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(TrackCatalog.allArenas(), key = { "arena_${it.arenaShape?.name}" }) { arenaTrack ->
+                            val shape = arenaTrack.arenaShape ?: ArenaShape.SQUARE
+                            val active = shape == selectedArena
+                            Surface(
+                                color = if (active) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainer
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(
+                                    width = if (active) 2.dp else 1.dp,
+                                    color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                ),
+                                modifier = Modifier
+                                    .width(164.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .clickable(enabled = isHostOrSolo) { onSelectArenaShape(shape) }
+                                    .testTag("arena_card_${shape.name}")
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(68.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(Color(arenaTrack.id.baseBgColorHex).copy(alpha = 0.88f))
+                                    ) {
+                                        Canvas(modifier = Modifier.fillMaxSize()) {
+                                            drawTrackMiniMap(
+                                                track = arenaTrack,
+                                                arenaFlag = ArenaFlagState(
+                                                    x = arenaTrack.worldWidth * 0.5f,
+                                                    y = arenaTrack.worldHeight * 0.5f,
+                                                    carrierId = null
+                                                )
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = shape.displayName,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${shape.shapeLabel} • Jumps & Boosts",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
+                                    )
                                 }
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = track.id.displayName,
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = "${track.id.surfaceLabel} • ${track.id.difficulty}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1
-                                )
+                            }
+                        }
+                    }
+                } else {
+                    // Circuit Track Selector + Laps
+                    val activeCustom = lobby?.activeCustomTrack
+                    val selectedTrack = runCatching {
+                        TrackId.valueOf(lobby?.trackId ?: TrackId.LIVING_ROOM_GP.name)
+                    }.getOrDefault(TrackId.LIVING_ROOM_GP)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (isHostOrSolo) "SELECT TRACK" else "SELECTED TRACK",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (activeRules?.winConditionEnum == WinCondition.TIME_TRIAL_DISTANCE) {
+                            Text(
+                                text = "TIME: ${activeRules.timeLimitSec}s",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf(2, 3, 5).forEach { laps ->
+                                    val active = (lobby?.totalLaps ?: 3) == laps
+                                    FilterChip(
+                                        selected = active,
+                                        onClick = { if (isHostOrSolo) onSelectLaps(laps) },
+                                        enabled = isHostOrSolo,
+                                        label = { Text("${laps}L", style = MaterialTheme.typography.labelSmall) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (isHostOrSolo) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = onGenerateRandomTrack,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("lobby_random_track_button")
+                            ) {
+                                Icon(Icons.Default.Casino, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Random", style = MaterialTheme.typography.labelMedium)
+                            }
+                            OutlinedButton(
+                                onClick = onOpenTrackEditor,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("lobby_track_editor_button")
+                            ) {
+                                Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Editor", style = MaterialTheme.typography.labelMedium)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    val base = activeRules ?: RaceRulesSettings()
+                                    onUpdateRules(base.copy(gameMode = GameMode.ARENA.name))
+                                },
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("lobby_switch_mode_button")
+                            ) {
+                                Icon(Icons.Default.Flag, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Arena", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+
+                    val carouselCustomTracks = remember(customTracks, activeCustom) {
+                        if (activeCustom != null && customTracks.none { it.id == activeCustom.id }) {
+                            listOf(activeCustom) + customTracks
+                        } else {
+                            customTracks
+                        }
+                    }
+
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        items(carouselCustomTracks, key = { "custom_${it.id}" }) { cTrack ->
+                            val previewDef = remember(cTrack) { TrackCatalog.buildCustomTrack(cTrack) }
+                            val active = activeCustom?.id == cTrack.id
+                            Surface(
+                                color = if (active) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainer
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(
+                                    width = if (active) 2.dp else 1.dp,
+                                    color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                ),
+                                modifier = Modifier
+                                    .width(156.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .clickable(enabled = isHostOrSolo) { onSelectCustomTrack(cTrack) }
+                                    .testTag("custom_track_card_${cTrack.id}")
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(66.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(Color(previewDef.id.baseBgColorHex).copy(alpha = 0.85f))
+                                    ) {
+                                        Canvas(modifier = Modifier.fillMaxSize()) {
+                                            drawTrackMiniMap(previewDef)
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = cTrack.name,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "Custom • ${previewDef.ramps.size} Jumps",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+
+                        items(TrackCatalog.allTracks(), key = { it.id.name }) { track ->
+                            val active = activeCustom == null && track.id == selectedTrack
+                            Surface(
+                                color = if (active) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainer
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(
+                                    width = if (active) 2.dp else 1.dp,
+                                    color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                ),
+                                modifier = Modifier
+                                    .width(156.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .clickable(enabled = isHostOrSolo) { onSelectTrack(track.id) }
+                                    .testTag("track_card_${track.id.name}")
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(66.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(Color(track.id.baseBgColorHex).copy(alpha = 0.85f))
+                                    ) {
+                                        Canvas(modifier = Modifier.fillMaxSize()) {
+                                            drawTrackMiniMap(track)
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = track.id.displayName,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${track.id.surfaceLabel} • ${track.id.difficulty}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
+                                    )
+                                }
                             }
                         }
                     }
@@ -604,9 +761,8 @@ fun LobbyScreen(
                             }
                         }
 
-                        // Quick chat chips
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            val quickPhrases = listOf("Ready!", "Good luck!", "Rematch!", "Wait up!")
+                            val quickPhrases = listOf("Ready!", "Good luck!", "Watch the flag!", "Rematch!")
                             items(quickPhrases) { phrase ->
                                 Surface(
                                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -688,7 +844,12 @@ fun LobbyScreen(
                             Icon(Icons.Default.PlayArrow, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (playerCount < 2) "START SOLO RACE (OR ADD BOT)" else "START RACE ($playerCount RACERS)",
+                                text = when {
+                                    isArenaMode && playerCount < 2 -> "START SOLO ARENA (OR ADD BOT)"
+                                    isArenaMode -> "START ARENA ($playerCount RACERS)"
+                                    playerCount < 2 -> "START SOLO RACE (OR ADD BOT)"
+                                    else -> "START RACE ($playerCount RACERS)"
+                                },
                                 style = MaterialTheme.typography.labelLarge
                             )
                         }

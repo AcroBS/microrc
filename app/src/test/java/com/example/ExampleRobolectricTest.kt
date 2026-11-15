@@ -82,4 +82,26 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("lobby_leave_button").performClick()
         composeTestRule.waitForIdle()
     }
+
+    @Test
+    fun hostRace_selectsArenaModeAndDisplaysArenaShapesInLobby() {
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("host_race_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("mode_option_ARENA").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("arena_minutes_3").performScrollTo().performClick()
+        composeTestRule.onNodeWithTag("host_setup_open_lobby_button").performClick()
+
+        composeTestRule.waitUntil(timeoutMillis = 5_000L) {
+            runCatching {
+                composeTestRule.onNodeWithTag("arena_card_SQUARE").assertIsDisplayed()
+                true
+            }.getOrDefault(false)
+        }
+        composeTestRule.onNodeWithTag("arena_card_CIRCLE").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("lobby_leave_button").performClick()
+        composeTestRule.waitForIdle()
+    }
 }

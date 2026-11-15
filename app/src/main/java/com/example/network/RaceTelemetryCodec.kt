@@ -1,8 +1,11 @@
 package com.example.network
 
 import com.example.data.TrackCatalog
+import com.example.model.ArenaFlagState
+import com.example.model.ArenaShape
 import com.example.model.ControlInput
 import com.example.model.ExternalEventType
+import com.example.model.GameMode
 import com.example.model.ItemBoxState
 import com.example.model.LobbyPlayer
 import com.example.model.PowerUpType
@@ -57,12 +60,18 @@ object RaceTelemetryCodec {
     }
 
     fun encodeSnapshot(seq: Long, snap: RaceSnapshot): ByteArray {
-        val sb = StringBuilder(460)
+        val sb = StringBuilder(520)
         val phaseOrd = runCatching { RacePhase.valueOf(snap.phase).ordinal }.getOrDefault(0)
         val trackOrd = runCatching { TrackId.valueOf(snap.trackId).ordinal }.getOrDefault(0)
         val banner = (snap.eventBanner ?: "").replace("|", "").replace("\n", "")
         val winOrd = runCatching { WinCondition.valueOf(snap.winCondition).ordinal }.getOrDefault(0)
         val evOrd = runCatching { ExternalEventType.valueOf(snap.activeEvent).ordinal }.getOrDefault(0)
+        val modeOrd = runCatching { GameMode.valueOf(snap.gameMode).ordinal }.getOrDefault(0)
+        val arenaOrd = snap.arenaShape?.let {
+            runCatching { ArenaShape.valueOf(it).ordinal }.getOrDefault(-1)
+        } ?: -1
+        val flag = snap.arenaFlag
+        val flagCarrier = (flag?.carrierId ?: "").replace(",", "").replace("|", "")
 
         sb.append("S|")
             .append(seq).append('|')
@@ -101,7 +110,8 @@ object RaceTelemetryCodec {
                 .append(r.currentLapStartMs).append(',')
                 .append(r.lapTimesMs.joinToString("-")).append(',')
                 .append(String.format(Locale.US, "%.2f", r.jumpZ)).append(',')
-                .append(r.racePoints)
+                .append(r.racePoints).append(',')
+                .append(r.flagCarryMs)
         }
         sb.append('|')
 
@@ -122,14 +132,20 @@ object RaceTelemetryCodec {
         }
         sb.append('|')
 
-        // Match & Weather Event meta (index 11)
+        // Match, Weather Event & Arena Flag meta (index 11)
         sb.append(winOrd).append(',')
             .append(snap.timeLimitSec).append(',')
             .append(evOrd).append(',')
             .append(snap.eventRemainingMs).append(',')
             .append(String.format(Locale.US, "%.3f", snap.windAngleRad)).append(',')
             .append(String.format(Locale.US, "%.2f", snap.windStrength)).append(',')
-            .append(snap.postFinishGraceMs)
+            .append(snap.postFinishGraceMs).append(',')
+            .append(modeOrd).append(',')
+            .append(arenaOrd).append(',')
+            .append(snap.arenaTargetMs).append(',')
+            .append(flagCarrier).append(',')
+            .append(String.format(Locale.US, "%.1f", flag?.x ?: 1100f)).append(',')
+            .append(String.format(Locale.US, "%.1f", flag?.y ?: 750f))
         sb.append('|')
 
         // Rain puddles (index 12)
@@ -161,6 +177,32 @@ object RaceTelemetryCodec {
         val trackId = TrackId.entries.getOrElse(parts[6].toIntOrNull() ?: 0) { TrackId.LIVING_ROOM_GP }
         val banner = parts[7].ifEmpty { null }
 
+        val metaFields = parts.getOrNull(11)?.split(',').orEmpty()
+        val winCondition = WinCondition.entries.getOrElse(metaFields.getOrNull(0)?.toIntOrNull() ?: 0) {
+            WinCondition.FIRST_TO_FINISH
+        }.name
+        val timeLimitSec = metaFields.getOrNull(1)?.toIntOrNull() ?: 90
+        val activeEvent = ExternalEventType.entries.getOrElse(metaFields.getOrNull(2)?.toIntOrNull() ?: 0) {
+            ExternalEventType.NONE
+        }.name
+        val eventRemainingMs = metaFields.getOrNull(3)?.toLongOrNull() ?: 0L
+        val windAngleRad = metaFields.getOrNull(4)?.toFloatOrNull() ?: 0f
+        val windStrength = metaFields.getOrNull(5)?.toFloatOrNull() ?: 0f
+        val postFinishGraceMs = metaFields.getOrNull(6)?.toLongOrNull() ?: 0L
+        val gameModeEnum = GameMode.entries.getOrElse(metaFields.getOrNull(7)?.toIntOrNull() ?: 0) {
+            GameMode.RACE
+        }
+        val arenaOrd = metaFields.getOrNull(8)?.toIntOrNull() ?: -1
+        val arenaShapeEnum = if (arenaOrd in ArenaShape.entries.indices) {
+            ArenaShape.entries[arenaOrd]
+        } else {
+            null
+        }
+        val arenaTargetMs = metaFields.getOrNull(9)?.toLongOrNull() ?: 120_000L
+        val flagCarrierRaw = metaFields.getOrNull(10)?.ifEmpty { null }
+        val flagX = metaFields.getOrNull(11)?.toFloatOrNull() ?: 1100f
+        val flagY = metaFields.getOrNull(12)?.toFloatOrNull() ?: 750f
+
         val rosterMap = roster.associateBy { it.id }
         val prevMap = previousSnapshot?.racers?.associateBy { it.playerId }.orEmpty()
 
@@ -188,6 +230,7 @@ object RaceTelemetryCodec {
                 }
                 val jumpZ = f.getOrNull(21)?.toFloatOrNull() ?: 0f
                 val racePoints = f.getOrNull(22)?.toIntOrNull() ?: 0
+                val flagCarryMs = f.getOrNull(23)?.toLongOrNull() ?: 0L
 
                 val vx = f[4].toFloatOrNull() ?: 0f
                 val vy = f[5].toFloatOrNull() ?: 0f
@@ -220,12 +263,17 @@ object RaceTelemetryCodec {
                     bestLapMs = bestLap,
                     currentLapStartMs = f[19].toLongOrNull() ?: 0L,
                     lapTimesMs = lapTimes,
-                    racePoints = racePoints
+                    racePoints = racePoints,
+                    flagCarryMs = flagCarryMs
                 )
             }
         }
 
-        val trackDef = activeTrack ?: TrackCatalog.getTrack(trackId)
+        val trackDef = activeTrack ?: if (gameModeEnum == GameMode.ARENA) {
+            TrackCatalog.getArenaTrack(arenaShapeEnum ?: ArenaShape.SQUARE)
+        } else {
+            TrackCatalog.getTrack(trackId)
+        }
         val mask = parts[9]
         val boxes = trackDef.itemSpawns.mapIndexed { idx, spawn ->
             ItemBoxState(
@@ -252,19 +300,6 @@ object RaceTelemetryCodec {
                 )
             }
         }
-
-        val metaFields = parts.getOrNull(11)?.split(',').orEmpty()
-        val winCondition = WinCondition.entries.getOrElse(metaFields.getOrNull(0)?.toIntOrNull() ?: 0) {
-            WinCondition.FIRST_TO_FINISH
-        }.name
-        val timeLimitSec = metaFields.getOrNull(1)?.toIntOrNull() ?: 90
-        val activeEvent = ExternalEventType.entries.getOrElse(metaFields.getOrNull(2)?.toIntOrNull() ?: 0) {
-            ExternalEventType.NONE
-        }.name
-        val eventRemainingMs = metaFields.getOrNull(3)?.toLongOrNull() ?: 0L
-        val windAngleRad = metaFields.getOrNull(4)?.toFloatOrNull() ?: 0f
-        val windStrength = metaFields.getOrNull(5)?.toFloatOrNull() ?: 0f
-        val postFinishGraceMs = metaFields.getOrNull(6)?.toLongOrNull() ?: 0L
 
         val puddlesRaw = parts.getOrNull(12).orEmpty()
         val rainPuddles = if (puddlesRaw.isEmpty()) {
@@ -300,7 +335,15 @@ object RaceTelemetryCodec {
                 windAngleRad = windAngleRad,
                 windStrength = windStrength,
                 rainPuddles = rainPuddles,
-                postFinishGraceMs = postFinishGraceMs
+                postFinishGraceMs = postFinishGraceMs,
+                gameMode = gameModeEnum.name,
+                arenaShape = arenaShapeEnum?.name,
+                arenaTargetMs = arenaTargetMs,
+                arenaFlag = if (gameModeEnum == GameMode.ARENA) {
+                    ArenaFlagState(x = flagX, y = flagY, carrierId = flagCarrierRaw)
+                } else {
+                    null
+                }
             )
         )
     }

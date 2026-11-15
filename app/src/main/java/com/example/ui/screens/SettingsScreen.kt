@@ -50,6 +50,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.model.AudioSettings
+import com.example.model.GameMode
 import com.example.model.RaceRulesSettings
 import com.example.model.WinCondition
 
@@ -197,7 +198,7 @@ fun SettingsScreen(
 
                 // Match Rules Section
                 Text(
-                    text = "RACE RULES",
+                    text = "MATCH MODE & RULES",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -212,37 +213,30 @@ fun SettingsScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = "Winning Condition",
+                            text = "Play Mode",
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            WinCondition.entries.forEach { cond ->
-                                val selected = rules.winConditionEnum == cond
+                            GameMode.entries.forEach { mode ->
                                 FilterChip(
-                                    selected = selected,
+                                    selected = rules.gameModeEnum == mode,
                                     enabled = canEditRules,
-                                    onClick = { onUpdateRules(rules.copy(winCondition = cond.name)) },
-                                    label = {
-                                        Text(
-                                            text = when (cond) {
-                                                WinCondition.FIRST_TO_FINISH -> "Laps"
-                                                WinCondition.TIME_TRIAL_DISTANCE -> "Timer"
-                                                WinCondition.CHAMPIONSHIP_POINTS -> "Points"
-                                            },
-                                            style = MaterialTheme.typography.labelSmall
-                                        )
-                                    },
-                                    modifier = Modifier.weight(1f)
+                                    onClick = { onUpdateRules(rules.copy(gameMode = mode.name)) },
+                                    label = { Text(mode.displayName, style = MaterialTheme.typography.labelMedium) },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("settings_mode_${mode.name}")
                                 )
                             }
                         }
-                        if (rules.winConditionEnum == WinCondition.TIME_TRIAL_DISTANCE) {
+
+                        if (rules.gameModeEnum == GameMode.ARENA) {
                             Text(
-                                text = "Time Limit: ${rules.timeLimitSec}s",
+                                text = "Flag Hold Target: ${rules.arenaTargetMinutes} min",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -250,14 +244,67 @@ fun SettingsScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                listOf(60, 90, 120, 180).forEach { secs ->
+                                listOf(1, 2, 3, 5).forEach { mins ->
                                     FilterChip(
-                                        selected = rules.timeLimitSec == secs,
+                                        selected = rules.arenaTargetMinutes == mins,
                                         enabled = canEditRules,
-                                        onClick = { onUpdateRules(rules.copy(timeLimitSec = secs)) },
-                                        label = { Text("${secs}s", style = MaterialTheme.typography.labelSmall) },
+                                        onClick = { onUpdateRules(rules.copy(arenaTargetMinutes = mins)) },
+                                        label = { Text("${mins}m", style = MaterialTheme.typography.labelSmall) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("settings_arena_min_$mins")
+                                    )
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = "Winning Condition",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                WinCondition.entries.forEach { cond ->
+                                    val selected = rules.winConditionEnum == cond
+                                    FilterChip(
+                                        selected = selected,
+                                        enabled = canEditRules,
+                                        onClick = { onUpdateRules(rules.copy(winCondition = cond.name)) },
+                                        label = {
+                                            Text(
+                                                text = when (cond) {
+                                                    WinCondition.FIRST_TO_FINISH -> "Laps"
+                                                    WinCondition.TIME_TRIAL_DISTANCE -> "Timer"
+                                                    WinCondition.CHAMPIONSHIP_POINTS -> "Points"
+                                                },
+                                                style = MaterialTheme.typography.labelSmall
+                                            )
+                                        },
                                         modifier = Modifier.weight(1f)
                                     )
+                                }
+                            }
+                            if (rules.winConditionEnum == WinCondition.TIME_TRIAL_DISTANCE) {
+                                Text(
+                                    text = "Time Limit: ${rules.timeLimitSec}s",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    listOf(60, 90, 120, 180).forEach { secs ->
+                                        FilterChip(
+                                            selected = rules.timeLimitSec == secs,
+                                            enabled = canEditRules,
+                                            onClick = { onUpdateRules(rules.copy(timeLimitSec = secs)) },
+                                            label = { Text("${secs}s", style = MaterialTheme.typography.labelSmall) },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
                                 }
                             }
                         }

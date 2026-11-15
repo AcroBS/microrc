@@ -13,6 +13,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.example.model.AudioSettings
 import com.example.model.ControlMode
 import com.example.model.CustomTrackData
+import com.example.model.GameMode
 import com.example.model.PlayerProfile
 import com.example.model.RaceRulesSettings
 import com.example.model.RcCarType
@@ -43,6 +44,7 @@ class PreferencesRepository(private val context: Context) {
         val CONTROL_MODE = stringPreferencesKey("control_mode")
         val TILT_SENSITIVITY = floatPreferencesKey("tilt_sensitivity")
         val AUTO_GAS_TILT = booleanPreferencesKey("auto_gas_tilt")
+        val RULE_GAME_MODE = stringPreferencesKey("rule_game_mode")
         val RULE_AUTO_ACCEL = booleanPreferencesKey("rule_auto_accel_v2")
         val RULE_HARD_BOUNDARY = booleanPreferencesKey("rule_hard_boundary_v2")
         val RULE_RANDOM_JUMPS = booleanPreferencesKey("rule_random_jumps_v2")
@@ -51,6 +53,7 @@ class PreferencesRepository(private val context: Context) {
         val RULE_WIN_CONDITION = stringPreferencesKey("rule_win_condition")
         val RULE_TOTAL_LAPS = intPreferencesKey("rule_total_laps")
         val RULE_TIME_LIMIT_SEC = intPreferencesKey("rule_time_limit_sec")
+        val RULE_ARENA_TARGET_MIN = intPreferencesKey("rule_arena_target_min")
         val AUDIO_MUSIC_ENABLED = booleanPreferencesKey("audio_music_enabled")
         val AUDIO_SFX_ENABLED = booleanPreferencesKey("audio_sfx_enabled")
         val CUSTOM_TRACKS_JSON = stringPreferencesKey("custom_tracks_json")
@@ -83,10 +86,14 @@ class PreferencesRepository(private val context: Context) {
     }
 
     val rulesFlow: Flow<RaceRulesSettings> = context.dataStore.data.map { prefs ->
+        val mode = runCatching {
+            GameMode.valueOf(prefs[Keys.RULE_GAME_MODE] ?: GameMode.RACE.name)
+        }.getOrDefault(GameMode.RACE)
         val winCond = runCatching {
             WinCondition.valueOf(prefs[Keys.RULE_WIN_CONDITION] ?: WinCondition.FIRST_TO_FINISH.name)
         }.getOrDefault(WinCondition.FIRST_TO_FINISH)
         RaceRulesSettings(
+            gameMode = mode.name,
             autoAccelerate = prefs[Keys.RULE_AUTO_ACCEL] ?: true,
             hardTrackBoundary = prefs[Keys.RULE_HARD_BOUNDARY] ?: true,
             randomJumpsEnabled = prefs[Keys.RULE_RANDOM_JUMPS] ?: true,
@@ -94,7 +101,8 @@ class PreferencesRepository(private val context: Context) {
             showPlayerNames = prefs[Keys.RULE_SHOW_PLAYER_NAMES] ?: true,
             winCondition = winCond.name,
             totalLaps = (prefs[Keys.RULE_TOTAL_LAPS] ?: 3).coerceIn(1, 9),
-            timeLimitSec = (prefs[Keys.RULE_TIME_LIMIT_SEC] ?: 90).coerceIn(30, 300)
+            timeLimitSec = (prefs[Keys.RULE_TIME_LIMIT_SEC] ?: 90).coerceIn(30, 300),
+            arenaTargetMinutes = (prefs[Keys.RULE_ARENA_TARGET_MIN] ?: 2).coerceIn(1, 10)
         )
     }
 
@@ -155,6 +163,7 @@ class PreferencesRepository(private val context: Context) {
 
     suspend fun updateRaceRules(rules: RaceRulesSettings) {
         context.dataStore.edit {
+            it[Keys.RULE_GAME_MODE] = rules.gameMode
             it[Keys.RULE_AUTO_ACCEL] = rules.autoAccelerate
             it[Keys.RULE_HARD_BOUNDARY] = rules.hardTrackBoundary
             it[Keys.RULE_RANDOM_JUMPS] = rules.randomJumpsEnabled
@@ -163,6 +172,7 @@ class PreferencesRepository(private val context: Context) {
             it[Keys.RULE_WIN_CONDITION] = rules.winCondition
             it[Keys.RULE_TOTAL_LAPS] = rules.totalLaps.coerceIn(1, 9)
             it[Keys.RULE_TIME_LIMIT_SEC] = rules.timeLimitSec.coerceIn(30, 300)
+            it[Keys.RULE_ARENA_TARGET_MIN] = rules.arenaTargetMinutes.coerceIn(1, 10)
         }
     }
 

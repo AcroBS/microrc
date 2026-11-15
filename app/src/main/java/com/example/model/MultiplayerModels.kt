@@ -8,6 +8,27 @@ enum class RacePhase {
     FINISHED
 }
 
+enum class GameMode(
+    val displayName: String,
+    val description: String
+) {
+    RACE(
+        displayName = "Circuit Race",
+        description = "Race laps, beat the clock, or battle for points on closed RC circuits"
+    ),
+    ARENA(
+        displayName = "Arena",
+        description = "Open-arena Hold the Flag! Pick up the flag, dodge puddles & collisions, and bank carry time to win"
+    )
+}
+
+@JsonClass(generateAdapter = true)
+data class ArenaFlagState(
+    val x: Float = 1100f,
+    val y: Float = 750f,
+    val carrierId: String? = null
+)
+
 enum class WinCondition(
     val displayName: String,
     val description: String
@@ -94,6 +115,7 @@ data class ControlInput(
 
 @JsonClass(generateAdapter = true)
 data class RaceRulesSettings(
+    val gameMode: String = GameMode.RACE.name,
     val autoAccelerate: Boolean = true,
     val hardTrackBoundary: Boolean = true,
     val randomJumpsEnabled: Boolean = true,
@@ -101,8 +123,12 @@ data class RaceRulesSettings(
     val showPlayerNames: Boolean = true,
     val winCondition: String = WinCondition.FIRST_TO_FINISH.name,
     val totalLaps: Int = 3,
-    val timeLimitSec: Int = 90
+    val timeLimitSec: Int = 90,
+    val arenaTargetMinutes: Int = 2
 ) {
+    val gameModeEnum: GameMode
+        get() = runCatching { GameMode.valueOf(gameMode) }.getOrDefault(GameMode.RACE)
+
     val winConditionEnum: WinCondition
         get() = runCatching { WinCondition.valueOf(winCondition) }.getOrDefault(WinCondition.FIRST_TO_FINISH)
 }
@@ -140,7 +166,8 @@ data class RacerState(
     val overdriveMs: Long = 0L,
     val spinVisualOffset: Float = 0f,
     val powerUpHits: Int = 0,
-    val racePoints: Int = 0
+    val racePoints: Int = 0,
+    val flagCarryMs: Long = 0L
 )
 
 @JsonClass(generateAdapter = true)
@@ -161,7 +188,11 @@ data class RaceSnapshot(
     val windAngleRad: Float = 0f,
     val windStrength: Float = 0f,
     val rainPuddles: List<TrackPuddle> = emptyList(),
-    val postFinishGraceMs: Long = 0L
+    val postFinishGraceMs: Long = 0L,
+    val gameMode: String = GameMode.RACE.name,
+    val arenaShape: String? = null,
+    val arenaTargetMs: Long = 120_000L,
+    val arenaFlag: ArenaFlagState? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -172,6 +203,7 @@ data class LobbyStatePayload(
     val tcpPort: Int,
     val udpPort: Int = 0,
     val trackId: String,
+    val arenaShape: String = ArenaShape.SQUARE.name,
     val totalLaps: Int,
     val players: List<LobbyPlayer>,
     val chatHistory: List<ChatMessage>,
@@ -190,6 +222,7 @@ data class NetworkMessage(
     val controlInput: ControlInput? = null,
     val raceSnapshot: RaceSnapshot? = null,
     val trackId: String? = null,
+    val arenaShape: String? = null,
     val totalLaps: Int? = null,
     val isReady: Boolean? = null,
     val rules: RaceRulesSettings? = null,

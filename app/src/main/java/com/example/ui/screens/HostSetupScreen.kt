@@ -26,10 +26,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.SportsScore
 import androidx.compose.material.icons.filled.Thunderstorm
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
@@ -53,6 +55,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import com.example.model.GameMode
 import com.example.model.RaceRulesSettings
 import com.example.model.WinCondition
 
@@ -65,6 +68,7 @@ fun HostSetupScreen(
     BackHandler { onBack() }
 
     var draft by remember(initialRules) { mutableStateOf(initialRules) }
+    val selectedMode = draft.gameModeEnum
     val selectedWin = draft.winConditionEnum
 
     Surface(
@@ -97,12 +101,12 @@ fun HostSetupScreen(
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Host Race Setup",
+                        text = "Host Match Setup",
                         style = MaterialTheme.typography.headlineMedium,
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Text(
-                        text = "Configure match rules before opening Wi-Fi lobby",
+                        text = "Choose Circuit Race or Arena Hold-the-Flag before opening lobby",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -117,7 +121,7 @@ fun HostSetupScreen(
                     .padding(horizontal = 16.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Winning Condition Card
+                // Play Mode Selector Card (Circuit Race vs Arena)
                 Card(
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainer
@@ -134,128 +138,285 @@ fun HostSetupScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Icon(
-                                Icons.Default.EmojiEvents,
+                                if (selectedMode == GameMode.ARENA) Icons.Default.Flag else Icons.Default.SportsScore,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary
                             )
                             Text(
-                                text = "Winning Condition",
+                                text = "Play Mode",
                                 style = MaterialTheme.typography.titleLarge,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
 
-                        WinCondition.entries.forEach { cond ->
-                            val isSelected = selectedWin == cond
-                            Surface(
-                                color = if (isSelected) {
-                                    MaterialTheme.colorScheme.primaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.surfaceContainerHigh
-                                },
-                                shape = RoundedCornerShape(16.dp),
-                                border = if (isSelected) {
-                                    BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
-                                } else {
-                                    BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .clickable {
-                                        draft = draft.copy(winCondition = cond.name)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            GameMode.entries.forEach { mode ->
+                                val isSelected = selectedMode == mode
+                                Surface(
+                                    color = if (isSelected) {
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceContainerHigh
+                                    },
+                                    shape = RoundedCornerShape(16.dp),
+                                    border = if (isSelected) {
+                                        BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+                                    } else {
+                                        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .clickable {
+                                            draft = draft.copy(gameMode = mode.name)
+                                        }
+                                        .testTag("mode_option_${mode.name}")
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(14.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (mode == GameMode.ARENA) {
+                                                    Icons.Default.Flag
+                                                } else {
+                                                    Icons.Default.SportsScore
+                                                },
+                                                contentDescription = null,
+                                                tint = if (isSelected) {
+                                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                                } else {
+                                                    MaterialTheme.colorScheme.primary
+                                                },
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Text(
+                                                text = mode.displayName,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = if (isSelected) {
+                                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurface
+                                                }
+                                            )
+                                        }
+                                        Text(
+                                            text = mode.description,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (isSelected) {
+                                                MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        )
                                     }
-                                    .testTag("win_condition_${cond.name}")
-                            ) {
-                                Column(modifier = Modifier.padding(14.dp)) {
-                                    Text(
-                                        text = cond.displayName,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = if (isSelected) {
-                                            MaterialTheme.colorScheme.onPrimaryContainer
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurface
-                                        }
-                                    )
-                                    Text(
-                                        text = cond.description,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = if (isSelected) {
-                                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        }
-                                    )
                                 }
                             }
                         }
                     }
                 }
 
-                // Laps or Time Limit Selector
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainer
-                    ),
-                    shape = RoundedCornerShape(22.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                if (selectedMode == GameMode.ARENA) {
+                    // Arena Winning Condition: Flag Hold Duration in Minutes
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer
+                        ),
+                        shape = RoundedCornerShape(22.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Icon(
-                                Icons.Default.Timer,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.secondary
-                            )
-                            Text(
-                                text = if (selectedWin == WinCondition.TIME_TRIAL_DISTANCE) {
-                                    "Race Time Limit"
-                                } else {
-                                    "Number of Laps"
-                                },
-                                style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Flag,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.secondary
+                                )
+                                Text(
+                                    text = "Flag Carry Winning Target",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
 
-                        if (selectedWin == WinCondition.TIME_TRIAL_DISTANCE) {
+                            Text(
+                                text = "Drive over the arena flag to start your hold timer. Spinning out on puddles or oil drops the flag, and car collisions steal it! First driver to carry the flag for ${draft.arenaTargetMinutes} min wins.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                listOf(60, 90, 120, 180).forEach { secs ->
-                                    val active = draft.timeLimitSec == secs
+                                listOf(1, 2, 3, 5).forEach { mins ->
+                                    val active = draft.arenaTargetMinutes == mins
                                     FilterChip(
                                         selected = active,
-                                        onClick = { draft = draft.copy(timeLimitSec = secs) },
-                                        label = { Text("${secs}s") },
+                                        onClick = { draft = draft.copy(arenaTargetMinutes = mins) },
+                                        label = { Text("$mins Min") },
                                         modifier = Modifier
                                             .weight(1f)
-                                            .testTag("setup_time_${secs}")
+                                            .testTag("arena_minutes_$mins")
                                     )
                                 }
                             }
-                        } else {
+                        }
+                    }
+                } else {
+                    // Circuit Race Winning Condition Card
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer
+                        ),
+                        shape = RoundedCornerShape(22.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                listOf(2, 3, 5, 7).forEach { laps ->
-                                    val active = draft.totalLaps == laps
-                                    FilterChip(
-                                        selected = active,
-                                        onClick = { draft = draft.copy(totalLaps = laps) },
-                                        label = { Text("$laps Laps") },
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .testTag("setup_laps_${laps}")
-                                    )
+                                Icon(
+                                    Icons.Default.EmojiEvents,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = "Winning Condition",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            WinCondition.entries.forEach { cond ->
+                                val isSelected = selectedWin == cond
+                                Surface(
+                                    color = if (isSelected) {
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceContainerHigh
+                                    },
+                                    shape = RoundedCornerShape(16.dp),
+                                    border = if (isSelected) {
+                                        BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+                                    } else {
+                                        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .clickable {
+                                            draft = draft.copy(winCondition = cond.name)
+                                        }
+                                        .testTag("win_condition_${cond.name}")
+                                ) {
+                                    Column(modifier = Modifier.padding(14.dp)) {
+                                        Text(
+                                            text = cond.displayName,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = if (isSelected) {
+                                                MaterialTheme.colorScheme.onPrimaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurface
+                                            }
+                                        )
+                                        Text(
+                                            text = cond.description,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = if (isSelected) {
+                                                MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Laps or Time Limit Selector
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer
+                        ),
+                        shape = RoundedCornerShape(22.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Timer,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.secondary
+                                )
+                                Text(
+                                    text = if (selectedWin == WinCondition.TIME_TRIAL_DISTANCE) {
+                                        "Race Time Limit"
+                                    } else {
+                                        "Number of Laps"
+                                    },
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+
+                            if (selectedWin == WinCondition.TIME_TRIAL_DISTANCE) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf(60, 90, 120, 180).forEach { secs ->
+                                        val active = draft.timeLimitSec == secs
+                                        FilterChip(
+                                            selected = active,
+                                            onClick = { draft = draft.copy(timeLimitSec = secs) },
+                                            label = { Text("${secs}s") },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("setup_time_${secs}")
+                                        )
+                                    }
+                                }
+                            } else {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf(2, 3, 5, 7).forEach { laps ->
+                                        val active = draft.totalLaps == laps
+                                        FilterChip(
+                                            selected = active,
+                                            onClick = { draft = draft.copy(totalLaps = laps) },
+                                            label = { Text("$laps Laps") },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("setup_laps_${laps}")
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -266,7 +427,7 @@ fun HostSetupScreen(
                 SetupSwitchCard(
                     icon = Icons.Default.Thunderstorm,
                     title = "Random Ride Conditions",
-                    description = "Temporary weather & quakes appear during races: rain puddles, screen-shaking tremors, leaf-blowing crosswinds & icy snow skids.",
+                    description = "Temporary weather & quakes appear: rain puddles, screen-shaking tremors, leaf-blowing crosswinds & icy snow skids.",
                     checked = draft.randomConditionsEnabled,
                     testTag = "setup_random_conditions_switch",
                     onCheckedChange = { draft = draft.copy(randomConditionsEnabled = it) }
@@ -284,7 +445,7 @@ fun HostSetupScreen(
                 SetupSwitchCard(
                     icon = Icons.Default.Shield,
                     title = "Bounce Off Walls",
-                    description = "Solid track guardrails keep cars bouncing inside the circuit.",
+                    description = "Solid outer guardrails keep cars bouncing inside the circuit or arena.",
                     checked = draft.hardTrackBoundary,
                     testTag = "setup_hard_boundary_switch",
                     onCheckedChange = { draft = draft.copy(hardTrackBoundary = it) }
@@ -292,8 +453,8 @@ fun HostSetupScreen(
 
                 SetupSwitchCard(
                     icon = Icons.Default.FlightTakeoff,
-                    title = "Random Track Jumps",
-                    description = "Spawn launch ramps on the circuit for mid-air overtakes.",
+                    title = "Random Jumps",
+                    description = "Spawn launch ramps on the circuit or arena floor for mid-air action.",
                     checked = draft.randomJumpsEnabled,
                     testTag = "setup_random_jumps_switch",
                     onCheckedChange = { draft = draft.copy(randomJumpsEnabled = it) }
@@ -302,7 +463,7 @@ fun HostSetupScreen(
                 SetupSwitchCard(
                     icon = Icons.Default.Badge,
                     title = "Player Names Next to Car",
-                    description = "Show driver name tags floating beside each RC car during the race for all players.",
+                    description = "Show driver name tags floating beside each RC car during the match for all players.",
                     checked = draft.showPlayerNames,
                     testTag = "setup_show_player_names_switch",
                     onCheckedChange = { draft = draft.copy(showPlayerNames = it) }
@@ -332,7 +493,14 @@ fun HostSetupScreen(
                     ) {
                         Icon(Icons.Default.Hub, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Open Wi-Fi Lobby", style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            text = if (selectedMode == GameMode.ARENA) {
+                                "Open Arena Wi-Fi Lobby"
+                            } else {
+                                "Open Wi-Fi Lobby"
+                            },
+                            style = MaterialTheme.typography.labelLarge
+                        )
                     }
                 }
             }

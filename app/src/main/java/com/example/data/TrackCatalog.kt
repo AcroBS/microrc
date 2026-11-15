@@ -1,5 +1,6 @@
 package com.example.data
 
+import com.example.model.ArenaShape
 import com.example.model.BoostPad
 import com.example.model.CustomTrackData
 import com.example.model.ItemBoxSpawn
@@ -9,15 +10,21 @@ import com.example.model.TrackId
 import com.example.model.TrackPoint
 import com.example.model.TrackProp
 import com.example.model.TrackRamp
+import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
+import kotlin.random.Random
 
 object TrackCatalog {
 
     private val tracks: Map<TrackId, TrackDefinition> = TrackId.entries.associateWith { id ->
         buildTrack(id)
+    }
+
+    private val arenas: Map<ArenaShape, TrackDefinition> = ArenaShape.entries.associateWith { shape ->
+        buildArenaTrack(shape)
     }
 
     fun getTrack(id: TrackId): TrackDefinition = tracks.getValue(id)
@@ -28,6 +35,15 @@ object TrackCatalog {
     }
 
     fun allTracks(): List<TrackDefinition> = TrackId.entries.map { getTrack(it) }
+
+    fun getArenaTrack(shape: ArenaShape): TrackDefinition = arenas.getValue(shape)
+
+    fun getArenaTrack(shapeName: String?): TrackDefinition {
+        val shape = shapeName?.let { runCatching { ArenaShape.valueOf(it) }.getOrNull() } ?: ArenaShape.SQUARE
+        return getArenaTrack(shape)
+    }
+
+    fun allArenas(): List<TrackDefinition> = ArenaShape.entries.map { getArenaTrack(it) }
 
     private fun buildTrack(id: TrackId): TrackDefinition {
         val worldW = 2200f
@@ -296,11 +312,35 @@ object TrackCatalog {
         seed: Long = System.currentTimeMillis()
     ): TrackDefinition {
         if (!enabled) return track.copy(ramps = emptyList())
-        val rng = kotlin.random.Random(seed)
+        val rng = Random(seed)
+        if (track.isArena) {
+            val targetCount = rng.nextInt(3, 6) // 3..5 random jumps across open arena
+            val chosen = mutableListOf<TrackRamp>()
+            val avoid = buildList {
+                track.boostPads.forEach { add(it.x to it.y) }
+                track.itemSpawns.forEach { add(it.x to it.y) }
+                track.props.forEach { add(it.x to it.y) }
+            }
+            var attempts = 0
+            while (chosen.size < targetCount && attempts < 90) {
+                attempts++
+                val (rx, ry) = sampleArenaInteriorPoint(
+                    track = track,
+                    rng = rng,
+                    minWallClearance = 155f,
+                    avoidPoints = avoid + chosen.map { it.x to it.y },
+                    minAvoidDist = 165f
+                )
+                val angle = rng.nextFloat() * (2f * PI.toFloat())
+                chosen.add(TrackRamp(rx, ry, angle, radius = 48f, impulse = rng.nextFloat() * 0.25f + 0.95f))
+            }
+            return track.copy(ramps = chosen.ifEmpty { track.ramps })
+        }
+
         val n = track.centerline.size
         if (n < 40) return track
         val targetCount = rng.nextInt(2, 5) // 2..4 random jumps per race
-        val chosen = mutableListOf<com.example.model.TrackRamp>()
+        val chosen = mutableListOf<TrackRamp>()
         val minSpacing = 240f
         var attempts = 0
         while (chosen.size < targetCount && attempts < 60) {
@@ -545,9 +585,20 @@ object TrackCatalog {
     }
 
     /**
-     * Computes grid start positions behind the start/finish line (index 0).
+     * Computes grid start positions behind the start/finish line (index 0) for circuits,
+     * or evenly spaced around the central arena ring facing inward for Arena mode.
      */
     fun gridStartTransform(track: TrackDefinition, slotIndex: Int): Triple<Float, Float, Float> {
+        if (track.isArena) {
+            val cx = track.worldWidth / 2f
+            val cy = track.worldHeight / 2f
+            val angleFromCenter = (PI / 4.0 + (slotIndex % 4) * (PI / 2.0)).toFloat()
+            val spawnRadius = 205f
+            val sx = cx + cos(angleFromCenter) * spawnRadius
+            val sy = cy + sin(angleFromCenter) * spawnRadius
+            val faceCenterAngle = atan2(cy - sy, cx - sx)
+            return Triple(sx, sy, faceCenterAngle)
+        }
         val pts = track.centerline
         val startIdx = (pts.size - 4 - (slotIndex / 2) * 3).mod(pts.size)
         val nextIdx = (startIdx + 1).mod(pts.size)
@@ -558,6 +609,240 @@ object TrackCatalog {
         val perpY = cos(angle)
         val lateralOffset = if (slotIndex % 2 == 0) -34f else 34f
         return Triple(p.x + perpX * lateralOffset, p.y + perpY * lateralOffset, angle)
+    }
+
+    private fun buildArenaTrack(shape: ArenaShape): TrackDefinition {
+        val worldW = 2200f
+        val worldH = 1500f
+        val cx = 1100f
+        val cy = 750f
+        val theme = shape.themeTrackId
+
+        val boundary: List<TrackPoint> = when (shape) {
+            ArenaShape.SQUARE -> {
+                // Rounded-corner large rectangle (1580 x 1100)
+                val halfW = 790f
+                val halfH = 550f
+                val cornerR = 130f
+                val pts = mutableListOf<TrackPoint>()
+                val corners = listOf(
+                    Triple(cx + halfW - cornerR, cy - halfH + cornerR, -PI.toFloat() / 2f),
+                    Triple(cx + halfW - cornerR, cy + halfH - cornerR, 0f),
+                    Triple(cx - halfW + cornerR, cy + halfH - cornerR, PI.toFloat() / 2f),
+                    Triple(cx - halfW + cornerR, cy - halfH + cornerR, PI.toFloat())
+                )
+                for (cIdx in corners.indices) {
+                    val (arcCx, arcCy, startAng) = corners[cIdx]
+                    val arcSteps = 12
+                    for (s in 0..arcSteps) {
+                        val a = startAng + (s.toFloat() / arcSteps) * (PI.toFloat() / 2f)
+                        pts.add(TrackPoint(arcCx + cos(a) * cornerR, arcCy + sin(a) * cornerR, 120f))
+                    }
+                    // Add straight-edge intermediate samples so nearest-point / polygon edges are uniform
+                    val nextCorner = corners[(cIdx + 1) % corners.size]
+                    val endA = startAng + PI.toFloat() / 2f
+                    val sx = arcCx + cos(endA) * cornerR
+                    val sy = arcCy + sin(endA) * cornerR
+                    val ex = nextCorner.first + cos(nextCorner.third) * cornerR
+                    val ey = nextCorner.second + sin(nextCorner.third) * cornerR
+                    for (edgeStep in 1..10) {
+                        val t = edgeStep / 11f
+                        pts.add(TrackPoint(sx + (ex - sx) * t, sy + (ey - sy) * t, 120f))
+                    }
+                }
+                pts
+            }
+
+            ArenaShape.CIRCLE -> {
+                val samples = 96
+                (0 until samples).map { i ->
+                    val a = (i.toFloat() / samples) * (2f * PI.toFloat())
+                    TrackPoint(cx + cos(a) * 760f, cy + sin(a) * 560f, 120f)
+                }
+            }
+
+            ArenaShape.STAR -> {
+                // Smooth 5-pointed star with generous open center & smooth rounded star tips
+                val samples = 120
+                (0 until samples).map { i ->
+                    val a = (i.toFloat() / samples) * (2f * PI.toFloat()) - PI.toFloat() / 2f
+                    val r = 535f + 190f * cos(5f * (a + PI.toFloat() / 2f))
+                    TrackPoint(cx + cos(a) * r * 1.16f, cy + sin(a) * r * 0.85f, 120f)
+                }
+            }
+
+            ArenaShape.HEXAGON -> {
+                val hexVertices = (0 until 6).map { i ->
+                    val a = (i.toFloat() / 6f) * (2f * PI.toFloat())
+                    TrackPoint(cx + cos(a) * 810f, cy + sin(a) * 575f, 120f)
+                }
+                val withMidpoints = mutableListOf<TrackPoint>()
+                for (i in hexVertices.indices) {
+                    val v1 = hexVertices[i]
+                    val v2 = hexVertices[(i + 1) % hexVertices.size]
+                    withMidpoints.add(v1)
+                    withMidpoints.add(
+                        TrackPoint(
+                            x = v1.x * 0.67f + v2.x * 0.33f,
+                            y = v1.y * 0.67f + v2.y * 0.33f,
+                            halfWidth = 120f
+                        )
+                    )
+                    withMidpoints.add(
+                        TrackPoint(
+                            x = v1.x * 0.33f + v2.x * 0.67f,
+                            y = v1.y * 0.33f + v2.y * 0.67f,
+                            halfWidth = 120f
+                        )
+                    )
+                }
+                subdivideClosedSpline(withMidpoints, samplesPerSegment = 6)
+            }
+
+            ArenaShape.CLOVER -> {
+                // 4-winged Diamond Cross open arena
+                val samples = 104
+                (0 until samples).map { i ->
+                    val a = (i.toFloat() / samples) * (2f * PI.toFloat())
+                    val r = 555f + 165f * cos(4f * a)
+                    TrackPoint(cx + cos(a) * r * 1.15f, cy + sin(a) * r * 0.85f, 120f)
+                }
+            }
+        }
+
+        val boosts = listOf(
+            BoostPad(cx - 330f, cy, -PI.toFloat() / 2f),
+            BoostPad(cx + 330f, cy, PI.toFloat() / 2f),
+            BoostPad(cx, cy - 250f, 0f),
+            BoostPad(cx, cy + 250f, PI.toFloat())
+        )
+
+        val items = (0 until 6).map { idx ->
+            val a = (idx.toFloat() / 6f) * (2f * PI.toFloat()) + 0.35f
+            ItemBoxSpawn(
+                id = idx,
+                x = cx + cos(a) * 310f,
+                y = cy + sin(a) * 235f
+            )
+        }
+
+        val defaultRamps = listOf(
+            TrackRamp(cx - 210f, cy - 150f, 0.65f, radius = 48f, impulse = 1.05f),
+            TrackRamp(cx + 210f, cy + 150f, -2.45f, radius = 48f, impulse = 1.05f),
+            TrackRamp(cx + 220f, cy - 155f, 2.35f, radius = 48f, impulse = 1.0f)
+        )
+
+        // Two oil/puddle slick patches inside the arena (causing flag carriers to spin & drop the flag!)
+        val props = listOf(
+            TrackProp(
+                x = cx - 260f,
+                y = cy + 165f,
+                radius = 44f,
+                shape = PropShape.MUD_POOL,
+                colorHex = 0xFF263238,
+                accentHex = 0xFF4FC3F7,
+                isSolidObstacle = false
+            ),
+            TrackProp(
+                x = cx + 260f,
+                y = cy - 165f,
+                radius = 44f,
+                shape = PropShape.MUD_POOL,
+                colorHex = 0xFF263238,
+                accentHex = 0xFF4FC3F7,
+                isSolidObstacle = false
+            )
+        )
+
+        return TrackDefinition(
+            id = theme,
+            worldWidth = worldW,
+            worldHeight = worldH,
+            centerline = boundary,
+            boostPads = boosts,
+            itemSpawns = items,
+            props = props,
+            ramps = defaultRamps,
+            customName = shape.displayName,
+            isArena = true,
+            arenaShape = shape,
+            arenaBoundary = boundary
+        )
+    }
+
+    fun isPointInPolygon(x: Float, y: Float, poly: List<TrackPoint>): Boolean {
+        if (poly.size < 3) return true
+        var inside = false
+        var j = poly.size - 1
+        for (i in poly.indices) {
+            val xi = poly[i].x
+            val yi = poly[i].y
+            val xj = poly[j].x
+            val yj = poly[j].y
+            val intersects = ((yi > y) != (yj > y)) &&
+                (x < (xj - xi) * (y - yi) / ((yj - yi).let { if (kotlin.math.abs(it) < 1e-6f) 1e-6f else it }) + xi)
+            if (intersects) inside = !inside
+            j = i
+        }
+        return inside
+    }
+
+    /**
+     * Returns (closestX, closestY, distanceToWall) along the closed arena boundary polygon.
+     */
+    fun closestPointOnPolygon(x: Float, y: Float, poly: List<TrackPoint>): Triple<Float, Float, Float> {
+        if (poly.isEmpty()) return Triple(x, y, 0f)
+        var bestX = poly[0].x
+        var bestY = poly[0].y
+        var bestDistSq = Float.MAX_VALUE
+        val n = poly.size
+        for (i in 0 until n) {
+            val a = poly[i]
+            val b = poly[(i + 1) % n]
+            val abx = b.x - a.x
+            val aby = b.y - a.y
+            val lenSq = abx * abx + aby * aby
+            val t = if (lenSq > 1e-4f) {
+                (((x - a.x) * abx + (y - a.y) * aby) / lenSq).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+            val px = a.x + abx * t
+            val py = a.y + aby * t
+            val dx = x - px
+            val dy = y - py
+            val d2 = dx * dx + dy * dy
+            if (d2 < bestDistSq) {
+                bestDistSq = d2
+                bestX = px
+                bestY = py
+            }
+        }
+        return Triple(bestX, bestY, kotlin.math.sqrt(bestDistSq))
+    }
+
+    fun sampleArenaInteriorPoint(
+        track: TrackDefinition,
+        rng: Random,
+        minWallClearance: Float = 130f,
+        avoidPoints: List<Pair<Float, Float>> = emptyList(),
+        minAvoidDist: Float = 180f
+    ): Pair<Float, Float> {
+        val poly = track.arenaBoundary.ifEmpty { track.centerline }
+        repeat(120) {
+            val px = rng.nextFloat() * (track.worldWidth - 520f) + 260f
+            val py = rng.nextFloat() * (track.worldHeight - 400f) + 200f
+            if (isPointInPolygon(px, py, poly)) {
+                val (_, _, wallDist) = closestPointOnPolygon(px, py, poly)
+                if (wallDist >= minWallClearance) {
+                    val farEnough = avoidPoints.all { (ax, ay) -> distance(px, py, ax, ay) >= minAvoidDist }
+                    if (farEnough) return px to py
+                }
+            }
+        }
+        // Fallback: safe offset inside center
+        val angle = rng.nextFloat() * (2f * PI.toFloat())
+        return (track.worldWidth / 2f + cos(angle) * 90f) to (track.worldHeight / 2f + sin(angle) * 70f)
     }
 
     fun distance(x1: Float, y1: Float, x2: Float, y2: Float): Float = hypot(x2 - x1, y2 - y1)
