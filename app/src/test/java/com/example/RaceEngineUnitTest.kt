@@ -33,7 +33,11 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import android.view.Surface
+import com.example.sensors.TiltSteeringController
+import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.min
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -618,7 +622,7 @@ class RaceEngineUnitTest {
     }
 
     @Test
-    fun lap2Mine_grantsOnLap2DropsSeparatelyAndExplodesWithSlipSpin() {
+    fun oneMinePerPlayerPerRound_grantsAtStartNoRefillOnLap2AndExplodesWithSlipSpin() {
         val track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP).copy(
             ramps = emptyList(),
             itemSpawns = emptyList()
@@ -637,9 +641,22 @@ class RaceEngineUnitTest {
 
         repeat(68) { engine.step(0.05f) }
         var snap = engine.step(0.016f)
-        assertEquals("No mine on Lap 1", 0, snap.racers.first { it.playerId == "p1" }.minesAvailable)
+        assertEquals("Every player must start the round with 1 mine", 1, snap.racers.first { it.playerId == "p1" }.minesAvailable)
+        assertEquals("Every player must start the round with 1 mine", 1, snap.racers.first { it.playerId == "p2" }.minesAvailable)
 
-        // Drive p1 around Lap 1 until crossing into Lap 2
+        // Drop p1's single round mine on Lap 1
+        engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f, dropMine = true))
+        snap = engine.step(0.016f)
+        assertEquals(0, snap.racers.first { it.playerId == "p1" }.minesAvailable)
+        val droppedMine = snap.hazards.firstOrNull { it.hazardTypeEnum == HazardType.MINE }
+        assertNotNull("Dropped flashing red mine should exist in hazards", droppedMine)
+
+        // Attempting to drop another mine does nothing
+        engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f, dropMine = true))
+        snap = engine.step(0.016f)
+        assertEquals(1, snap.hazards.count { it.hazardTypeEnum == HazardType.MINE })
+
+        // Drive p1 around Lap 1 until crossing into Lap 2 -> must NOT receive a second mine!
         var steps = 0
         while (snap.racers.first { it.playerId == "p1" }.lap < 2 && steps < 2000) {
             val r = snap.racers.first { it.playerId == "p1" }
@@ -655,21 +672,30 @@ class RaceEngineUnitTest {
 
         val p1Lap2 = snap.racers.first { it.playerId == "p1" }
         assertEquals(2, p1Lap2.lap)
-        assertEquals("Driver must receive 1 mine starting on Lap 2", 1, p1Lap2.minesAvailable)
+        assertEquals("Strictly 1 mine per player per round — no extra mine on Lap 2", 0, p1Lap2.minesAvailable)
 
-        // Drop mine using separate dropMine input
-        engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f, dropMine = true))
-        snap = engine.step(0.016f)
-        assertEquals(0, snap.racers.first { it.playerId == "p1" }.minesAvailable)
-        val droppedMine = snap.hazards.firstOrNull { it.hazardTypeEnum == HazardType.MINE }
-        assertNotNull("Dropped flashing red mine should exist in hazards", droppedMine)
-
-        // Now test rival hitting a mine: spawns explosion, spins out like oil/puddle, and increments collisionSeq
+        // Also verify Arena round grants 1 mine per player per round
         val arena = TrackCatalog.getArenaTrack(ArenaShape.CIRCLE).copy(
             ramps = emptyList(),
             props = emptyList(),
             itemSpawns = emptyList()
         )
+        val arenaEngine = RacePhysicsEngine(
+            track = arena,
+            totalLaps = 3,
+            players = players,
+            rules = RaceRulesSettings(gameMode = GameMode.ARENA.name, autoAccelerate = false, randomConditionsEnabled = false),
+            random = Random(66L)
+        )
+        repeat(68) { arenaEngine.step(0.05f) }
+        var aSnap = arenaEngine.step(0.02f)
+        assertEquals(1, aSnap.racers.first { it.playerId == "p1" }.minesAvailable)
+        arenaEngine.submitInput("p1", ControlInput(throttle = 0f, steer = 0f, dropMine = true))
+        aSnap = arenaEngine.step(0.02f)
+        assertEquals(0, aSnap.racers.first { it.playerId == "p1" }.minesAvailable)
+        assertEquals(1, aSnap.hazards.count { it.hazardTypeEnum == HazardType.MINE })
+
+        // Now test hitting a mine: spawns explosion, spins out like oil/puddle, and increments collisionSeq
         val hitEngine = RacePhysicsEngine(
             track = track.copy(props = emptyList()),
             totalLaps = 3,
@@ -684,7 +710,6 @@ class RaceEngineUnitTest {
         hitEngine.submitInput("p1", ControlInput(throttle = 0f, steer = 0f, dropMine = true))
         hSnap = hitEngine.step(0.02f)
         val mine = hSnap.hazards.first { it.hazardTypeEnum == HazardType.MINE }
-        assertNotNull(arena)
 
         // Advance > 1.25s so self-grace expires, then back p1 onto the mine to trigger explosion deterministically
         repeat(30) { hSnap = hitEngine.step(0.05f) }
@@ -1095,24 +1120,123 @@ class RaceEngineUnitTest {
     }
 
     @Test
-    fun springSliderSteer_appliesDeadzoneExpoAndFullLockSymmetrically() {
+    fun springSliderSteer_appliesAdjustableSensitivityDeadzoneExpoAndFullLock() {
         // Neutral & inside small center deadzone -> exact 0f
         assertEquals(0f, com.example.model.computeSpringSliderSteer(0f), 0.0001f)
-        assertEquals(0f, com.example.model.computeSpringSliderSteer(0.02f), 0.0001f)
-        assertEquals(0f, com.example.model.computeSpringSliderSteer(-0.02f), 0.0001f)
+        assertEquals(0f, com.example.model.computeSpringSliderSteer(0.015f), 0.0001f)
+        assertEquals(0f, com.example.model.computeSpringSliderSteer(-0.015f), 0.0001f)
 
         // Full left/right lock -> exact -1f / +1f
         assertEquals(1f, com.example.model.computeSpringSliderSteer(1f), 0.0001f)
         assertEquals(-1f, com.example.model.computeSpringSliderSteer(-1f), 0.0001f)
 
-        // Subtle RC expo: mid-travel is smooth and gentler than raw linear deflection, strictly monotonic & symmetric
-        val quarter = com.example.model.computeSpringSliderSteer(0.25f)
-        val half = com.example.model.computeSpringSliderSteer(0.50f)
-        val threeQuarter = com.example.model.computeSpringSliderSteer(0.75f)
-        assertTrue("Quarter deflection ($quarter) should be > 0 and gentler than linear 0.25", quarter in 0.12f..0.22f)
-        assertTrue("Half deflection ($half) should be gentler than linear 0.50 due to expo", half in 0.32f..0.46f)
-        assertTrue("Curve must be strictly monotonic ($quarter < $half < $threeQuarter < 1f)", quarter < half && half < threeQuarter && threeQuarter < 1f)
-        assertEquals("Left/right must be perfectly symmetric", -half, com.example.model.computeSpringSliderSteer(-0.50f), 0.0001f)
+        // Default sensitivity (1.45f) is noticeably more responsive than 1.0f and reaches full lock around ~70% travel
+        val lowSensQuarter = com.example.model.computeSpringSliderSteer(0.28f, sensitivity = 0.9f)
+        val defaultSensQuarter = com.example.model.computeSpringSliderSteer(0.28f, sensitivity = 1.45f)
+        val highSensQuarter = com.example.model.computeSpringSliderSteer(0.28f, sensitivity = 2.2f)
+        assertTrue(
+            "Higher slider sensitivity must produce stronger steering ($lowSensQuarter < $defaultSensQuarter < $highSensQuarter)",
+            lowSensQuarter < defaultSensQuarter && defaultSensQuarter < highSensQuarter
+        )
+        assertEquals("Default 1.45x sensitivity reaches full lock by ~72% thumb travel", 1f, com.example.model.computeSpringSliderSteer(0.72f), 0.0001f)
+
+        // Monotonicity & left/right symmetry
+        val s20 = com.example.model.computeSpringSliderSteer(0.20f)
+        val s45 = com.example.model.computeSpringSliderSteer(0.45f)
+        val s65 = com.example.model.computeSpringSliderSteer(0.65f)
+        assertTrue("Curve must be strictly monotonic ($s20 < $s45 < $s65 <= 1f)", s20 < s45 && s45 < s65 && s65 <= 1f)
+        assertEquals("Left/right must be perfectly symmetric", -s45, com.example.model.computeSpringSliderSteer(-0.45f), 0.0001f)
+    }
+
+    @Test
+    fun builtInTracks_haveNoOverlappingInvisibleWallsOrBlockingProps_andLivingRoomGpLowerRightIsClear() {
+        for (track in TrackCatalog.allTracks()) {
+            val pts = track.centerline
+            val n = pts.size
+
+            // 1. Every solid obstacle prop must stay well outside the road + kerb corridor
+            for (prop in track.props.filter { it.isSolidObstacle }) {
+                for (pt in pts) {
+                    val d = TrackCatalog.distance(prop.x, prop.y, pt.x, pt.y)
+                    val minClear = pt.halfWidth + prop.radius + 20f
+                    assertTrue(
+                        "Solid prop (${prop.x},${prop.y}) on ${track.id} encroaches road ($d < $minClear)",
+                        d >= minClear
+                    )
+                }
+            }
+
+            // 2. Non-adjacent road legs must never overlap their asphalt/kerb strokes (which hid invisible walls!)
+            val minIndexSeparation = 26
+            for (i in 0 until n) {
+                for (j in (i + 1) until n) {
+                    val circDiff = min(j - i, n - (j - i))
+                    if (circDiff >= minIndexSeparation) {
+                        val d = TrackCatalog.distance(pts[i].x, pts[i].y, pts[j].x, pts[j].y)
+                        val minLegSeparation = pts[i].halfWidth + pts[j].halfWidth + 24f
+                        assertTrue(
+                            "Track ${track.id} has overlapping road legs at $i and $j (dist=$d < $minLegSeparation)",
+                            d >= minLegSeparation
+                        )
+                    }
+                }
+            }
+        }
+
+        // 3. Drive LIVING_ROOM_GP cleanly through the lower-right corner and complete a full lap
+        val livingRoom = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP).copy(ramps = emptyList())
+        val players = listOf(
+            LobbyPlayer("p1", "CornerTester", isHost = true, isBot = false, carType = RcCarType.APEX_FORMULA.name)
+        )
+        val engine = RacePhysicsEngine(
+            track = livingRoom,
+            totalLaps = 1,
+            players = players,
+            rules = RaceRulesSettings(hardTrackBoundary = true, randomConditionsEnabled = false)
+        )
+        repeat(68) { engine.step(0.05f) }
+        var snap = engine.step(0.016f)
+        var visitedLowerRight = false
+        var minSpeedInLowerRight = Float.MAX_VALUE
+        var steps = 0
+        while (!snap.racers.first().finished && steps < 1800) {
+            val r = snap.racers.first()
+            if (r.x > 1450f && r.y > 1000f) {
+                visitedLowerRight = true
+                if (r.speed < minSpeedInLowerRight) minSpeedInLowerRight = r.speed
+            }
+            val proj = TrackCatalog.nearestTrackSegmentLocal(livingRoom, r.x, r.y, r.checkpointIndex)
+            val target = livingRoom.centerline[(proj.index + 7) % livingRoom.centerline.size]
+            val desired = kotlin.math.atan2(target.y - r.y, target.x - r.x)
+            val diff = RacePhysicsEngine.normalizeAngle(desired - r.angleRad)
+            engine.submitInput("p1", ControlInput(throttle = 1f, steer = (diff / 0.6f).coerceIn(-1f, 1f)))
+            snap = engine.step(0.016f)
+            steps++
+        }
+        assertTrue("Car must traverse lower-right corner of LIVING_ROOM_GP", visitedLowerRight)
+        assertTrue("Car must maintain clean speed through lower-right corner without slamming invisible wall ($minSpeedInLowerRight)", minSpeedInLowerRight > 280f)
+        assertTrue("Car must finish LIVING_ROOM_GP lap cleanly", snap.racers.first().finished)
+    }
+
+    @Test
+    fun tiltSteering_recognizesLandscapeAndPortraitWithoutDrivingInCircles() {
+        // Portrait (ROTATION_0): level phone has x = 0, y = +9.81 -> raw tilt axis = 0
+        assertEquals(0f, TiltSteeringController.computeRawTiltAxis(x = 0f, y = 9.81f, rotation = Surface.ROTATION_0), 0.001f)
+        assertTrue("Portrait CW tilt (x < 0) steers right", TiltSteeringController.computeRawTiltAxis(x = -3.5f, y = 9.0f, rotation = Surface.ROTATION_0) > 0f)
+
+        // Landscape Left (ROTATION_90): level phone has x = +9.81, y = 0 -> raw tilt axis MUST be 0 (not -9.81!)
+        val rot90Level = TiltSteeringController.computeRawTiltAxis(x = 9.81f, y = 0f, rotation = Surface.ROTATION_90)
+        assertEquals("Level phone in Landscape ROTATION_90 must output 0 tilt", 0f, rot90Level, 0.001f)
+        assertEquals(0f, TiltSteeringController.computeSteerFromSmoothedTilt(rot90Level / 5.2f), 0.001f)
+        assertTrue("Landscape ROTATION_90 CW tilt (y > 0) steers right", TiltSteeringController.computeRawTiltAxis(x = 9.0f, y = 3.5f, rotation = Surface.ROTATION_90) > 0f)
+        assertTrue("Landscape ROTATION_90 CCW tilt (y < 0) steers left", TiltSteeringController.computeRawTiltAxis(x = 9.0f, y = -3.5f, rotation = Surface.ROTATION_90) < 0f)
+
+        // Reverse Landscape (ROTATION_270): level phone has x = -9.81, y = 0 -> raw tilt axis MUST be 0 (not +9.81!)
+        val rot270Level = TiltSteeringController.computeRawTiltAxis(x = -9.81f, y = 0f, rotation = Surface.ROTATION_270)
+        assertEquals("Level phone in Landscape ROTATION_270 must output 0 tilt", 0f, rot270Level, 0.001f)
+        assertEquals(0f, TiltSteeringController.computeSteerFromSmoothedTilt(rot270Level / 5.2f), 0.001f)
+        assertTrue("Landscape ROTATION_270 CW tilt (y < 0) steers right", TiltSteeringController.computeRawTiltAxis(x = -9.0f, y = -3.5f, rotation = Surface.ROTATION_270) > 0f)
+        assertTrue("Landscape ROTATION_270 CCW tilt (y > 0) steers left", TiltSteeringController.computeRawTiltAxis(x = -9.0f, y = 3.5f, rotation = Surface.ROTATION_270) < 0f)
     }
 
     @Test

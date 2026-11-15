@@ -27,8 +27,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -50,6 +52,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -60,6 +63,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -72,9 +76,12 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
@@ -132,15 +139,20 @@ fun RaceScreen(
     onUpdateControlInput: (Float, Float) -> Unit,
     onTriggerPowerUp: () -> Unit,
     onDropMine: () -> Unit = {},
-    onSwitchControlMode: (ControlMode, Float, Boolean) -> Unit,
+    onSwitchControlMode: (ControlMode, Float, Boolean, Float) -> Unit,
     onUpdateAudioSettings: (AudioSettings) -> Unit = {},
     onLeaveRace: () -> Unit
 ) {
     val view = LocalView.current
+    val configuration = LocalConfiguration.current
     DisposableEffect(view) {
         val oldKeep = view.keepScreenOn
         view.keepScreenOn = true
         onDispose { view.keepScreenOn = oldKeep }
+    }
+
+    LaunchedEffect(view, configuration.orientation, profile.controlMode) {
+        tiltController.updateDisplayRotation(view.display?.rotation)
     }
 
     // Pick a fresh randomized race soundtrack for this run + feed per-car RC motor SFX
@@ -175,6 +187,7 @@ fun RaceScreen(
 
     DisposableEffect(profile.controlMode, profile.tiltSensitivity) {
         if (profile.controlMode == ControlMode.TILT_SENSOR) {
+            tiltController.updateDisplayRotation(view.display?.rotation)
             tiltController.setSensitivity(profile.tiltSensitivity)
             tiltController.start()
         } else {
@@ -825,7 +838,7 @@ fun RaceScreen(
             runCatching { PowerUpType.valueOf(it) }.getOrNull()
         }
         val minesAvailable = localRacer?.minesAvailable ?: 0
-        val hasMine = !isArenaMode && minesAvailable > 0
+        val hasMine = minesAvailable > 0
 
         BoxWithConstraints(
             modifier = Modifier
@@ -840,9 +853,9 @@ fun RaceScreen(
                 else -> 88.dp
             }
             val sliderWidth = when {
-                maxWidth >= 560.dp -> 248.dp
-                maxWidth >= 380.dp -> 212.dp
-                else -> 184.dp
+                maxWidth >= 560.dp -> 260.dp
+                maxWidth >= 380.dp -> 224.dp
+                else -> 196.dp
             }
             val controlHeight = when {
                 maxWidth >= 520.dp -> 100.dp
@@ -890,6 +903,8 @@ fun RaceScreen(
                     ControlMode.SPRING_SLIDER -> {
                         SpringSteeringSlider(
                             onSteerChange = { sliderSteer = it },
+                            sensitivity = profile.sliderSensitivity,
+                            iconSize = steerIconSize,
                             modifier = Modifier
                                 .size(width = sliderWidth, height = controlHeight)
                                 .testTag("spring_steering_slider")
@@ -953,61 +968,55 @@ fun RaceScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (!isArenaMode) {
-                            val mineFlash = 0.5f + 0.5f * sin(animTimeSec * 14f)
-                            val mineActiveBg = if (mineFlash > 0.45f) {
-                                AlertRed.copy(alpha = 0.94f)
-                            } else {
-                                Color(0xFF7F0019).copy(alpha = 0.92f)
-                            }
-                            val mineBorder = if (hasMine) {
-                                if (mineFlash > 0.45f) Color(0xFFFFCDD2) else AlertRed
-                            } else {
-                                PaddockOutline
-                            }
-                            Surface(
-                                color = if (hasMine) mineActiveBg else CarbonBg.copy(alpha = 0.65f),
-                                shape = RoundedCornerShape(18.dp),
-                                border = BorderStroke(2.dp, mineBorder),
-                                modifier = Modifier
-                                    .size(width = 96.dp, height = 56.dp)
-                                    .clip(RoundedCornerShape(18.dp))
-                                    .clickable(enabled = hasMine) {
-                                        hapticController?.onMineDropped()
-                                        onDropMine()
-                                    }
-                                    .testTag("drop_mine_button")
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(horizontal = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(12.dp)
-                                            .clip(CircleShape)
-                                            .background(
-                                                if (hasMine) {
-                                                    if (mineFlash > 0.45f) Color.White else Color(0xFFFF5252)
-                                                } else {
-                                                    TextSecondary.copy(alpha = 0.5f)
-                                                }
-                                            )
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text(
-                                        text = when {
-                                            hasMine -> "MINE"
-                                            (localRacer?.lap ?: 1) < 2 -> "LAP 2"
-                                            else -> "MINE"
-                                        },
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = if (hasMine) Color.White else TextSecondary
-                                    )
+                        val mineFlash = 0.5f + 0.5f * sin(animTimeSec * 14f)
+                        val mineActiveBg = if (mineFlash > 0.45f) {
+                            AlertRed.copy(alpha = 0.94f)
+                        } else {
+                            Color(0xFF7F0019).copy(alpha = 0.92f)
+                        }
+                        val mineBorder = if (hasMine) {
+                            if (mineFlash > 0.45f) Color(0xFFFFCDD2) else AlertRed
+                        } else {
+                            PaddockOutline
+                        }
+                        Surface(
+                            color = if (hasMine) mineActiveBg else CarbonBg.copy(alpha = 0.65f),
+                            shape = RoundedCornerShape(18.dp),
+                            border = BorderStroke(2.dp, mineBorder),
+                            modifier = Modifier
+                                .size(width = 96.dp, height = 56.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .clickable(enabled = hasMine) {
+                                    hapticController?.onMineDropped()
+                                    onDropMine()
                                 }
+                                .testTag("drop_mine_button")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(12.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (hasMine) {
+                                                if (mineFlash > 0.45f) Color.White else Color(0xFFFF5252)
+                                            } else {
+                                                TextSecondary.copy(alpha = 0.5f)
+                                            }
+                                        )
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (hasMine) "MINE" else "USED",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = if (hasMine) Color.White else TextSecondary
+                                )
                             }
                         }
 
@@ -1096,7 +1105,10 @@ fun RaceScreen(
             onDismissRequest = { showPauseDialog = false },
             title = { Text("Race Controls & Audio", style = MaterialTheme.typography.titleLarge) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     Text(
                         text = "Switch Steering Mode Live:",
                         style = MaterialTheme.typography.labelMedium,
@@ -1107,7 +1119,12 @@ fun RaceScreen(
                             val active = profile.controlMode == mode
                             OutlinedButton(
                                 onClick = {
-                                    onSwitchControlMode(mode, profile.tiltSensitivity, profile.autoGasInTilt)
+                                    onSwitchControlMode(
+                                        mode,
+                                        profile.tiltSensitivity,
+                                        profile.autoGasInTilt,
+                                        profile.sliderSensitivity
+                                    )
                                 },
                                 border = BorderStroke(
                                     1.5.dp,
@@ -1130,6 +1147,27 @@ fun RaceScreen(
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(mode.shortLabel, maxLines = 1, style = MaterialTheme.typography.labelMedium)
                             }
+                        }
+                    }
+                    if (profile.controlMode == ControlMode.SPRING_SLIDER) {
+                        Column {
+                            Text(
+                                text = "Slider Sensitivity: ${String.format("%.2fx", profile.sliderSensitivity)}",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            Slider(
+                                value = profile.sliderSensitivity,
+                                onValueChange = { newSens ->
+                                    onSwitchControlMode(
+                                        profile.controlMode,
+                                        profile.tiltSensitivity,
+                                        profile.autoGasInTilt,
+                                        newSens
+                                    )
+                                },
+                                valueRange = 0.7f..2.6f,
+                                modifier = Modifier.testTag("pause_slider_sensitivity")
+                            )
                         }
                     }
                     Row(
@@ -1181,6 +1219,25 @@ fun RaceScreen(
                         )
                     }
                     if (profile.controlMode == ControlMode.TILT_SENSOR) {
+                        Column {
+                            Text(
+                                text = "Tilt Sensitivity: ${String.format("%.2fx", profile.tiltSensitivity)}",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            Slider(
+                                value = profile.tiltSensitivity,
+                                onValueChange = { newTiltSens ->
+                                    onSwitchControlMode(
+                                        profile.controlMode,
+                                        newTiltSens,
+                                        profile.autoGasInTilt,
+                                        profile.sliderSensitivity
+                                    )
+                                },
+                                valueRange = 0.6f..2.2f,
+                                modifier = Modifier.testTag("pause_tilt_sensitivity")
+                            )
+                        }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1190,7 +1247,12 @@ fun RaceScreen(
                             Switch(
                                 checked = profile.autoGasInTilt,
                                 onCheckedChange = {
-                                    onSwitchControlMode(profile.controlMode, profile.tiltSensitivity, it)
+                                    onSwitchControlMode(
+                                        profile.controlMode,
+                                        profile.tiltSensitivity,
+                                        it,
+                                        profile.sliderSensitivity
+                                    )
                                 }
                             )
                         }
@@ -1279,14 +1341,21 @@ private fun HoldControlPad(
 @Composable
 fun SpringSteeringSlider(
     onSteerChange: (Float) -> Unit,
+    sensitivity: Float = 1.45f,
+    iconSize: Dp = 44.dp,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
-    val thumbHalfWidthPx = with(density) { 28.dp.toPx() }
+    val thumbHalfWidthPx = with(density) { 22.dp.toPx() }
+    val slideSlopPx = with(density) { 8.dp.toPx() }
+    val centerPuckGrabPx = with(density) { 22.dp.toPx() }
     var sliderWidthPx by remember { mutableFloatStateOf(0f) }
-    var isDragging by remember { mutableStateOf(false) }
+    var isSliding by remember { mutableStateOf(false) }
+    var tapButtonDir by remember { mutableIntStateOf(0) }
     var rawThumbOffset by remember { mutableFloatStateOf(0f) }
+    var activeSteerOut by remember { mutableFloatStateOf(0f) }
     val latestOnSteerChange by androidx.compose.runtime.rememberUpdatedState(onSteerChange)
+    val latestSensitivity by androidx.compose.runtime.rememberUpdatedState(sensitivity)
 
     DisposableEffect(Unit) {
         onDispose {
@@ -1294,40 +1363,91 @@ fun SpringSteeringSlider(
         }
     }
 
+    val isInteracting = isSliding || tapButtonDir != 0
     val animatedThumbOffset by animateFloatAsState(
-        targetValue = if (isDragging) rawThumbOffset else 0f,
+        targetValue = if (isInteracting) rawThumbOffset else 0f,
         animationSpec = spring(
             dampingRatio = 0.68f,
             stiffness = Spring.StiffnessHigh
         ),
         label = "springThumbSnap"
     )
-    val displayOffset = if (isDragging) rawThumbOffset else animatedThumbOffset
+    val displayOffset = if (isInteracting) rawThumbOffset else animatedThumbOffset
 
     Surface(
         color = CarbonBg.copy(alpha = 0.80f),
         shape = RoundedCornerShape(24.dp),
         border = BorderStroke(
             2.2.dp,
-            if (isDragging) Color.White else ElectricCyan.copy(alpha = 0.82f)
+            if (isInteracting) Color.White else ElectricCyan.copy(alpha = 0.82f)
         ),
         modifier = modifier
             .onSizeChanged { sliderWidthPx = it.width.toFloat() }
-            .pointerInput(thumbHalfWidthPx) {
+            .pointerInput(thumbHalfWidthPx, slideSlopPx, centerPuckGrabPx) {
                 awaitPointerEventScope {
+                    val pointerOrder = mutableListOf<PointerId>()
+                    val downXById = mutableMapOf<PointerId, Float>()
+                    val slidingIds = mutableSetOf<PointerId>()
+
                     while (true) {
                         val event = awaitPointerEvent()
-                        val activePointer = event.changes.firstOrNull { it.pressed }
+                        val pressedSet = event.changes.filter { it.pressed }.map { it.id }.toSet()
+
+                        // Clean up lifted pointers
+                        val released = pointerOrder.filter { it !in pressedSet }
+                        for (rid in released) {
+                            pointerOrder.remove(rid)
+                            downXById.remove(rid)
+                            slidingIds.remove(rid)
+                        }
+
+                        // Register newly pressed pointers
+                        val centerGrab = minOf(centerPuckGrabPx, sliderWidthPx * 0.16f)
+                        for (change in event.changes) {
+                            if (change.pressed && change.id !in downXById) {
+                                downXById[change.id] = change.position.x
+                                pointerOrder.add(change.id)
+                                if (sliderWidthPx > 0f &&
+                                    kotlin.math.abs(change.position.x - sliderWidthPx / 2f) <= centerGrab
+                                ) {
+                                    slidingIds.add(change.id)
+                                }
+                            }
+                        }
+
+                        val primaryId = pointerOrder.lastOrNull()
+                        val activePointer = event.changes.firstOrNull { it.id == primaryId && it.pressed }
+
                         if (activePointer != null && sliderWidthPx > 0f) {
-                            val maxTravel = (sliderWidthPx / 2f - thumbHalfWidthPx).coerceAtLeast(1f)
-                            val rawNorm = ((activePointer.position.x - sliderWidthPx / 2f) / maxTravel)
-                                .coerceIn(-1f, 1f)
-                            isDragging = true
-                            rawThumbOffset = rawNorm
-                            latestOnSteerChange(computeSpringSliderSteer(rawNorm))
-                        } else if (isDragging || rawThumbOffset != 0f) {
-                            isDragging = false
+                            val startX = downXById[activePointer.id] ?: activePointer.position.x
+                            val curX = activePointer.position.x
+                            if (kotlin.math.abs(curX - startX) > slideSlopPx) {
+                                slidingIds.add(activePointer.id)
+                            }
+
+                            if (activePointer.id in slidingIds) {
+                                val maxTravel = (sliderWidthPx / 2f - thumbHalfWidthPx).coerceAtLeast(1f)
+                                val rawNorm = ((curX - sliderWidthPx / 2f) / maxTravel).coerceIn(-1f, 1f)
+                                val steer = computeSpringSliderSteer(rawNorm, sensitivity = latestSensitivity)
+                                isSliding = true
+                                tapButtonDir = 0
+                                rawThumbOffset = rawNorm
+                                activeSteerOut = steer
+                                latestOnSteerChange(steer)
+                            } else {
+                                val dir = if (curX < sliderWidthPx / 2f) -1 else 1
+                                val steer = dir.toFloat()
+                                isSliding = false
+                                tapButtonDir = dir
+                                rawThumbOffset = steer
+                                activeSteerOut = steer
+                                latestOnSteerChange(steer)
+                            }
+                        } else if (isSliding || tapButtonDir != 0 || rawThumbOffset != 0f || activeSteerOut != 0f) {
+                            isSliding = false
+                            tapButtonDir = 0
                             rawThumbOffset = 0f
+                            activeSteerOut = 0f
                             latestOnSteerChange(0f)
                         }
                         event.changes.forEach { it.consume() }
@@ -1344,27 +1464,74 @@ fun SpringSteeringSlider(
                 val maxTravel = (w / 2f - thumbHalfWidthPx).coerceAtLeast(1f)
                 val thumbCenterX = centerX + displayOffset * maxTravel
 
-                // Center channel groove
-                val railHeight = 10.dp.toPx()
-                val railMargin = thumbHalfWidthPx * 0.65f
+                // Overlaid Left & Right Arrow Button Pad Zones
+                val padInset = 6.dp.toPx()
+                val padGap = 8.dp.toPx()
+                val padWidth = ((w - padInset * 2f - padGap) / 2f).coerceAtLeast(24f)
+                val padHeight = (h - padInset * 2f).coerceAtLeast(24f)
+                val padCorner = CornerRadius(18.dp.toPx(), 18.dp.toPx())
+
+                val leftActive = tapButtonDir < 0 || (isSliding && activeSteerOut < -0.15f)
+                val rightActive = tapButtonDir > 0 || (isSliding && activeSteerOut > 0.15f)
+
                 drawRoundRect(
-                    color = PaddockSurface,
+                    color = when {
+                        tapButtonDir < 0 -> ElectricCyan.copy(alpha = 0.55f)
+                        leftActive -> ElectricCyan.copy(alpha = 0.18f)
+                        else -> PaddockSurface.copy(alpha = 0.45f)
+                    },
+                    topLeft = Offset(padInset, padInset),
+                    size = Size(padWidth, padHeight),
+                    cornerRadius = padCorner
+                )
+                drawRoundRect(
+                    color = if (tapButtonDir < 0) Color.White else ElectricCyan.copy(alpha = 0.42f),
+                    topLeft = Offset(padInset, padInset),
+                    size = Size(padWidth, padHeight),
+                    cornerRadius = padCorner,
+                    style = Stroke(width = if (tapButtonDir < 0) 2.dp.toPx() else 1.2.dp.toPx())
+                )
+
+                val rightLeftX = w - padInset - padWidth
+                drawRoundRect(
+                    color = when {
+                        tapButtonDir > 0 -> ElectricCyan.copy(alpha = 0.55f)
+                        rightActive -> ElectricCyan.copy(alpha = 0.18f)
+                        else -> PaddockSurface.copy(alpha = 0.45f)
+                    },
+                    topLeft = Offset(rightLeftX, padInset),
+                    size = Size(padWidth, padHeight),
+                    cornerRadius = padCorner
+                )
+                drawRoundRect(
+                    color = if (tapButtonDir > 0) Color.White else ElectricCyan.copy(alpha = 0.42f),
+                    topLeft = Offset(rightLeftX, padInset),
+                    size = Size(padWidth, padHeight),
+                    cornerRadius = padCorner,
+                    style = Stroke(width = if (tapButtonDir > 0) 2.dp.toPx() else 1.2.dp.toPx())
+                )
+
+                // Center channel groove
+                val railHeight = 8.dp.toPx()
+                val railMargin = thumbHalfWidthPx * 0.75f
+                drawRoundRect(
+                    color = CarbonBg.copy(alpha = 0.85f),
                     topLeft = Offset(railMargin, centerY - railHeight / 2f),
                     size = Size((w - railMargin * 2f).coerceAtLeast(4f), railHeight),
                     cornerRadius = CornerRadius(railHeight / 2f, railHeight / 2f)
                 )
 
-                // Expo tick marks (-75%, -40%, 0%, +40%, +75%)
-                val tickFracs = floatArrayOf(-0.75f, -0.4f, 0f, 0.4f, 0.75f)
+                // Expo tick marks (-70%, -35%, 0%, +35%, +70%)
+                val tickFracs = floatArrayOf(-0.70f, -0.35f, 0f, 0.35f, 0.70f)
                 for (tf in tickFracs) {
                     val tx = centerX + tf * maxTravel
                     val isZero = tf == 0f
-                    val tickHalfH = if (isZero) h * 0.34f else h * 0.16f
+                    val tickHalfH = if (isZero) h * 0.32f else h * 0.14f
                     drawLine(
-                        color = if (isZero) SignalOrange.copy(alpha = 0.85f) else PaddockOutline,
+                        color = if (isZero) SignalOrange.copy(alpha = 0.88f) else PaddockOutline,
                         start = Offset(tx, centerY - tickHalfH),
                         end = Offset(tx, centerY + tickHalfH),
-                        strokeWidth = if (isZero) 2.5.dp.toPx() else 1.5.dp.toPx()
+                        strokeWidth = if (isZero) 2.5.dp.toPx() else 1.4.dp.toPx()
                     )
                 }
 
@@ -1373,69 +1540,76 @@ fun SpringSteeringSlider(
                 val barWidth = kotlin.math.abs(thumbCenterX - centerX)
                 if (barWidth > 1f) {
                     drawRoundRect(
-                        color = ElectricCyan.copy(alpha = 0.85f),
+                        color = ElectricCyan.copy(alpha = 0.90f),
                         topLeft = Offset(barLeft, centerY - railHeight / 2f),
                         size = Size(barWidth, railHeight),
                         cornerRadius = CornerRadius(railHeight / 2f, railHeight / 2f)
                     )
                 }
 
-                // Spring-loaded RC transmitter thumb puck (>= 48dp touch area)
-                val puckW = (thumbHalfWidthPx * 1.85f).coerceAtLeast(44.dp.toPx())
-                val puckH = (h - 14.dp.toPx()).coerceAtLeast(44.dp.toPx())
+                // Spring-loaded RC transmitter thumb puck
+                val puckW = (thumbHalfWidthPx * 1.75f).coerceAtLeast(38.dp.toPx())
+                val puckH = (h - 18.dp.toPx()).coerceAtLeast(42.dp.toPx())
                 val puckLeft = thumbCenterX - puckW / 2f
                 val puckTop = centerY - puckH / 2f
-                val puckColor = if (isDragging) ElectricCyan else ElectricCyan.copy(alpha = 0.90f)
+                val puckColor = if (isInteracting) ElectricCyan else ElectricCyan.copy(alpha = 0.88f)
 
                 drawRoundRect(
                     color = puckColor,
                     topLeft = Offset(puckLeft, puckTop),
                     size = Size(puckW, puckH),
-                    cornerRadius = CornerRadius(16.dp.toPx(), 16.dp.toPx())
+                    cornerRadius = CornerRadius(14.dp.toPx(), 14.dp.toPx())
                 )
 
                 // Knurled grip ridges on thumb puck
                 val ridgeColor = CarbonBg.copy(alpha = 0.72f)
-                val ridgeSpacing = 6.dp.toPx()
+                val ridgeSpacing = 5.dp.toPx()
                 for (ri in -1..1) {
                     val rx = thumbCenterX + ri * ridgeSpacing
                     drawLine(
                         color = ridgeColor,
-                        start = Offset(rx, centerY - puckH * 0.26f),
-                        end = Offset(rx, centerY + puckH * 0.26f),
+                        start = Offset(rx, centerY - puckH * 0.25f),
+                        end = Offset(rx, centerY + puckH * 0.25f),
                         strokeWidth = 2.dp.toPx()
                     )
                 }
             }
 
-            Row(
+            // Overlaid Left & Right Arrow Icons (matching Touch Pedals arrow visuals)
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                contentDescription = "Steer Left",
+                tint = if (tapButtonDir < 0) CarbonBg else ElectricCyan,
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .align(Alignment.CenterStart)
+                    .padding(start = 10.dp)
+                    .size(iconSize)
+                    .testTag("slider_left_arrow_overlay")
+            )
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = "Steer Right",
+                tint = if (tapButtonDir > 0) CarbonBg else ElectricCyan,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 10.dp)
+                    .size(iconSize)
+                    .testTag("slider_right_arrow_overlay")
+            )
+
+            Text(
+                text = if (isInteracting) {
+                    val pct = (activeSteerOut * 100f).toInt()
+                    if (pct > 0) "+$pct%" else "$pct%"
+                } else {
+                    "SLIDE / TAP"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isInteracting) Color.White else TextSecondary.copy(alpha = 0.82f),
+                modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "◄ L",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary.copy(alpha = 0.78f)
-                )
-                Text(
-                    text = if (isDragging) {
-                        val pct = (computeSpringSliderSteer(rawThumbOffset) * 100f).toInt()
-                        if (pct > 0) "+$pct%" else "$pct%"
-                    } else {
-                        "STEER"
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (isDragging) ElectricCyan else TextSecondary.copy(alpha = 0.78f)
-                )
-                Text(
-                    text = "R ►",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = TextSecondary.copy(alpha = 0.78f)
-                )
-            }
+                    .padding(top = 3.dp)
+            )
         }
     }
 }

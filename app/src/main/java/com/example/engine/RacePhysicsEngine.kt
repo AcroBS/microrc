@@ -83,8 +83,8 @@ class RacePhysicsEngine(
         var spinImmunityMs: Long = 0L,
         var botLaneOffset: Float = 0f,
         var botPowerUpDelayMs: Long = 0L,
-        var minesAvailable: Int = 0,
-        var lap2MineGranted: Boolean = false,
+        var minesAvailable: Int = 1,
+        var roundMineGranted: Boolean = true,
         var botMineDelayMs: Long = 0L,
         var invertedSteerMs: Long = 0L,
         var portalCooldownMs: Long = 0L,
@@ -116,7 +116,10 @@ class RacePhysicsEngine(
             angleRad = angle,
             checkpointIndex = startTrackIdx,
             lastTrackIdx = startTrackIdx,
-            botLaneOffset = ((idx % 3) - 1) * 26f
+            botLaneOffset = ((idx % 3) - 1) * 26f,
+            minesAvailable = 1,
+            roundMineGranted = true,
+            botMineDelayMs = if (p.isBot) random.nextLong(6500L, 16500L) else 0L
         )
     }.toMutableList()
 
@@ -221,8 +224,8 @@ class RacePhysicsEngine(
 
     fun grantMineForTest(playerId: String, count: Int = 1) {
         val racer = racers.find { it.playerId == playerId } ?: return
-        racer.minesAvailable = count.coerceAtLeast(0)
-        if (count > 0) racer.lap2MineGranted = true
+        racer.minesAvailable = count.coerceIn(0, 1)
+        racer.roundMineGranted = true
     }
 
     fun spawnFieldPickupForTest(
@@ -722,7 +725,7 @@ class RacePhysicsEngine(
                 }
 
                 val shouldDropMine = if (racer.isBot) {
-                    !isArenaMode && racer.minesAvailable > 0 && racer.botMineDelayMs <= 0L
+                    racer.minesAvailable > 0 && racer.botMineDelayMs <= 0L
                 } else {
                     pendingMineDropTrigger.remove(racer.playerId)
                 }
@@ -1347,30 +1350,29 @@ class RacePhysicsEngine(
             return
         }
 
-        // Circuit centerline corridor boundary
-        val (postIdx, postDist) = TrackCatalog.nearestTrackPointLocal(
+        // Circuit centerline corridor boundary (continuous spline segment projection)
+        val proj = TrackCatalog.nearestTrackSegmentLocal(
             track = track,
             x = racer.x,
             y = racer.y,
             hintIdx = racer.lastTrackIdx
         )
-        racer.lastTrackIdx = postIdx
-        val postPt = track.centerline[postIdx]
+        racer.lastTrackIdx = proj.index
 
         val maxCorridor = if (rules.hardTrackBoundary) {
-            (postPt.halfWidth - racer.carType.radiusPx * 0.45f).coerceAtLeast(42f)
+            (proj.halfWidth - racer.carType.radiusPx * 0.45f).coerceAtLeast(42f)
         } else {
-            postPt.halfWidth + 130f
+            proj.halfWidth + 130f
         }
-        if (postDist > maxCorridor) {
-            val dx = racer.x - postPt.x
-            val dy = racer.y - postPt.y
+        if (proj.distance > maxCorridor) {
+            val dx = racer.x - proj.closestX
+            val dy = racer.y - proj.closestY
             val d = hypot(dx, dy).coerceAtLeast(1f)
             val nx = dx / d
             val ny = dy / d
             val safeDist = (maxCorridor - 2.5f).coerceAtLeast(24f)
-            racer.x = postPt.x + nx * safeDist
-            racer.y = postPt.y + ny * safeDist
+            racer.x = proj.closestX + nx * safeDist
+            racer.y = proj.closestY + ny * safeDist
 
             val vn = racer.vx * nx + racer.vy * ny
             if (vn > 0f) {
@@ -1384,8 +1386,9 @@ class RacePhysicsEngine(
                 racer.vy = (racer.vy - restitution * vn * ny) * retention
             }
             if (throttle > 0.1f && abs(vn) < 40f && rules.hardTrackBoundary) {
-                val nextPt = track.centerline[(postIdx + 2) % track.centerline.size]
-                val tangAng = atan2(nextPt.y - postPt.y, nextPt.x - postPt.x)
+                val segA = track.centerline[proj.index]
+                val segB = track.centerline[(proj.index + 1) % track.centerline.size]
+                val tangAng = atan2(segB.y - segA.y, segB.x - segA.x)
                 val diff = normalizeAngle(tangAng - racer.angleRad)
                 racer.angleRad = normalizeAngle(racer.angleRad + diff * (2.6f * dt).coerceAtMost(0.35f))
             }
@@ -1503,8 +1506,8 @@ class RacePhysicsEngine(
     }
 
     private fun dropMine(racer: MutableRacer) {
-        if (isArenaMode || racer.minesAvailable <= 0) return
-        racer.minesAvailable -= 1
+        if (racer.minesAvailable <= 0) return
+        racer.minesAvailable = 0
         val dropX = racer.x - cos(racer.angleRad) * 54f
         val dropY = racer.y - sin(racer.angleRad) * 54f
         hazards.add(
@@ -1978,22 +1981,8 @@ class RacePhysicsEngine(
                         racer.currentLapStartMs = raceTimeMs
                         racer.sectorMask = 0b0001
 
-                        // Starting with the 2nd lap, each driver gets 1 flashing red mine!
-                        if (racer.lap >= 2 && !racer.lap2MineGranted) {
-                            racer.lap2MineGranted = true
-                            racer.minesAvailable = 1
-                            if (racer.isBot) {
-                                racer.botMineDelayMs = random.nextLong(2200L, 6800L)
-                            }
-                        }
-
                         if (winCondition != WinCondition.TIME_TRIAL_DISTANCE && racer.lap == effectiveLaps) {
-                            setBanner(
-                                if (racer.lap == 2) "${racer.name}: FINAL LAP • MINE READY!" else "${racer.name}: FINAL LAP!",
-                                1700L
-                            )
-                        } else if (racer.lap == 2 && !racer.isBot) {
-                            setBanner("${racer.name}: LAP 2 — RED MINE ARMED!", 1700L)
+                            setBanner("${racer.name}: FINAL LAP!", 1700L)
                         }
                     }
                 } else {

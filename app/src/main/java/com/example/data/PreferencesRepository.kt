@@ -60,6 +60,7 @@ class PreferencesRepository(context: Context) {
         val ACCENT_COLOR = longPreferencesKey("accent_color")
         val CONTROL_MODE = stringPreferencesKey("control_mode")
         val TILT_SENSITIVITY = floatPreferencesKey("tilt_sensitivity")
+        val SLIDER_SENSITIVITY = floatPreferencesKey("slider_sensitivity")
         val AUTO_GAS_TILT = booleanPreferencesKey("auto_gas_tilt")
         val RULE_GAME_MODE = stringPreferencesKey("rule_game_mode")
         val RULE_AUTO_ACCEL = booleanPreferencesKey("rule_auto_accel_v2")
@@ -90,6 +91,7 @@ class PreferencesRepository(context: Context) {
             ControlMode.valueOf(prefs[Keys.CONTROL_MODE] ?: ControlMode.TOUCH_OVERLAY.name)
         }.getOrDefault(ControlMode.TOUCH_OVERLAY)
         val sensitivity = prefs[Keys.TILT_SENSITIVITY] ?: 1.25f
+        val sliderSensitivity = (prefs[Keys.SLIDER_SENSITIVITY] ?: 1.45f).coerceIn(0.7f, 2.6f)
         val autoGas = prefs[Keys.AUTO_GAS_TILT] ?: false
 
         PlayerProfile(
@@ -100,7 +102,8 @@ class PreferencesRepository(context: Context) {
             accentColorArgb = accent,
             controlMode = controlMode,
             tiltSensitivity = sensitivity,
-            autoGasInTilt = autoGas
+            autoGasInTilt = autoGas,
+            sliderSensitivity = sliderSensitivity
         )
     }
 
@@ -176,12 +179,14 @@ class PreferencesRepository(context: Context) {
     suspend fun updateControlSettings(
         controlMode: ControlMode,
         tiltSensitivity: Float,
-        autoGasInTilt: Boolean
+        autoGasInTilt: Boolean,
+        sliderSensitivity: Float = 1.45f
     ) {
         dataStore.edit {
             it[Keys.CONTROL_MODE] = controlMode.name
             it[Keys.TILT_SENSITIVITY] = tiltSensitivity.coerceIn(0.6f, 2.2f)
             it[Keys.AUTO_GAS_TILT] = autoGasInTilt
+            it[Keys.SLIDER_SENSITIVITY] = sliderSensitivity.coerceIn(0.7f, 2.6f)
         }
     }
 

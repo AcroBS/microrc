@@ -5,7 +5,8 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.os.Build
+import android.hardware.display.DisplayManager
+import android.view.Display
 import android.view.Surface
 import android.view.WindowManager
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,6 +17,7 @@ import kotlin.math.abs
 class TiltSteeringController(private val context: Context) : SensorEventListener {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+    private val displayManager = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
     private val tiltSensor: Sensor? =
         sensorManager?.getDefaultSensor(Sensor.TYPE_GRAVITY)
             ?: sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
@@ -32,13 +34,45 @@ class TiltSteeringController(private val context: Context) : SensorEventListener
     private var smoothedTilt = 0f
     private var sensitivity = 1.25f
     private var isListening = false
+    private var uiRotationOverride: Int? = null
+    private var lastRotation: Int = -1
+
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = Unit
+        override fun onDisplayRemoved(displayId: Int) = Unit
+        override fun onDisplayChanged(displayId: Int) {
+            if (displayId == Display.DEFAULT_DISPLAY) {
+                val rot = querySystemDisplayRotation()
+                if (uiRotationOverride != null) {
+                    uiRotationOverride = rot
+                }
+                if (rot != lastRotation) {
+                    handleRotationChanged(rot, resetSmoothedTo = 0f)
+                }
+            }
+        }
+    }
 
     fun setSensitivity(value: Float) {
         sensitivity = value.coerceIn(0.6f, 2.2f)
     }
 
+    /**
+     * Syncs the live UI window's display rotation (e.g. Surface.ROTATION_90 / ROTATION_270 in landscape)
+     * directly from Compose's LocalView so landscape orientation is always recognized accurately.
+     */
+    fun updateDisplayRotation(rotation: Int?) {
+        uiRotationOverride = rotation
+        val resolved = getDisplayRotation()
+        if (resolved != lastRotation) {
+            handleRotationChanged(resolved, resetSmoothedTo = 0f)
+        }
+    }
+
     fun start() {
         if (isListening || tiltSensor == null) return
+        lastRotation = getDisplayRotation()
+        displayManager?.registerDisplayListener(displayListener, null)
         sensorManager?.registerListener(this, tiltSensor, SensorManager.SENSOR_DELAY_GAME)
         isListening = true
     }
@@ -46,6 +80,7 @@ class TiltSteeringController(private val context: Context) : SensorEventListener
     fun stop() {
         if (!isListening) return
         sensorManager?.unregisterListener(this)
+        runCatching { displayManager?.unregisterDisplayListener(displayListener) }
         isListening = false
         _steerValue.value = 0f
     }
@@ -57,43 +92,80 @@ class TiltSteeringController(private val context: Context) : SensorEventListener
     override fun onSensorChanged(event: SensorEvent) {
         val x = event.values[0]
         val y = event.values[1]
+        processSensorAxes(x, y, getDisplayRotation())
+    }
 
-        val rotation = getDisplayRotation()
-        // Map device tilt to left(-)/right(+) across portrait and landscape orientations
-        val rawAxis = when (rotation) {
-            Surface.ROTATION_90 -> y
-            Surface.ROTATION_270 -> -y
-            Surface.ROTATION_180 -> x
-            else -> -x
-        }
-
-        // Normalize against standard gravity ~9.81 m/s^2 (max tilt around ~5.2 m/s^2 -> full lock)
+    internal fun processSensorAxes(x: Float, y: Float, rotation: Int): Float {
+        val rawAxis = computeRawTiltAxis(x, y, rotation)
         val normalized = (rawAxis / 5.2f).coerceIn(-1.5f, 1.5f)
-        smoothedTilt = smoothedTilt * 0.72f + normalized * 0.28f
+
+        if (rotation != lastRotation) {
+            handleRotationChanged(rotation, resetSmoothedTo = normalized)
+        } else {
+            smoothedTilt = smoothedTilt * 0.72f + normalized * 0.28f
+        }
         _rawTilt.value = smoothedTilt
 
-        val relative = (smoothedTilt - neutralOffset) * sensitivity
-        val deadzone = 0.06f
-        val steer = if (abs(relative) < deadzone) {
-            0f
-        } else {
-            val sign = if (relative > 0f) 1f else -1f
-            ((abs(relative) - deadzone) / (1f - deadzone) * sign).coerceIn(-1f, 1f)
-        }
+        val steer = computeSteerFromSmoothedTilt(
+            smoothedTilt = smoothedTilt,
+            neutralOffset = neutralOffset,
+            sensitivity = sensitivity
+        )
         _steerValue.value = steer
+        return steer
+    }
+
+    private fun handleRotationChanged(newRotation: Int, resetSmoothedTo: Float) {
+        lastRotation = newRotation
+        neutralOffset = 0f
+        smoothedTilt = resetSmoothedTo
+        _rawTilt.value = resetSmoothedTo
+        _steerValue.value = 0f
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
-    @Suppress("DEPRECATION")
     private fun getDisplayRotation(): Int {
+        return uiRotationOverride ?: querySystemDisplayRotation()
+    }
+
+    @Suppress("DEPRECATION")
+    private fun querySystemDisplayRotation(): Int {
+        displayManager?.getDisplay(Display.DEFAULT_DISPLAY)?.rotation?.let { return it }
         return runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                context.display?.rotation ?: Surface.ROTATION_0
-            } else {
-                val wm = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-                wm?.defaultDisplay?.rotation ?: Surface.ROTATION_0
-            }
+            val wm = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+            wm?.defaultDisplay?.rotation ?: Surface.ROTATION_0
         }.getOrDefault(Surface.ROTATION_0)
+    }
+
+    companion object {
+        /**
+         * Maps hardware gravity/accelerometer (x, y) to steering tilt axis:
+         * Negative = steer left (CCW), Positive = steer right (CW), 0 = level,
+         * across portrait (ROTATION_0 / ROTATION_180) and landscape (ROTATION_90 / ROTATION_270).
+         */
+        fun computeRawTiltAxis(x: Float, y: Float, rotation: Int): Float {
+            return when (rotation) {
+                Surface.ROTATION_90 -> y
+                Surface.ROTATION_270 -> -y
+                Surface.ROTATION_180 -> x
+                else -> -x
+            }
+        }
+
+        fun computeSteerFromSmoothedTilt(
+            smoothedTilt: Float,
+            neutralOffset: Float = 0f,
+            sensitivity: Float = 1.25f,
+            deadzone: Float = 0.06f
+        ): Float {
+            val relative = (smoothedTilt - neutralOffset) * sensitivity
+            return if (abs(relative) < deadzone) {
+                0f
+            } else {
+                val sign = if (relative > 0f) 1f else -1f
+                ((abs(relative) - deadzone) / (1f - deadzone) * sign).coerceIn(-1f, 1f)
+            }
+        }
     }
 }

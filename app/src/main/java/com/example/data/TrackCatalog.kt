@@ -54,39 +54,40 @@ object TrackCatalog {
                 val ctrl = listOf(
                     TrackPoint(460f, 320f, 114f),
                     TrackPoint(1100f, 260f, 114f),
-                    TrackPoint(1780f, 330f, 114f),
-                    TrackPoint(1900f, 640f, 112f),
-                    TrackPoint(1560f, 840f, 112f),
-                    TrackPoint(1220f, 750f, 110f),
-                    TrackPoint(1080f, 1080f, 112f),
-                    TrackPoint(1620f, 1210f, 114f),
-                    TrackPoint(1100f, 1280f, 114f),
-                    TrackPoint(460f, 1210f, 114f),
-                    TrackPoint(300f, 790f, 114f)
+                    TrackPoint(1750f, 330f, 114f),
+                    TrackPoint(1890f, 600f, 112f),
+                    TrackPoint(1420f, 680f, 112f),
+                    TrackPoint(1460f, 920f, 112f),
+                    TrackPoint(1840f, 1020f, 114f),
+                    TrackPoint(1800f, 1250f, 114f),
+                    TrackPoint(1320f, 1310f, 114f),
+                    TrackPoint(680f, 1270f, 114f),
+                    TrackPoint(330f, 1060f, 114f),
+                    TrackPoint(300f, 680f, 114f)
                 )
                 val spline = subdivideClosedSpline(ctrl, samplesPerSegment = 14)
                 val boosts = listOf(
                     boostAt(spline, 14),
-                    boostAt(spline, 96)
+                    boostAt(spline, 112)
                 )
                 val items = listOf(
-                    itemAt(spline, 25, 0),
-                    itemAt(spline, 52, 1),
-                    itemAt(spline, 82, 2),
-                    itemAt(spline, 118, 3),
-                    itemAt(spline, 138, 4)
+                    itemAt(spline, 26, 0),
+                    itemAt(spline, 56, 1),
+                    itemAt(spline, 90, 2),
+                    itemAt(spline, 128, 3),
+                    itemAt(spline, 150, 4)
                 )
                 val ramps = listOf(
-                    rampAt(spline, 38),
-                    rampAt(spline, 108)
+                    rampAt(spline, 40),
+                    rampAt(spline, 120)
                 )
                 val props = listOf(
-                    TrackProp(780f, 620f, 62f, PropShape.CIRCLE, 0xFFE65100, 0xFFFFCC80, isSolidObstacle = false),
-                    TrackProp(1480f, 540f, 44f, PropShape.CRATE, 0xFF8D6E63, 0xFFD7CCC8, isSolidObstacle = true),
-                    TrackProp(640f, 920f, 48f, PropShape.CRATE, 0xFF546E7A, 0xFFB0BEC5, isSolidObstacle = true),
-                    TrackProp(1520f, 1040f, 36f, PropShape.CIRCLE, 0xFF00897B, 0xFFB2DFDB, isSolidObstacle = true),
-                    TrackProp(200f, 200f, 52f, PropShape.CRATE, 0xFF6D4C41, 0xFFBCAAA4, isSolidObstacle = false),
-                    TrackProp(2010f, 1320f, 56f, PropShape.CIRCLE, 0xFFD84315, 0xFFFFAB91, isSolidObstacle = false)
+                    TrackProp(760f, 600f, 62f, PropShape.CIRCLE, 0xFFE65100, 0xFFFFCC80, isSolidObstacle = false),
+                    TrackProp(960f, 840f, 44f, PropShape.CRATE, 0xFF8D6E63, 0xFFD7CCC8, isSolidObstacle = true),
+                    TrackProp(660f, 880f, 48f, PropShape.CRATE, 0xFF546E7A, 0xFFB0BEC5, isSolidObstacle = true),
+                    TrackProp(1040f, 560f, 36f, PropShape.CIRCLE, 0xFF00897B, 0xFFB2DFDB, isSolidObstacle = true),
+                    TrackProp(180f, 180f, 52f, PropShape.CRATE, 0xFF6D4C41, 0xFFBCAAA4, isSolidObstacle = false),
+                    TrackProp(2040f, 1360f, 56f, PropShape.CIRCLE, 0xFFD84315, 0xFFFFAB91, isSolidObstacle = false)
                 )
                 TrackDefinition(id, worldW, worldH, spline, boosts, items, props, ramps = ramps)
             }
@@ -134,15 +135,15 @@ object TrackCatalog {
                 val ctrl = listOf(
                     TrackPoint(420f, 280f, 108f),
                     TrackPoint(1150f, 250f, 108f),
-                    TrackPoint(1860f, 300f, 108f),
-                    TrackPoint(1900f, 720f, 106f),
-                    TrackPoint(1420f, 710f, 106f),
-                    TrackPoint(1380f, 1140f, 108f),
-                    TrackPoint(1840f, 1250f, 108f),
-                    TrackPoint(1040f, 1290f, 108f),
-                    TrackPoint(410f, 1200f, 108f),
-                    TrackPoint(650f, 840f, 106f),
-                    TrackPoint(310f, 600f, 108f)
+                    TrackPoint(1840f, 310f, 108f),
+                    TrackPoint(1900f, 640f, 106f),
+                    TrackPoint(1400f, 680f, 106f),
+                    TrackPoint(1400f, 940f, 108f),
+                    TrackPoint(1860f, 1080f, 108f),
+                    TrackPoint(1580f, 1300f, 108f),
+                    TrackPoint(960f, 1290f, 108f),
+                    TrackPoint(430f, 1180f, 108f),
+                    TrackPoint(320f, 720f, 108f)
                 )
                 val spline = subdivideClosedSpline(ctrl, samplesPerSegment = 14)
                 val boosts = listOf(
@@ -163,11 +164,11 @@ object TrackCatalog {
                     rampAt(spline, 124)
                 )
                 val props = listOf(
-                    TrackProp(960f, 680f, 44f, PropShape.PYLON, 0xFF00E5FF, 0xFFE040FB, isSolidObstacle = true),
-                    TrackProp(1700f, 960f, 40f, PropShape.PYLON, 0xFFE040FB, 0xFF00E5FF, isSolidObstacle = true),
+                    TrackProp(960f, 620f, 44f, PropShape.PYLON, 0xFF00E5FF, 0xFFE040FB, isSolidObstacle = true),
+                    TrackProp(660f, 760f, 40f, PropShape.PYLON, 0xFFE040FB, 0xFF00E5FF, isSolidObstacle = true),
                     TrackProp(160f, 1020f, 46f, PropShape.CRATE, 0xFF1A233A, 0xFF00E5FF, isSolidObstacle = false),
                     TrackProp(2050f, 150f, 44f, PropShape.CRATE, 0xFF1A233A, 0xFFE040FB, isSolidObstacle = false),
-                    TrackProp(820f, 1040f, 36f, PropShape.PYLON, 0xFF00E5FF, 0xFFFFFFFF, isSolidObstacle = true)
+                    TrackProp(960f, 940f, 36f, PropShape.PYLON, 0xFF00E5FF, 0xFFFFFFFF, isSolidObstacle = true)
                 )
                 TrackDefinition(id, worldW, worldH, spline, boosts, items, props, ramps = ramps)
             }
@@ -581,6 +582,72 @@ object TrackCatalog {
             bestIdx to localDist
         } else {
             nearestTrackPoint(track, x, y)
+        }
+    }
+
+    data class SegmentProjection(
+        val index: Int,
+        val closestX: Float,
+        val closestY: Float,
+        val halfWidth: Float,
+        val distance: Float
+    )
+
+    /**
+     * Projects (x, y) continuously onto closed centerline spline segments in a local window around
+     * hintIdx (with global fallback) so road boundaries are smooth continuous curves on every corner.
+     */
+    fun nearestTrackSegmentLocal(
+        track: TrackDefinition,
+        x: Float,
+        y: Float,
+        hintIdx: Int,
+        windowRadius: Int = 22
+    ): SegmentProjection {
+        val pts = track.centerline
+        if (pts.isEmpty()) return SegmentProjection(0, x, y, 112f, 0f)
+        val n = pts.size
+
+        fun searchRange(indices: IntProgression): SegmentProjection {
+            var bestIdx = hintIdx.mod(n)
+            var bestX = pts[bestIdx].x
+            var bestY = pts[bestIdx].y
+            var bestHw = pts[bestIdx].halfWidth
+            var bestDistSq = Float.MAX_VALUE
+            for (raw in indices) {
+                val i = raw.mod(n)
+                val a = pts[i]
+                val b = pts[(i + 1) % n]
+                val abx = b.x - a.x
+                val aby = b.y - a.y
+                val lenSq = abx * abx + aby * aby
+                val t = if (lenSq > 1e-4f) {
+                    (((x - a.x) * abx + (y - a.y) * aby) / lenSq).coerceIn(0f, 1f)
+                } else {
+                    0f
+                }
+                val px = a.x + abx * t
+                val py = a.y + aby * t
+                val dx = x - px
+                val dy = y - py
+                val d2 = dx * dx + dy * dy
+                if (d2 < bestDistSq) {
+                    bestDistSq = d2
+                    bestIdx = i
+                    bestX = px
+                    bestY = py
+                    bestHw = a.halfWidth + (b.halfWidth - a.halfWidth) * t
+                }
+            }
+            return SegmentProjection(bestIdx, bestX, bestY, bestHw, kotlin.math.sqrt(bestDistSq))
+        }
+
+        val local = searchRange((hintIdx - windowRadius)..(hintIdx + windowRadius))
+        val fallbackThresh = (local.halfWidth * 2.4f).coerceAtLeast(260f)
+        return if (local.distance <= fallbackThresh) {
+            local
+        } else {
+            searchRange(0 until n)
         }
     }
 

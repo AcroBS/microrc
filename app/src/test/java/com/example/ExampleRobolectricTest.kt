@@ -1,14 +1,19 @@
 package com.example
 
 import android.content.Context
+import android.view.Surface
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
+import com.example.sensors.TiltSteeringController
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -139,7 +144,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun garageAndRaceScreen_supportsSpringSliderControlMode() {
+    fun garageAndRaceScreen_supportsHybridSpringSliderArrowTapSlideAndSensitivity() {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("open_garage_button").performScrollTo().performClick()
         composeTestRule.waitForIdle()
@@ -147,6 +152,46 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("control_mode_SPRING_SLIDER").performScrollTo().performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("garage_spring_slider_preview").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("garage_slider_sensitivity").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("slider_left_arrow_overlay", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("slider_right_arrow_overlay", useUnmergedTree = true).assertIsDisplayed()
+
+        // 1. Tap & hold Left Arrow overlay on slider -> instant -100% steer, lifting snaps to 0%
+        composeTestRule.onNodeWithTag("garage_spring_slider_preview").performTouchInput {
+            down(Offset(width * 0.12f, height * 0.5f))
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Steer: -100%").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("garage_spring_slider_preview").performTouchInput {
+            up()
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Steer: 0%").assertIsDisplayed()
+
+        // 2. Tap & hold Right Arrow overlay on slider -> instant +100% steer, lifting snaps to 0%
+        composeTestRule.onNodeWithTag("garage_spring_slider_preview").performTouchInput {
+            down(Offset(width * 0.88f, height * 0.5f))
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Steer: 100%").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("garage_spring_slider_preview").performTouchInput {
+            up()
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Steer: 0%").assertIsDisplayed()
+
+        // 3. Slide proportionally from center -> intermediate proportional steer (not pegged at 100%), lifting snaps to 0%
+        composeTestRule.onNodeWithTag("garage_spring_slider_preview").performTouchInput {
+            down(Offset(width * 0.50f, height * 0.5f))
+            moveTo(Offset(width * 0.64f, height * 0.5f))
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("garage_spring_slider_preview").performTouchInput {
+            up()
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Steer: 0%").assertIsDisplayed()
+
         composeTestRule.onNodeWithTag("garage_done_button").performScrollTo().performClick()
         composeTestRule.waitForIdle()
 
@@ -166,16 +211,44 @@ class ExampleRobolectricTest {
                 Thread.sleep(15L)
             }
             composeTestRule.onNodeWithTag("spring_steering_slider").assertIsDisplayed()
+            composeTestRule.onNodeWithTag("slider_left_arrow_overlay", useUnmergedTree = true).assertIsDisplayed()
+            composeTestRule.onNodeWithTag("slider_right_arrow_overlay", useUnmergedTree = true).assertIsDisplayed()
+            composeTestRule.onNodeWithTag("drop_mine_button").assertIsDisplayed()
             composeTestRule.onNodeWithTag("auto_gas_badge").assertIsDisplayed()
             composeTestRule.onNodeWithTag("race_pause_button").performClick()
             composeTestRule.mainClock.advanceTimeBy(100L)
             composeTestRule.onNodeWithTag("pause_mode_SPRING_SLIDER").assertIsDisplayed()
+            composeTestRule.onNodeWithTag("pause_slider_sensitivity").assertIsDisplayed()
             composeTestRule.onNodeWithText("Exit Race").performClick()
             composeTestRule.mainClock.advanceTimeBy(150L)
         } finally {
             composeTestRule.mainClock.autoAdvance = true
         }
         composeTestRule.waitForIdle()
+    }
+
+    @Test
+    fun applicationContextTiltController_recognizesLandscapeWithoutDrivingInCircles() {
+        val appContext = ApplicationProvider.getApplicationContext<Context>()
+        val tilt = TiltSteeringController(appContext)
+        tilt.updateDisplayRotation(Surface.ROTATION_90)
+
+        // Level phone in landscape (gravity along +X = 9.81, Y = 0) must stay at 0 steer, never -1f!
+        repeat(8) {
+            val steer = tilt.processSensorAxes(x = 9.81f, y = 0f, rotation = Surface.ROTATION_90)
+            assertEquals("Landscape level phone on Application context must output 0f steer", 0f, steer, 0.001f)
+        }
+
+        // Tilt wheel right in landscape (y = +3.6f) -> smooth positive right steer
+        var rightSteer = 0f
+        repeat(8) {
+            rightSteer = tilt.processSensorAxes(x = 9.1f, y = 3.6f, rotation = Surface.ROTATION_90)
+        }
+        assertTrue("Tilting clockwise in landscape must steer right ($rightSteer > 0.3f)", rightSteer > 0.3f)
+
+        // Flip to reverse landscape (ROTATION_270) held level (x = -9.81, y = 0) -> resets cleanly to 0f!
+        val afterFlip = tilt.processSensorAxes(x = -9.81f, y = 0f, rotation = Surface.ROTATION_270)
+        assertEquals("Flipping to ROTATION_270 level must immediately reset steer to 0f", 0f, afterFlip, 0.001f)
     }
 
     @Test

@@ -112,10 +112,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateControlSettings(
         mode: ControlMode,
         sensitivity: Float,
-        autoGasInTilt: Boolean
+        autoGasInTilt: Boolean,
+        sliderSensitivity: Float = profile.value.sliderSensitivity
     ) {
         viewModelScope.launch {
-            prefsRepo.updateControlSettings(mode, sensitivity, autoGasInTilt)
+            prefsRepo.updateControlSettings(mode, sensitivity, autoGasInTilt, sliderSensitivity)
             tiltController.setSensitivity(sensitivity)
         }
     }

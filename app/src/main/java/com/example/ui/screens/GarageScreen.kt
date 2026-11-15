@@ -62,6 +62,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,6 +70,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.model.ControlMode
@@ -84,7 +87,7 @@ fun GarageScreen(
     profile: PlayerProfile,
     tiltController: TiltSteeringController,
     onSaveCarAndColors: (RcCarType, Long, Long) -> Unit,
-    onSaveControlSettings: (ControlMode, Float, Boolean) -> Unit,
+    onSaveControlSettings: (ControlMode, Float, Boolean, Float) -> Unit,
     onBack: () -> Unit
 ) {
     var selectedCar by remember(profile.carType) { mutableStateOf(profile.carType) }
@@ -92,13 +95,21 @@ fun GarageScreen(
     var accentColorArgb by remember(profile.accentColorArgb) { mutableLongStateOf(profile.accentColorArgb) }
     var selectedControlMode by remember(profile.controlMode) { mutableStateOf(profile.controlMode) }
     var tiltSensitivity by remember(profile.tiltSensitivity) { mutableFloatStateOf(profile.tiltSensitivity) }
+    var sliderSensitivity by remember(profile.sliderSensitivity) { mutableFloatStateOf(profile.sliderSensitivity) }
     var autoGasTilt by remember(profile.autoGasInTilt) { mutableStateOf(profile.autoGasInTilt) }
 
     var showCustomHue by remember { mutableStateOf(false) }
     var customHue by remember { mutableFloatStateOf(16f) }
 
+    val view = LocalView.current
+    val configuration = LocalConfiguration.current
+    LaunchedEffect(view, configuration.orientation, selectedControlMode) {
+        tiltController.updateDisplayRotation(view.display?.rotation)
+    }
+
     DisposableEffect(selectedControlMode) {
         if (selectedControlMode == ControlMode.TILT_SENSOR) {
+            tiltController.updateDisplayRotation(view.display?.rotation)
             tiltController.setSensitivity(tiltSensitivity)
             tiltController.start()
         } else {
@@ -381,7 +392,7 @@ fun GarageScreen(
                                 .clickable {
                                     selectedControlMode = mode
                                     if (mode != ControlMode.SPRING_SLIDER) previewSliderSteer = 0f
-                                    onSaveControlSettings(mode, tiltSensitivity, autoGasTilt)
+                                    onSaveControlSettings(mode, tiltSensitivity, autoGasTilt, sliderSensitivity)
                                 }
                                 .testTag("control_mode_${mode.name}")
                         ) {
@@ -455,16 +466,30 @@ fun GarageScreen(
                                 )
                             }
                             Text(
-                                text = "Slide thumb left/right for proportional RC expo steering. Lift thumb to snap straight back to neutral.",
+                                text = "Slide proportionally with RC expo OR tap/hold the overlaid left/right arrows for instant full lock. Lift to snap to neutral.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             SpringSteeringSlider(
                                 onSteerChange = { previewSliderSteer = it },
+                                sensitivity = sliderSensitivity,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(84.dp)
+                                    .height(88.dp)
                                     .testTag("garage_spring_slider_preview")
+                            )
+                            Text(
+                                text = "Slider Sensitivity: ${String.format("%.2fx", sliderSensitivity)}",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            Slider(
+                                value = sliderSensitivity,
+                                onValueChange = {
+                                    sliderSensitivity = it
+                                    onSaveControlSettings(selectedControlMode, tiltSensitivity, autoGasTilt, it)
+                                },
+                                valueRange = 0.7f..2.6f,
+                                modifier = Modifier.testTag("garage_slider_sensitivity")
                             )
                         }
                     }
@@ -527,7 +552,7 @@ fun GarageScreen(
                                 onValueChange = {
                                     tiltSensitivity = it
                                     tiltController.setSensitivity(it)
-                                    onSaveControlSettings(selectedControlMode, it, autoGasTilt)
+                                    onSaveControlSettings(selectedControlMode, it, autoGasTilt, sliderSensitivity)
                                 },
                                 valueRange = 0.6f..2.2f
                             )
@@ -548,7 +573,7 @@ fun GarageScreen(
                                     checked = autoGasTilt,
                                     onCheckedChange = {
                                         autoGasTilt = it
-                                        onSaveControlSettings(selectedControlMode, tiltSensitivity, it)
+                                        onSaveControlSettings(selectedControlMode, tiltSensitivity, it, sliderSensitivity)
                                     }
                                 )
                             }
