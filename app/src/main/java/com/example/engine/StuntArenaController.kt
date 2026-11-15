@@ -3,12 +3,15 @@ package com.example.engine
 import com.example.data.TrackCatalog
 import com.example.model.ControlInput
 import com.example.model.PowerUpType
+import com.example.model.PropShape
 import com.example.model.StuntGolfHole
+import com.example.model.StuntObstacleState
 import com.example.model.StuntPinState
 import com.example.model.StuntStateSnapshot
 import com.example.model.StuntVariant
 import com.example.model.TrackDefinition
 import com.example.model.TrackExplosion
+import com.example.model.TrackProp
 import java.util.Locale
 import kotlin.math.PI
 import kotlin.math.abs
@@ -52,6 +55,8 @@ internal class StuntArenaController(
         private set
     var hasLandedJump: Boolean = false
         private set
+    var hasLandedAfterRamp: Boolean = false
+        private set
     var landingX: Float = 0f
         private set
     var landingY: Float = 700f
@@ -59,6 +64,9 @@ internal class StuntArenaController(
     private var groundedStoppedMs: Long = 0L
     private var bowlingSettleMs: Long = 0L
     private var bowlingTouched: Boolean = false
+
+    // Randomized lead-in runway obstacles per stunt round (shared across turns in the same round for fair competition)
+    private var roundRunwayObstacles: List<TrackProp> = emptyList()
 
     // Soccer Ball state
     var ballX: Float = BALL_START_X
@@ -88,7 +96,16 @@ internal class StuntArenaController(
     val totalRounds: Int
         get() = sequence.size.coerceAtLeast(1)
 
-    fun trackForCurrentRound(): TrackDefinition = TrackCatalog.getStuntTrack(activeVariant)
+    val controlsLocked: Boolean
+        get() = turnPhase != PHASE_DRIVING || hasLandedAfterRamp
+
+    fun trackForCurrentRound(): TrackDefinition {
+        val base = TrackCatalog.getStuntTrack(activeVariant)
+        if (roundRunwayObstacles.isEmpty()) {
+            roundRunwayObstacles = TrackCatalog.generateRandomRunwayObstacles(random)
+        }
+        return base.copy(props = roundRunwayObstacles)
+    }
 
     fun initializeFirstRound(playerCount: Int, onSetupTurn: (turnIdx: Int, variant: StuntVariant) -> Unit) {
         roundIndexZeroBased = 0
@@ -101,6 +118,7 @@ internal class StuntArenaController(
     }
 
     private fun prepareRoundAssets() {
+        roundRunwayObstacles = TrackCatalog.generateRandomRunwayObstacles(random)
         if (activeVariant == StuntVariant.GOLF_HOLES) {
             roundGolfHolesTemplate = TrackCatalog.generateGolfHoles(random)
         }
@@ -112,6 +130,7 @@ internal class StuntArenaController(
         postScoreHoldMs = 0L
         hasLaunchedRamp = false
         hasLandedJump = false
+        hasLandedAfterRamp = false
         landingX = 0f
         landingY = 700f
         groundedStoppedMs = 0L
@@ -144,10 +163,14 @@ internal class StuntArenaController(
         }
     }
 
-    fun shouldCutForwardThrottle(carX: Float, jumpZ: Float): Boolean {
-        if (turnPhase != PHASE_DRIVING) return true
-        if (carX <= RAMP_EXIT_X || jumpZ > 0.05f) return false
-        return activeVariant == StuntVariant.LONG_JUMP || activeVariant == StuntVariant.GOLF_HOLES
+    fun syncForTestPosition(x: Float, jumpZ: Float) {
+        if (x > RAMP_EXIT_X + 10f) {
+            hasLaunchedRamp = true
+            hasLandedAfterRamp = jumpZ <= 0.01f
+        } else {
+            hasLaunchedRamp = false
+            hasLandedAfterRamp = false
+        }
     }
 
     fun applyProgressiveRunwayBoost(
@@ -157,15 +180,15 @@ internal class StuntArenaController(
         baseMaxSpeed: Float,
         currentBoostMs: Long
     ): Pair<Long, Float>? {
-        if (jumpZ > 0.12f) return null
+        if (jumpZ > 0.12f || hasLandedAfterRamp) return null
         val pads = listOf(
-            Triple(1005f, 700f, 1.38f),
-            Triple(1130f, 700f, 1.54f),
-            Triple(1250f, 700f, 1.70f)
+            Triple(1005f, 700f, 1.06f),
+            Triple(1130f, 700f, 1.12f),
+            Triple(1250f, 700f, 1.18f)
         )
         for ((px, py, mult) in pads) {
             if (TrackCatalog.distance(carX, carY, px, py) <= 56f) {
-                return max(currentBoostMs, 1300L) to (baseMaxSpeed * mult)
+                return max(currentBoostMs, 900L) to (baseMaxSpeed * mult)
             }
         }
         return null
@@ -182,11 +205,11 @@ internal class StuntArenaController(
         if (hasLaunchedRamp || jumpZ > 0.05f) return null
         if (carX in 1310f..1398f && carY in 550f..850f) {
             val speed = hypot(vx, vy)
-            if (speed >= 95f) {
+            if (speed >= 55f) {
                 hasLaunchedRamp = true
-                val speedRatio = (speed / baseMaxSpeed.coerceAtLeast(180f)).coerceIn(0.45f, 1.95f)
-                val vz = 3.25f + speedRatio * 2.15f
-                return Triple(vx * 1.18f, vy * 1.04f, vz)
+                val speedRatio = (speed / baseMaxSpeed.coerceAtLeast(180f)).coerceIn(0.45f, 1.55f)
+                val vz = 2.35f + speedRatio * 1.45f
+                return Triple(vx * 1.02f, vy * 1.0f, vz)
             }
         }
         return null
@@ -214,7 +237,6 @@ internal class StuntArenaController(
         snapCarTo: (Float, Float) -> Unit
     ): TurnStepOutcome {
         if (turnPhase == PHASE_SCORED) {
-            // Continue animating ball / pins while celebrating score
             stepSoccerBallPhysics(dt)
             stepBowlingPinPhysics(dt)
             postScoreHoldMs = (postScoreHoldMs - dtMs).coerceAtLeast(0L)
@@ -223,6 +245,15 @@ internal class StuntArenaController(
 
         turnTimeRemainingMs = (turnTimeRemainingMs - dtMs).coerceAtLeast(0L)
         val carSpeed = hypot(carVx, carVy)
+
+        // Lock all car controls permanently for this attempt once the car touches down past the ramp
+        if (!hasLandedAfterRamp && (
+                (hasLaunchedRamp && (wasAirborneBeforeTick || carX > RAMP_EXIT_X + 20f) && jumpZ <= 0.001f) ||
+                    (carX > RAMP_EXIT_X + 45f && jumpZ <= 0.001f)
+                )
+        ) {
+            hasLandedAfterRamp = true
+        }
 
         when (activeVariant) {
             StuntVariant.LONG_JUMP -> {
@@ -234,7 +265,7 @@ internal class StuntArenaController(
                     if (meters > bestDistanceMeters) {
                         bestDistanceMeters = meters
                     }
-                    val pts = (meters * 10f).toInt().coerceIn(25, 1200)
+                    val pts = (meters * 10f).toInt().coerceIn(25, 1800)
                     val summary = String.format(Locale.US, "%.1fm JUMP! +%d PTS", meters, pts)
                     return completeTurn(
                         points = pts,
@@ -273,9 +304,9 @@ internal class StuntArenaController(
                     val ny = rawDy / d
                     ballX = carX + nx * (carRadius + BALL_RADIUS + 3f)
                     ballY = carY + ny * (carRadius + BALL_RADIUS + 3f)
-                    val strikeSpeed = max(carSpeed * 1.48f, 470f)
-                    ballVx = nx * strikeSpeed * 0.55f + carVx * 0.88f
-                    ballVy = ny * strikeSpeed * 0.55f + carVy * 0.88f
+                    val strikeSpeed = max(carSpeed * 1.65f, 560f)
+                    ballVx = nx * strikeSpeed * 0.58f + carVx * 0.92f
+                    ballVy = ny * strikeSpeed * 0.58f + carVy * 0.92f
                     ballTouched = true
                     hitNow = true
                 }
@@ -297,7 +328,7 @@ internal class StuntArenaController(
                         summary = "$label +$pts PTS",
                         explosion = TrackExplosion(
                             id = nextExplosionId(),
-                            x = ballX.coerceAtMost(2460f),
+                            x = ballX.coerceAtMost(GOAL_LINE_X + 120f),
                             y = ballY,
                             ageMs = 0L,
                             durationMs = 700L
@@ -309,13 +340,23 @@ internal class StuntArenaController(
                 if (ballTouched) {
                     ballPostTouchMs += dtMs
                     val ballSpeed = hypot(ballVx, ballVy)
-                    if (ballX >= 2465f || (ballPostTouchMs >= 1700L && ballSpeed < 35f)) {
+                    if (ballX >= GOAL_LINE_X + 150f || (ballPostTouchMs >= 1650L && ballSpeed < 35f)) {
                         return completeTurn(
                             points = 100,
                             summary = "WIDE OF GOAL (+100 PTS)",
                             bumped = hitNow
                         )
                     }
+                } else if (hasLandedAfterRamp && carSpeed < 22f) {
+                    groundedStoppedMs += dtMs
+                    if (groundedStoppedMs >= 700L) {
+                        return completeTurn(
+                            points = 0,
+                            summary = "MISSED THE BALL (0 PTS)"
+                        )
+                    }
+                } else {
+                    groundedStoppedMs = 0L
                 }
                 if (hitNow) {
                     return TurnStepOutcome(bumpedCollision = true)
@@ -353,7 +394,7 @@ internal class StuntArenaController(
                         summary = "STRIKE! 9/9 PINS (+1000 PTS)",
                         explosion = TrackExplosion(
                             id = nextExplosionId(),
-                            x = 1980f,
+                            x = 2060f,
                             y = 700f,
                             ageMs = 0L,
                             durationMs = 680L
@@ -362,10 +403,10 @@ internal class StuntArenaController(
                     )
                 }
 
-                if (bowlingTouched || (hasLaunchedRamp && jumpZ <= 0.01f && carX > 1700f)) {
+                if (bowlingTouched || hasLandedAfterRamp) {
                     bowlingSettleMs += dtMs
                     val pinsMoving = pins.any { hypot(it.vx, it.vy) > 32f }
-                    if (bowlingSettleMs >= 1550L || (!pinsMoving && bowlingSettleMs >= 900L && carSpeed < 35f)) {
+                    if (bowlingSettleMs >= 1550L || (!pinsMoving && bowlingSettleMs >= 850L && carSpeed < 35f)) {
                         val pts = knockedCount * 100
                         val summary = if (knockedCount > 0) {
                             "$knockedCount/9 PINS KNOCKED (+$pts PTS)"
@@ -385,7 +426,7 @@ internal class StuntArenaController(
                     for (idx in activeTurnGolfHoles.indices) {
                         val hole = activeTurnGolfHoles[idx]
                         val d = TrackCatalog.distance(carX, carY, hole.x, hole.y)
-                        if (d <= hole.radius * 0.88f && carSpeed <= 440f) {
+                        if (d <= hole.radius * 0.88f && carSpeed <= 460f) {
                             activeTurnGolfHoles[idx] = hole.copy(captured = true)
                             snapCarTo(hole.x, hole.y)
                             return completeTurn(
@@ -405,7 +446,7 @@ internal class StuntArenaController(
 
                 if (carX > RAMP_EXIT_X + 35f && jumpZ <= 0.01f && carSpeed < 20f) {
                     groundedStoppedMs += dtMs
-                    if (groundedStoppedMs >= 650L) {
+                    if (groundedStoppedMs >= 600L) {
                         val nearest = activeTurnGolfHoles.minByOrNull {
                             TrackCatalog.distance(carX, carY, it.x, it.y) - it.radius
                         }
@@ -428,7 +469,7 @@ internal class StuntArenaController(
             }
         }
 
-        // Turn clock expiration fallback
+        // 10s turn clock expiration fallback
         if (turnTimeRemainingMs == 0L) {
             val fallbackPts = when (activeVariant) {
                 StuntVariant.LONG_JUMP -> {
@@ -453,7 +494,7 @@ internal class StuntArenaController(
         if (abs(ballVx) < 0.5f && abs(ballVy) < 0.5f) return
         ballX += ballVx * dt
         ballY += ballVy * dt
-        val drag = max(0f, 1f - 0.82f * dt)
+        val drag = max(0f, 1f - 0.74f * dt)
         ballVx *= drag
         ballVy *= drag
 
@@ -467,9 +508,9 @@ internal class StuntArenaController(
         if (ballX < RAMP_EXIT_X + BALL_RADIUS) {
             ballX = RAMP_EXIT_X + BALL_RADIUS
             ballVx = abs(ballVx) * 0.7f
-        } else if (ballX > 2530f - BALL_RADIUS) {
-            ballX = 2530f - BALL_RADIUS
-            ballVx = -abs(ballVx) * 0.45f
+        } else if (ballX > STADIUM_END_X - BALL_RADIUS) {
+            ballX = STADIUM_END_X - BALL_RADIUS
+            ballVx = -abs(ballVx) * 0.55f
         }
     }
 
@@ -482,7 +523,7 @@ internal class StuntArenaController(
                 val drag = max(0f, 1f - 2.1f * dt)
                 p.vx *= drag
                 p.vy *= drag
-                p.x = p.x.coerceIn(1450f, 2520f)
+                p.x = p.x.coerceIn(1450f, STADIUM_END_X - 20f)
                 p.y = p.y.coerceIn(240f, 1160f)
             }
         }
@@ -578,18 +619,33 @@ internal class StuntArenaController(
         carX: Float,
         carY: Float,
         carAngleRad: Float,
+        carJumpZ: Float,
         heldPowerUp: PowerUpType?
     ): Pair<ControlInput, Boolean> {
-        if (turnPhase != PHASE_DRIVING) {
+        if (controlsLocked) {
             return ControlInput(throttle = 0f, steer = 0f) to false
         }
 
-        // Slalom waypoints around the 4 runway obstacles at (465,635), (615,765), (765,632), (900,762)
+        // Dynamic slalom navigation around randomly placed runway obstacles
+        val upcomingObs = if (carX < 980f) {
+            roundRunwayObstacles.firstOrNull { obs ->
+                obs.x > carX - 18f && obs.x - carX <= 265f
+            }
+        } else {
+            null
+        }
+
         val (targetX, targetY) = when {
-            carX < 460f -> 475f to 728f
-            carX < 610f -> 625f to 672f
-            carX < 760f -> 775f to 728f
-            carX < 910f -> 915f to 676f
+            upcomingObs != null -> {
+                val topRoom = upcomingObs.y - 565f
+                val botRoom = 835f - upcomingObs.y
+                val passY = if (topRoom >= botRoom) {
+                    (upcomingObs.y - 68f).coerceIn(585f, 815f)
+                } else {
+                    (upcomingObs.y + 68f).coerceIn(585f, 815f)
+                }
+                (upcomingObs.x + 22f) to passY
+            }
             carX < RAMP_EXIT_X -> {
                 val aimY = when (activeVariant) {
                     StuntVariant.LONG_JUMP -> 700f
@@ -599,7 +655,7 @@ internal class StuntArenaController(
                         val targetHole = activeTurnGolfHoles.find { it.number == botTargetGolfHoleNumber }
                             ?: activeTurnGolfHoles.firstOrNull()
                         val hy = targetHole?.y ?: 700f
-                        (700f + (hy - 700f) * 0.28f).coerceIn(600f, 800f)
+                        (700f + (hy - 700f) * 0.26f).coerceIn(605f, 795f)
                     }
                 }
                 1360f to aimY
@@ -607,13 +663,13 @@ internal class StuntArenaController(
             else -> {
                 when (activeVariant) {
                     StuntVariant.SOCCER_BALL -> ballX to ballY
-                    StuntVariant.BOWLING -> 1980f to 700f
+                    StuntVariant.BOWLING -> 2060f to 700f
                     StuntVariant.GOLF_HOLES -> {
                         val h = activeTurnGolfHoles.find { it.number == botTargetGolfHoleNumber }
                             ?: activeTurnGolfHoles.firstOrNull()
-                        (h?.x ?: 2000f) to (h?.y ?: 700f)
+                        (h?.x ?: 2100f) to (h?.y ?: 700f)
                     }
-                    StuntVariant.LONG_JUMP -> 2450f to 700f
+                    StuntVariant.LONG_JUMP -> 2900f to 700f
                 }
             }
         }
@@ -625,8 +681,18 @@ internal class StuntArenaController(
         while (diff < -PI) diff += twoPi
 
         val steer = (diff / 0.55f).coerceIn(-1f, 1f)
-        val throttle = if (shouldCutForwardThrottle(carX, 0f)) 0f else 1f
-        val triggerNitro = heldPowerUp == PowerUpType.TURBO_NITRO && carX >= 935f && abs(diff) < 0.35f
+        val shouldAirBrake = carJumpZ > 0.08f && when (activeVariant) {
+            StuntVariant.SOCCER_BALL -> carX >= ballX - 110f
+            StuntVariant.BOWLING -> carX >= 1910f
+            StuntVariant.GOLF_HOLES -> {
+                val h = activeTurnGolfHoles.find { it.number == botTargetGolfHoleNumber }
+                    ?: activeTurnGolfHoles.firstOrNull()
+                h != null && carX >= h.x - 130f
+            }
+            StuntVariant.LONG_JUMP -> false
+        }
+        val throttle = if (shouldAirBrake) -0.85f else 1f
+        val triggerNitro = heldPowerUp == PowerUpType.TURBO_NITRO && carX >= 945f && carX <= 1280f && abs(diff) < 0.35f
         return ControlInput(throttle = throttle, steer = steer, usePowerUp = triggerNitro) to triggerNitro
     }
 
@@ -646,30 +712,41 @@ internal class StuntArenaController(
             landingX = landingX,
             landingY = landingY,
             hasLanded = hasLandedJump,
+            controlsLocked = controlsLocked,
             ballX = ballX,
             ballY = ballY,
             ballVx = ballVx,
             ballVy = ballVy,
             ballScoredPoints = ballScoredPoints,
             pins = pins.map { StuntPinState(id = it.id, x = it.x, y = it.y, knocked = it.knocked) },
-            golfHoles = activeTurnGolfHoles.toList()
+            golfHoles = activeTurnGolfHoles.toList(),
+            runwayObstacles = roundRunwayObstacles.map {
+                StuntObstacleState(
+                    x = it.x,
+                    y = it.y,
+                    radius = it.radius,
+                    isCrate = it.shape == PropShape.CRATE
+                )
+            }
         )
     }
 
     companion object {
         const val PHASE_DRIVING = "DRIVING"
         const val PHASE_SCORED = "SCORED"
-        const val TURN_DURATION_MS = 15_000L
-        const val POST_SCORE_HOLD_MS = 1450L
+        const val TURN_DURATION_MS = 10_000L
+        const val POST_SCORE_HOLD_MS = 1350L
 
+        const val RAMP_START_X = 1310f
         const val RAMP_EXIT_X = 1390f
         const val RAMP_ZERO_METER_X = 1400f
+        const val STADIUM_END_X = 3120f
         const val PIXELS_PER_METER = 9.5f
 
-        const val BALL_START_X = 1830f
+        const val BALL_START_X = 1920f
         const val BALL_START_Y = 700f
         const val BALL_RADIUS = 40f
-        const val GOAL_LINE_X = 2340f
+        const val GOAL_LINE_X = 2780f
         const val GOAL_TOP_Y = 340f
         const val GOAL_BOTTOM_Y = 1060f
 

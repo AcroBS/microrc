@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import com.example.data.TrackCatalog
+import com.example.model.ActiveRocketState
 import com.example.model.ArenaFlagState
 import com.example.model.ExternalEventType
 import com.example.model.FieldPickupType
@@ -34,6 +35,7 @@ import com.example.model.TrackExplosion
 import com.example.model.TrackFieldPickup
 import com.example.model.TrackHazard
 import com.example.model.TrackId
+import com.example.model.TrackProp
 import com.example.model.TrackPuddle
 import kotlin.math.PI
 import kotlin.math.atan2
@@ -63,7 +65,8 @@ fun DrawScope.drawTrackWorld(
     portalPair: PortalPairState? = null,
     explosions: List<TrackExplosion> = emptyList(),
     arenaSuddenDeathStage: Int = 0,
-    stuntState: StuntStateSnapshot? = null
+    stuntState: StuntStateSnapshot? = null,
+    rockets: List<ActiveRocketState> = emptyList()
 ) {
     // 1. Background floor
     drawRect(
@@ -416,8 +419,23 @@ fun DrawScope.drawTrackWorld(
         }
     }
 
-    // 6. Props & obstacles (including Arena Oil Slicks!)
-    for (prop in track.props) {
+    // 6. Props & obstacles (including Arena Oil Slicks & synced random Stunt lead-in obstacles!)
+    val propsToRender = if (track.isStunt && stuntState != null && stuntState.runwayObstacles.isNotEmpty()) {
+        stuntState.runwayObstacles.mapIndexed { idx, ob ->
+            TrackProp(
+                x = ob.x,
+                y = ob.y,
+                radius = ob.radius,
+                shape = if (ob.isCrate) PropShape.CRATE else PropShape.PYLON,
+                colorHex = if (ob.isCrate) 0xFF455A64 else (if (idx % 2 == 0) 0xFFFF6D00 else 0xFF00E5FF),
+                accentHex = if (ob.isCrate) 0xFFFFAB00 else 0xFFFFFFFF,
+                isSolidObstacle = true
+            )
+        }
+    } else {
+        track.props
+    }
+    for (prop in propsToRender) {
         when (prop.shape) {
             PropShape.CIRCLE -> {
                 drawCircle(Color(prop.colorHex), prop.radius, Offset(prop.x, prop.y))
@@ -783,11 +801,66 @@ fun DrawScope.drawTrackWorld(
             animTimeSec = animTimeSec,
             isCarryingFlag = arenaFlag?.carrierId == r.playerId,
             hasElectroAura = r.electroShockAuraMs > 0L,
-            isElectroParalyzed = r.electroParalyzedMs > 0L
+            isElectroParalyzed = r.electroParalyzedMs > 0L,
+            hasRedLaser = r.laserBeamMs > 0L
         )
     }
 
-    // 9b. Small Mine Blast Explosions
+    // 9a. Active Homing Rockets seeking rivals
+    for (rk in rockets) {
+        val deg = rk.angleRad * 180f / PI.toFloat()
+        val thrusterFlicker = 1f + 0.30f * sin(animTimeSec * 48f + rk.id)
+        withTransform({
+            translate(rk.x, rk.y)
+            rotate(deg, Offset.Zero)
+        }) {
+            // Exhaust smoke & thruster flame plume
+            drawCircle(
+                color = Color(0xFF90A4AE).copy(alpha = 0.35f),
+                radius = 7f * thrusterFlicker,
+                center = Offset(-24f, 0f)
+            )
+            val exhaust = Path().apply {
+                moveTo(-11f, -5f)
+                lineTo(-11f - 18f * thrusterFlicker, 0f)
+                lineTo(-11f, 5f)
+                close()
+            }
+            drawPath(exhaust, Color(0xFFFF6D00))
+            drawCircle(Color(0xFFFFEA00), radius = 4f * thrusterFlicker, center = Offset(-14f, 0f))
+
+            // Stabilizer tail fins
+            val fins = Path().apply {
+                moveTo(-4f, -4f)
+                lineTo(-13f, -11f)
+                lineTo(-11f, -4f)
+                close()
+                moveTo(-4f, 4f)
+                lineTo(-13f, 11f)
+                lineTo(-11f, 4f)
+                close()
+            }
+            drawPath(fins, Color(0xFFD50000))
+
+            // Cylindrical white/steel missile fuselage + crimson seeker warhead
+            drawRoundRect(
+                color = Color(0xFFECEFF1),
+                topLeft = Offset(-11f, -4.5f),
+                size = Size(20f, 9f),
+                cornerRadius = CornerRadius(3f, 3f)
+            )
+            val warhead = Path().apply {
+                moveTo(8f, -4.5f)
+                lineTo(18f, 0f)
+                lineTo(8f, 4.5f)
+                close()
+            }
+            drawPath(warhead, Color(0xFFFF1744))
+            drawCircle(Color.White, radius = 1.8f, center = Offset(12f, 0f))
+        }
+    }
+
+    // 9b. Small Mine & Rocket Blast Explosions
     for (exp in explosions) {
         val progress = (exp.ageMs.toFloat() / exp.durationMs.coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
         val fade = (1f - progress).coerceIn(0f, 1f)

@@ -205,6 +205,8 @@ fun RaceScreen(
         stuntState.activePlayerId.isEmpty() ||
         stuntState.activePlayerId == profile.playerId
 
+    val stuntControlsLocked = isStuntsMode && stuntState?.controlsLocked == true
+
     LaunchedEffect(
         profile.controlMode,
         profile.autoGasInTilt,
@@ -215,9 +217,10 @@ fun RaceScreen(
         gasPressed,
         brakePressed,
         tiltSteer,
-        isLocalActiveStuntDriver
+        isLocalActiveStuntDriver,
+        stuntControlsLocked
     ) {
-        if (!isLocalActiveStuntDriver) {
+        if (!isLocalActiveStuntDriver || stuntControlsLocked) {
             onUpdateControlInput(0f, 0f)
             return@LaunchedEffect
         }
@@ -326,7 +329,7 @@ fun RaceScreen(
                         val stuntSnap = snap.stuntState
                         val trackSoccerBall = snap.gameMode == GameMode.STUNTS.name &&
                             stuntSnap?.variantEnum == StuntVariant.SOCCER_BALL &&
-                            stuntSnap.ballX > 1855f
+                            stuntSnap.ballX > 1945f
                         val lookX = if (trackSoccerBall) {
                             target.x * 0.45f + stuntSnap.ballX * 0.55f
                         } else {
@@ -429,7 +432,8 @@ fun RaceScreen(
                         portalPair = snapshot?.portalPair,
                         explosions = snapshot?.explosions.orEmpty(),
                         arenaSuddenDeathStage = snapshot?.arenaSuddenDeathStage ?: 0,
-                        stuntState = stuntState
+                        stuntState = stuntState,
+                        rockets = snapshot?.rockets.orEmpty()
                     )
                 }
             } else {
@@ -455,7 +459,8 @@ fun RaceScreen(
                         portalPair = snapshot?.portalPair,
                         explosions = snapshot?.explosions.orEmpty(),
                         arenaSuddenDeathStage = snapshot?.arenaSuddenDeathStage ?: 0,
-                        stuntState = stuntState
+                        stuntState = stuntState,
+                        rockets = snapshot?.rockets.orEmpty()
                     )
                 }
             }
@@ -499,7 +504,7 @@ fun RaceScreen(
                             )
                         }
                         if (isStuntsMode) {
-                            val turnRemSec = (((stuntState?.turnTimeRemainingMs ?: 15_000L) + 999L) / 1000L).coerceAtLeast(0L)
+                            val turnRemSec = (((stuntState?.turnTimeRemainingMs ?: 10_000L) + 999L) / 1000L).coerceAtLeast(0L)
                             Column {
                                 Text(
                                     text = "STUNT ${stuntState?.roundIndex ?: 1}/${stuntState?.totalRounds ?: 4}",
@@ -525,7 +530,7 @@ fun RaceScreen(
                                 Text(
                                     text = "${turnRemSec}s",
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = if (turnRemSec <= 4L) AlertRed else Color.White
+                                    color = if (turnRemSec <= 3L) AlertRed else Color.White
                                 )
                             }
                         } else if (isArenaMode) {
@@ -968,10 +973,12 @@ fun RaceScreen(
                 if (isArenaMode && arenaFlagToDraw?.carrierId == localRacer?.playerId) {
                     StatusChip("CARRYING FLAG!", GoldTrophy)
                 }
+                if (stuntControlsLocked && isLocalActiveStuntDriver) StatusChip("LANDED — COASTING", ElectricCyan)
                 if ((localRacer?.jumpZ ?: 0f) > 0.1f) StatusChip("AIRBORNE!", GoldTrophy)
                 if ((localRacer?.boostMs ?: 0L) > 0L) StatusChip("TURBO", SignalOrange)
                 if ((localRacer?.shieldMs ?: 0L) > 0L) StatusChip("SHIELD", AcidLime)
                 if ((localRacer?.overdriveMs ?: 0L) > 0L) StatusChip("OVERDRIVE", Color(0xFFE040FB))
+                if ((localRacer?.laserBeamMs ?: 0L) > 0L) StatusChip("RED LASER", AlertRed)
                 if ((localRacer?.electroShockAuraMs ?: 0L) > 0L) StatusChip("ELECTRO AURA", Color(0xFFB388FF))
                 if ((localRacer?.electroParalyzedMs ?: 0L) > 0L) StatusChip("MOTIONLESS!", Color(0xFF7C4DFF))
                 if ((localRacer?.stunnedMs ?: 0L) > 0L) StatusChip("ZAPPED!", AlertRed)
@@ -1245,15 +1252,20 @@ fun RaceScreen(
                             }
                         }
 
-                        val powerUpColor = heldPowerUp?.let { Color(it.colorHex) } ?: PaddockOutline
+                        val canFirePowerUp = heldPowerUp != null && !stuntControlsLocked
+                        val powerUpColor = if (canFirePowerUp) {
+                            heldPowerUp?.let { Color(it.colorHex) } ?: PaddockOutline
+                        } else {
+                            PaddockOutline
+                        }
                         Surface(
-                            color = if (heldPowerUp != null) powerUpColor.copy(alpha = 0.92f) else CarbonBg.copy(alpha = 0.65f),
+                            color = if (canFirePowerUp) powerUpColor.copy(alpha = 0.92f) else CarbonBg.copy(alpha = 0.65f),
                             shape = RoundedCornerShape(18.dp),
                             border = BorderStroke(2.dp, powerUpColor),
                             modifier = Modifier
                                 .size(width = powerBtnWidth, height = 56.dp)
                                 .clip(RoundedCornerShape(18.dp))
-                                .clickable(enabled = heldPowerUp != null) {
+                                .clickable(enabled = canFirePowerUp) {
                                     hapticController?.onPowerUpUsed()
                                     onTriggerPowerUp()
                                 }
@@ -1269,14 +1281,14 @@ fun RaceScreen(
                                 Icon(
                                     Icons.Default.Bolt,
                                     contentDescription = "Power-up",
-                                    tint = if (heldPowerUp != null) CarbonBg else TextSecondary,
+                                    tint = if (canFirePowerUp) CarbonBg else TextSecondary,
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Spacer(modifier = Modifier.width(5.dp))
                                 Text(
-                                    text = heldPowerUp?.shortName ?: "EMPTY",
+                                    text = if (stuntControlsLocked) "LOCKED" else (heldPowerUp?.shortName ?: "EMPTY"),
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = if (heldPowerUp != null) CarbonBg else TextSecondary
+                                    color = if (canFirePowerUp) CarbonBg else TextSecondary
                                 )
                             }
                         }

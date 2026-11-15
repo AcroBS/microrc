@@ -134,10 +134,10 @@ fun DrawScope.drawStuntWorldLayer(
         }
     }
 
-    // 3. Stunt Landing Stadium (x = 1400..2530, y = 240..1160)
+    // 3. Expanded Stunt Landing Stadium (x = 1400..3120, y = 240..1160) with bouncy rear barrier
     val sLeft = 1400f
     val sTop = 240f
-    val sWidth = 1130f
+    val sWidth = 1720f
     val sHeight = 920f
 
     // Stadium outer barrier
@@ -155,13 +155,21 @@ fun DrawScope.drawStuntWorldLayer(
         StuntVariant.GOLF_HOLES -> drawGolfStadium(sLeft, sTop, sWidth, sHeight, stuntState, animTimeSec)
     }
 
-    // Stadium perimeter neon rim
+    // Stadium perimeter neon rim + high-visibility bouncy rear bumper strip at x = 3120
     drawRoundRect(
         color = Color(track.id.kerbPrimaryHex).copy(alpha = 0.8f),
         topLeft = Offset(sLeft, sTop),
         size = Size(sWidth, sHeight),
         cornerRadius = CornerRadius(24f, 24f),
         style = Stroke(width = 6f)
+    )
+    drawLine(
+        color = Color(0xFFFFAB00),
+        start = Offset(sLeft + sWidth - 4f, sTop + 26f),
+        end = Offset(sLeft + sWidth - 4f, sTop + sHeight - 26f),
+        strokeWidth = 9f,
+        cap = StrokeCap.Round,
+        pathEffect = PathEffect.dashPathEffect(floatArrayOf(26f, 18f), 0f)
     )
 
     // 4. Wide Mega Launch Ramp spanning runway exit (x = 1300..1396, y = 556..844)
@@ -232,15 +240,15 @@ private fun DrawScope.drawLongJumpStadium(
         cornerRadius = CornerRadius(18f, 18f)
     )
 
-    // Distance meter lines every 10m (9.5 px per meter starting from x = 1400f)
+    // Distance meter lines every 10m (9.5 px per meter starting from x = 1400f up to 170m)
     stuntFieldPaint.textSize = 20f
-    for (meters in 10..110 step 10) {
+    for (meters in 10..170 step 10) {
         val mx = 1400f + meters * 9.5f
         if (mx > sLeft + sWidth - 18f) break
         val isMajor = meters % 20 == 0
         val lineColor = when {
-            meters >= 80 -> Color(0xFFFFD54F)
-            meters >= 50 -> Color(0xFF00E5FF)
+            meters >= 100 -> Color(0xFFFFD54F)
+            meters >= 60 -> Color(0xFF00E5FF)
             else -> Color.White.copy(alpha = 0.45f)
         }
         drawLine(
@@ -318,23 +326,23 @@ private fun DrawScope.drawSoccerGoalStadium(
         idx++
     }
 
-    // Pitch penalty arc & center spot around ball spawn (1830, 700)
+    // Pitch penalty arc & center spot around ball spawn (1920, 700)
     drawCircle(
         color = Color.White.copy(alpha = 0.35f),
         radius = 120f,
-        center = Offset(1830f, 700f),
+        center = Offset(1920f, 700f),
         style = Stroke(width = 3.5f)
     )
     drawLine(
         color = Color.White.copy(alpha = 0.30f),
-        start = Offset(1830f, sTop + 20f),
-        end = Offset(1830f, sTop + sHeight - 20f),
+        start = Offset(1920f, sTop + 20f),
+        end = Offset(1920f, sTop + sHeight - 20f),
         strokeWidth = 3f
     )
 
-    // Goal Scoring Zone at x = 2340..2490, y = 340..1060 (center highest 1000 -> sides 750 -> 500 -> 250)
-    val goalX = 2340f
-    val goalW = 148f
+    // Goal Scoring Zone at x = 2780..2948, y = 340..1060 (center highest 1000 -> sides 750 -> 500 -> 250)
+    val goalX = 2780f
+    val goalW = 168f
     val zones = listOf(
         Triple(340f, 1060f, Color(0xFFFF6D00) to "250"),
         Triple(445f, 955f, Color(0xFFB2FF59) to "500"),
@@ -390,7 +398,7 @@ private fun DrawScope.drawSoccerGoalStadium(
     }
 
     // Giant 2.5D Soccer Ball (radius = 40f)
-    val bx = stuntState?.ballX ?: 1830f
+    val bx = stuntState?.ballX ?: 1920f
     val by = stuntState?.ballY ?: 700f
     val r = 40f
     drawCircle(Color.Black.copy(alpha = 0.42f), radius = r * 0.96f, center = Offset(bx + 7f, by + 9f))
@@ -511,8 +519,8 @@ private fun DrawScope.drawGolfStadium(
         size = Size(sWidth - 130f, sHeight - 90f)
     )
     // Decorative sand bunkers in corners
-    drawOval(Color(0xFFE6C280).copy(alpha = 0.82f), topLeft = Offset(1460f, 280f), size = Size(170f, 100f))
-    drawOval(Color(0xFFE6C280).copy(alpha = 0.82f), topLeft = Offset(2310f, 990f), size = Size(170f, 110f))
+    drawOval(Color(0xFFE6C280).copy(alpha = 0.82f), topLeft = Offset(1470f, 280f), size = Size(185f, 105f))
+    drawOval(Color(0xFFE6C280).copy(alpha = 0.82f), topLeft = Offset(2860f, 985f), size = Size(185f, 110f))
 
     val holes = stuntState?.golfHoles?.ifEmpty { null } ?: previewGolfHoles
     for (hole in holes) {
@@ -599,26 +607,26 @@ fun DrawScope.drawStuntMiniMap(
     drawRoundRect(
         color = stadiumColor,
         topLeft = Offset(offsetX + 1400f * scale, offsetY + 240f * scale),
-        size = Size(1130f * scale, 920f * scale),
+        size = Size(1720f * scale, 920f * scale),
         cornerRadius = CornerRadius(5.dp.toPx(), 5.dp.toPx())
     )
     drawRoundRect(
         color = Color(track.id.kerbPrimaryHex),
         topLeft = Offset(offsetX + 1400f * scale, offsetY + 240f * scale),
-        size = Size(1130f * scale, 920f * scale),
+        size = Size(1720f * scale, 920f * scale),
         cornerRadius = CornerRadius(5.dp.toPx(), 5.dp.toPx()),
         style = Stroke(width = 1.8.dp.toPx())
     )
 
     when (variant) {
         StuntVariant.SOCCER_BALL -> {
-            val bx = stuntState?.ballX ?: 1830f
+            val bx = stuntState?.ballX ?: 1920f
             val by = stuntState?.ballY ?: 700f
             drawCircle(Color.White, radius = 3.2.dp.toPx(), center = Offset(offsetX + bx * scale, offsetY + by * scale))
             drawRect(
                 color = Color(0xFFFFD54F),
-                topLeft = Offset(offsetX + 2340f * scale, offsetY + 340f * scale),
-                size = Size(140f * scale, 720f * scale),
+                topLeft = Offset(offsetX + 2780f * scale, offsetY + 340f * scale),
+                size = Size(165f * scale, 720f * scale),
                 style = Stroke(width = 1.5.dp.toPx())
             )
         }
@@ -646,7 +654,7 @@ fun DrawScope.drawStuntMiniMap(
             }
         }
         StuntVariant.LONG_JUMP -> {
-            for (m in 25..100 step 25) {
+            for (m in 30..150 step 30) {
                 val lx = offsetX + (1400f + m * 9.5f) * scale
                 drawLine(
                     color = Color(0xFF00E5FF).copy(alpha = 0.5f),

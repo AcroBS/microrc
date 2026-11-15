@@ -1,6 +1,7 @@
 package com.example.network
 
 import com.example.data.TrackCatalog
+import com.example.model.ActiveRocketState
 import com.example.model.ArenaFlagState
 import com.example.model.ArenaShape
 import com.example.model.ControlInput
@@ -16,6 +17,7 @@ import com.example.model.RacePhase
 import com.example.model.RaceSnapshot
 import com.example.model.RacerState
 import com.example.model.StuntGolfHole
+import com.example.model.StuntObstacleState
 import com.example.model.StuntPinState
 import com.example.model.StuntStateSnapshot
 import com.example.model.StuntVariant
@@ -175,13 +177,18 @@ object RaceTelemetryCodec {
                 .append(r.collisionSeq).append(',')
                 .append(r.portalWarpSeq).append(',')
                 .append(r.electroShockAuraMs).append(',')
-                .append(r.electroParalyzedMs)
+                .append(r.electroParalyzedMs).append(',')
+                .append(r.laserBeamMs)
         }
         sb.append('|')
 
-        // Item boxes compact mask (index 9)
-        for (b in snap.itemBoxes) {
-            sb.append(if (b.available) '1' else '0')
+        // Item boxes with live randomized coordinates (index 9)
+        snap.itemBoxes.forEachIndexed { idx, b ->
+            if (idx > 0) sb.append('~')
+            sb.append(b.id).append(':')
+                .append(String.format(Locale.US, "%.1f", b.x)).append(':')
+                .append(String.format(Locale.US, "%.1f", b.y)).append(':')
+                .append(if (b.available) 1 else 0)
         }
         sb.append('|')
 
@@ -292,7 +299,8 @@ object RaceTelemetryCodec {
                 .append(String.format(Locale.US, "%.1f", st.ballY)).append(',')
                 .append(String.format(Locale.US, "%.1f", st.ballVx)).append(',')
                 .append(String.format(Locale.US, "%.1f", st.ballVy)).append(',')
-                .append(st.ballScoredPoints)
+                .append(st.ballScoredPoints).append(',')
+                .append(if (st.controlsLocked) 1 else 0)
                 .append(';')
             st.pins.forEachIndexed { idx, p ->
                 if (idx > 0) sb.append('~')
@@ -311,6 +319,27 @@ object RaceTelemetryCodec {
                     .append(gh.points).append(':')
                     .append(if (gh.captured) 1 else 0)
             }
+            sb.append(';')
+            st.runwayObstacles.forEachIndexed { idx, ob ->
+                if (idx > 0) sb.append('~')
+                sb.append(String.format(Locale.US, "%.0f", ob.x)).append(':')
+                    .append(String.format(Locale.US, "%.0f", ob.y)).append(':')
+                    .append(String.format(Locale.US, "%.0f", ob.radius)).append(':')
+                    .append(if (ob.isCrate) 1 else 0)
+            }
+        }
+        sb.append('|')
+
+        // Active Homing Rockets (index 17)
+        snap.rockets.forEachIndexed { idx, rk ->
+            if (idx > 0) sb.append(';')
+            sb.append(rk.id).append(',')
+                .append(sanitizeToken(rk.ownerId)).append(',')
+                .append(sanitizeToken(rk.targetId ?: "")).append(',')
+                .append(String.format(Locale.US, "%.1f", rk.x)).append(',')
+                .append(String.format(Locale.US, "%.1f", rk.y)).append(',')
+                .append(String.format(Locale.US, "%.3f", rk.angleRad)).append(',')
+                .append(rk.remainingMs)
         }
 
         return sb.toString().toByteArray(Charsets.UTF_8)
@@ -399,6 +428,7 @@ object RaceTelemetryCodec {
                 val portalWarpSeq = f.getOrNull(27)?.toIntOrNull() ?: 0
                 val electroAuraMs = f.getOrNull(28)?.toLongOrNull() ?: 0L
                 val electroParalyzedMs = f.getOrNull(29)?.toLongOrNull() ?: 0L
+                val laserBeamMs = f.getOrNull(30)?.toLongOrNull() ?: 0L
 
                 val vx = f[4].toFloatOrNull() ?: 0f
                 val vy = f[5].toFloatOrNull() ?: 0f
@@ -438,7 +468,8 @@ object RaceTelemetryCodec {
                     collisionSeq = collisionSeq,
                     portalWarpSeq = portalWarpSeq,
                     electroShockAuraMs = electroAuraMs,
-                    electroParalyzedMs = electroParalyzedMs
+                    electroParalyzedMs = electroParalyzedMs,
+                    laserBeamMs = laserBeamMs
                 )
             }
         }
@@ -484,6 +515,21 @@ object RaceTelemetryCodec {
                         )
                     }
                 }
+                val obstaclesRaw = sections.getOrNull(3).orEmpty()
+                val runwayObstacles = if (obstaclesRaw.isEmpty()) {
+                    emptyList()
+                } else {
+                    obstaclesRaw.split('~').mapNotNull { oEntry ->
+                        val of = oEntry.split(':')
+                        if (of.size < 4) return@mapNotNull null
+                        StuntObstacleState(
+                            x = of[0].toFloatOrNull() ?: return@mapNotNull null,
+                            y = of[1].toFloatOrNull() ?: return@mapNotNull null,
+                            radius = of[2].toFloatOrNull() ?: 25f,
+                            isCrate = of[3] == "1"
+                        )
+                    }
+                }
                 StuntStateSnapshot(
                     variant = variant.name,
                     roundIndex = h[1].toIntOrNull() ?: 1,
@@ -492,18 +538,20 @@ object RaceTelemetryCodec {
                     activePlayerId = h[4],
                     activePlayerName = h[5],
                     turnPhase = h[6].ifEmpty { "DRIVING" },
-                    turnTimeRemainingMs = h[7].toLongOrNull() ?: 15000L,
+                    turnTimeRemainingMs = h[7].toLongOrNull() ?: 10_000L,
+                    controlsLocked = h.getOrNull(19) == "1",
                     lastAttemptScore = h[8].toIntOrNull() ?: 0,
                     lastAttemptSummary = h[9],
                     bestDistanceMeters = h[10].toFloatOrNull() ?: 0f,
                     landingX = h[11].toFloatOrNull() ?: 0f,
                     landingY = h[12].toFloatOrNull() ?: 700f,
                     hasLanded = h[13] == "1",
-                    ballX = h[14].toFloatOrNull() ?: 1830f,
+                    ballX = h[14].toFloatOrNull() ?: 1920f,
                     ballY = h[15].toFloatOrNull() ?: 700f,
                     ballVx = h[16].toFloatOrNull() ?: 0f,
                     ballVy = h[17].toFloatOrNull() ?: 0f,
                     ballScoredPoints = h[18].toIntOrNull() ?: 0,
+                    runwayObstacles = runwayObstacles,
                     pins = pins,
                     golfHoles = holes
                 )
@@ -522,15 +570,34 @@ object RaceTelemetryCodec {
             }
             else -> TrackCatalog.getTrack(trackId)
         }
-        val mask = parts[9]
-        val boxes = trackDef.itemSpawns.mapIndexed { idx, spawn ->
-            ItemBoxState(
-                id = spawn.id,
-                x = spawn.x,
-                y = spawn.y,
-                available = mask.getOrNull(idx) != '0',
-                respawnMs = 0L
-            )
+        val rawBoxes = parts[9]
+        val boxes = when {
+            gameModeEnum == GameMode.STUNTS -> emptyList()
+            rawBoxes.contains(':') -> {
+                rawBoxes.split('~').mapNotNull { entry ->
+                    val bf = entry.split(':')
+                    if (bf.size < 4) return@mapNotNull null
+                    ItemBoxState(
+                        id = bf[0].toIntOrNull() ?: return@mapNotNull null,
+                        x = bf[1].toFloatOrNull() ?: return@mapNotNull null,
+                        y = bf[2].toFloatOrNull() ?: return@mapNotNull null,
+                        available = bf[3] != "0",
+                        respawnMs = 0L
+                    )
+                }
+            }
+            rawBoxes.isEmpty() -> emptyList()
+            else -> {
+                trackDef.itemSpawns.mapIndexed { idx, spawn ->
+                    ItemBoxState(
+                        id = spawn.id,
+                        x = spawn.x,
+                        y = spawn.y,
+                        available = rawBoxes.getOrNull(idx) != '0',
+                        respawnMs = 0L
+                    )
+                }
+            }
         }
 
         val hazards = if (parts[10].isEmpty()) {
@@ -641,6 +708,25 @@ object RaceTelemetryCodec {
             }
         }
 
+        val rocketsRaw = parts.getOrNull(17).orEmpty()
+        val rockets = if (rocketsRaw.isEmpty()) {
+            emptyList()
+        } else {
+            rocketsRaw.split(';').mapNotNull { entry ->
+                val f = entry.split(',')
+                if (f.size < 7) return@mapNotNull null
+                ActiveRocketState(
+                    id = f[0].toIntOrNull() ?: return@mapNotNull null,
+                    ownerId = f[1],
+                    targetId = f[2].ifEmpty { null },
+                    x = f[3].toFloatOrNull() ?: return@mapNotNull null,
+                    y = f[4].toFloatOrNull() ?: return@mapNotNull null,
+                    angleRad = f[5].toFloatOrNull() ?: 0f,
+                    remainingMs = f[6].toLongOrNull() ?: 3000L
+                )
+            }
+        }
+
         return DecodedSnapshot(
             seq = seq,
             snapshot = RaceSnapshot(
@@ -677,7 +763,8 @@ object RaceTelemetryCodec {
                 stuntState = stuntState,
                 isHybridTour = isHybridTour,
                 hybridStageNumber = hybridStageNumber,
-                nextHybridMode = nextHybridMode
+                nextHybridMode = nextHybridMode,
+                rockets = rockets
             )
         )
     }

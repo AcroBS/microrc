@@ -17,7 +17,7 @@ enum class PowerUpType(
     EMP_ZAP(
         displayName = "EMP Zap",
         shortName = "ZAP",
-        description = "Stuns the nearest rival ahead",
+        description = "Zaps and stuns all rival cars",
         colorHex = 0xFF00E5FF
     ),
     SHIELD(
@@ -43,6 +43,18 @@ enum class PowerUpType(
         shortName = "SHOCK",
         description = "4s electric aura freezes nearby cars",
         colorHex = 0xFF7C4DFF
+    ),
+    HOMING_ROCKET(
+        displayName = "Homing Rocket",
+        shortName = "ROCKET",
+        description = "Seeks the next rival & explodes",
+        colorHex = 0xFFFF5252
+    ),
+    RED_LASER(
+        displayName = "Red Laser",
+        shortName = "LASER",
+        description = "Forward red beam freezes cars on touch",
+        colorHex = 0xFFFF1744
     )
 }
 
@@ -114,3 +126,15 @@ data class TrackExplosion(
     val ageMs: Long = 0L,
     val durationMs: Long = 650L
 )
+
+@JsonClass(generateAdapter = true)
+data class ActiveRocketState(
+    val id: Int,
+    val ownerId: String,
+    val targetId: String? = null,
+    val x: Float,
+    val y: Float,
+    val angleRad: Float,
+    val remainingMs: Long = 6000L
+)
+

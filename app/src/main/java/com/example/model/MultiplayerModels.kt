@@ -56,6 +56,14 @@ data class StuntGolfHole(
 )
 
 @JsonClass(generateAdapter = true)
+data class StuntObstacleState(
+    val x: Float,
+    val y: Float,
+    val radius: Float = 25f,
+    val isCrate: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
 data class StuntStateSnapshot(
     val variant: String = StuntVariant.LONG_JUMP.name,
     val roundIndex: Int = 1,
@@ -64,20 +72,22 @@ data class StuntStateSnapshot(
     val activePlayerId: String = "",
     val activePlayerName: String = "",
     val turnPhase: String = "DRIVING",
-    val turnTimeRemainingMs: Long = 16000L,
+    val turnTimeRemainingMs: Long = 10_000L,
     val lastAttemptScore: Int = 0,
     val lastAttemptSummary: String = "",
     val bestDistanceMeters: Float = 0f,
     val landingX: Float = 0f,
     val landingY: Float = 0f,
     val hasLanded: Boolean = false,
-    val ballX: Float = 1850f,
+    val controlsLocked: Boolean = false,
+    val ballX: Float = 1920f,
     val ballY: Float = 700f,
     val ballVx: Float = 0f,
     val ballVy: Float = 0f,
     val ballScoredPoints: Int = 0,
     val pins: List<StuntPinState> = emptyList(),
-    val golfHoles: List<StuntGolfHole> = emptyList()
+    val golfHoles: List<StuntGolfHole> = emptyList(),
+    val runwayObstacles: List<StuntObstacleState> = emptyList()
 ) {
     val variantEnum: StuntVariant
         get() = runCatching { StuntVariant.valueOf(variant) }.getOrDefault(StuntVariant.LONG_JUMP)
@@ -273,7 +283,8 @@ data class RacerState(
     val collisionSeq: Int = 0,
     val portalWarpSeq: Int = 0,
     val electroShockAuraMs: Long = 0L,
-    val electroParalyzedMs: Long = 0L
+    val electroParalyzedMs: Long = 0L,
+    val laserBeamMs: Long = 0L
 )
 
 @JsonClass(generateAdapter = true)
@@ -302,6 +313,7 @@ data class RaceSnapshot(
     val fieldPickups: List<TrackFieldPickup> = emptyList(),
     val portalPair: PortalPairState? = null,
     val explosions: List<TrackExplosion> = emptyList(),
+    val rockets: List<ActiveRocketState> = emptyList(),
     val arenaSuddenDeathStage: Int = 0,
     val arenaSuddenDeathRemainingMs: Long = 0L,
     val stuntState: StuntStateSnapshot? = null,

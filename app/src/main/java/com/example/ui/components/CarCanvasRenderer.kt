@@ -33,15 +33,70 @@ fun DrawScope.drawRcCar(
     animTimeSec: Float = 0f,
     isCarryingFlag: Boolean = false,
     hasElectroAura: Boolean = false,
-    isElectroParalyzed: Boolean = false
+    isElectroParalyzed: Boolean = false,
+    hasRedLaser: Boolean = false
 ) {
     val deg = ((angleRad + spinVisualOffset) * 180f / PI.toFloat())
+    val headingDeg = (angleRad * 180f / PI.toFloat())
     val frontWheelAngle = steerVisual * 22f
     val airElevation = jumpZ.coerceIn(0f, 1.4f)
     val airScale = scale * (1f + airElevation * 0.44f)
     val shadowDx = airElevation * 38f * scale
     val shadowDy = airElevation * 44f * scale
     val shadowScale = scale * (1f - airElevation * 0.14f)
+
+    // Forward-extending visible Red Laser beam from the car's front nose (340px physics range)
+    if (hasRedLaser) {
+        val beamPulse = 0.5f + 0.5f * sin(animTimeSec * 32f)
+        withTransform({
+            translate(left = x, top = y)
+            scale(scaleX = scale, scaleY = scale, pivot = Offset.Zero)
+            rotate(degrees = headingDeg, pivot = Offset.Zero)
+        }) {
+            val emitterStart = Offset(20f, 0f)
+            val beamEnd = Offset(360f, 0f)
+            // Wide crimson atmospheric bloom
+            drawLine(
+                color = Color(0xFFFF1744).copy(alpha = 0.24f + 0.12f * beamPulse),
+                start = emitterStart,
+                end = beamEnd,
+                strokeWidth = 18f,
+                cap = StrokeCap.Round
+            )
+            // Intense scarlet outer beam
+            drawLine(
+                color = Color(0xFFFF1744).copy(alpha = 0.88f),
+                start = emitterStart,
+                end = beamEnd,
+                strokeWidth = 7.5f + 1.5f * beamPulse,
+                cap = StrokeCap.Round
+            )
+            // White-hot inner core
+            drawLine(
+                color = Color(0xFFFFCDD2),
+                start = emitterStart,
+                end = beamEnd,
+                strokeWidth = 2.8f,
+                cap = StrokeCap.Round
+            )
+            // Front bumper emitter lens & beam-tip flare
+            drawCircle(
+                color = Color(0xFFFF1744),
+                radius = 7f + 2f * beamPulse,
+                center = emitterStart
+            )
+            drawCircle(
+                color = Color.White,
+                radius = 3.5f,
+                center = emitterStart
+            )
+            drawCircle(
+                color = Color(0xFFFF5252).copy(alpha = 0.72f),
+                radius = 8f + 3f * beamPulse,
+                center = beamEnd
+            )
+        }
+    }
 
     // Electro Shock active 155px proximity aura on the track surface
     if (hasElectroAura) {

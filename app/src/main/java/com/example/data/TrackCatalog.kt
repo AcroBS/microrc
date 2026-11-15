@@ -467,7 +467,7 @@ object TrackCatalog {
             boostAt(spline, (n * 0.58f).toInt())
         )
         val items = listOf(0.24f, 0.46f, 0.72f, 0.90f).mapIndexed { id, frac ->
-            itemAt(spline, (n * frac).toInt(), id)
+            itemAt(spline, (n * frac).toInt(), id, lateralFrac = rng.nextFloat() * 1.44f - 0.72f)
         }
         val rampFracs = listOf(0.34f, 0.66f, 0.80f).take(rng.nextInt(2, 4))
         val ramps = rampFracs.map { frac ->
@@ -535,9 +535,33 @@ object TrackCatalog {
         return BoostPad(p.x, p.y, angle)
     }
 
-    fun itemAt(spline: List<TrackPoint>, index: Int, id: Int): ItemBoxSpawn {
-        val p = spline[index.mod(spline.size)]
-        return ItemBoxSpawn(id = id, x = p.x, y = p.y)
+    fun itemAt(
+        spline: List<TrackPoint>,
+        index: Int,
+        id: Int,
+        lateralFrac: Float? = null
+    ): ItemBoxSpawn {
+        val i = index.mod(spline.size)
+        val next = (index + 1).mod(spline.size)
+        val p = spline[i]
+        val n = spline[next]
+        val angle = atan2(n.y - p.y, n.x - p.x)
+        val perpX = -sin(angle)
+        val perpY = cos(angle)
+        val frac = lateralFrac ?: when (id % 5) {
+            0 -> -0.58f
+            1 -> 0.56f
+            2 -> -0.34f
+            3 -> 0.64f
+            else -> -0.46f
+        }
+        val maxLat = (p.halfWidth - 24f).coerceAtLeast(18f)
+        val offset = frac.coerceIn(-0.78f, 0.78f) * maxLat
+        return ItemBoxSpawn(
+            id = id,
+            x = p.x + perpX * offset,
+            y = p.y + perpY * offset
+        )
     }
 
     fun subdivideClosedSpline(
@@ -1040,29 +1064,123 @@ object TrackCatalog {
         return (track.worldWidth / 2f + cos(angle) * 65f) to (track.worldHeight / 2f + sin(angle) * 50f)
     }
 
+    fun sampleRandomItemBoxPoint(
+        track: TrackDefinition,
+        rng: Random,
+        avoidPoints: List<Pair<Float, Float>> = emptyList(),
+        boundaryOverride: List<TrackPoint>? = null
+    ): Pair<Float, Float> {
+        if (track.isArena) {
+            return sampleArenaInteriorPoint(
+                track = track,
+                rng = rng,
+                minWallClearance = 135f,
+                avoidPoints = avoidPoints,
+                minAvoidDist = 115f,
+                boundaryOverride = boundaryOverride
+            )
+        }
+        val pts = track.centerline
+        if (pts.size < 16) return (track.worldWidth * 0.5f) to (track.worldHeight * 0.5f)
+        val staticAvoid = buildList {
+            addAll(avoidPoints)
+            track.boostPads.forEach { add(it.x to it.y) }
+            track.ramps.forEach { add(it.x to it.y) }
+            track.props.filter { it.isSolidObstacle }.forEach { add(it.x to it.y) }
+        }
+        repeat(64) {
+            val idx = rng.nextInt(6, (pts.size - 6).coerceAtLeast(7))
+            val p = pts[idx]
+            val n = pts[(idx + 1) % pts.size]
+            val tangAng = atan2(n.y - p.y, n.x - p.x)
+            val perpX = -sin(tangAng)
+            val perpY = cos(tangAng)
+            val maxLat = (p.halfWidth - 22f).coerceAtLeast(20f)
+            // Sample across full road width, preferring non-centerline lateral offsets so boxes aren't lined up on center
+            val sign = if (rng.nextBoolean()) 1f else -1f
+            val mag = if (rng.nextFloat() < 0.84f) {
+                0.24f + rng.nextFloat() * 0.52f
+            } else {
+                rng.nextFloat() * 0.24f
+            }
+            val latOffset = sign * mag * maxLat
+            val cx = p.x + perpX * latOffset
+            val cy = p.y + perpY * latOffset
+            val clear = staticAvoid.all { (ax, ay) -> distance(cx, cy, ax, ay) >= 88f }
+            if (clear) return cx to cy
+        }
+        val fallbackIdx = rng.nextInt(6, (pts.size - 6).coerceAtLeast(7))
+        val fp = pts[fallbackIdx]
+        val fn = pts[(fallbackIdx + 1) % pts.size]
+        val fAng = atan2(fn.y - fp.y, fn.x - fp.x)
+        val side = if (rng.nextBoolean()) 1f else -1f
+        val off = side * (fp.halfWidth * 0.45f)
+        return (fp.x + (-sin(fAng)) * off) to (fp.y + cos(fAng) * off)
+    }
+
+    fun generateRandomRunwayObstacles(rng: Random = Random.Default): List<TrackProp> {
+        val count = rng.nextInt(4, 6) // 4..5 randomized lead-in obstacles
+        val startX = 385f
+        val endX = 930f
+        val span = (endX - startX) / count.toFloat()
+        val palette = listOf(
+            Triple(PropShape.PYLON, 0xFFFF6D00L, 0xFFFFFFFFL),
+            Triple(PropShape.CRATE, 0xFF455A64L, 0xFFFFAB00L),
+            Triple(PropShape.PYLON, 0xFF00E5FFL, 0xFFFFFFFFL),
+            Triple(PropShape.CRATE, 0xFF546E7AL, 0xFFFFD54FL),
+            Triple(PropShape.PYLON, 0xFFE040FBL, 0xFFFFFFFFL)
+        )
+        val placed = mutableListOf<TrackProp>()
+        for (i in 0 until count) {
+            val zoneMinX = startX + i * span + 14f
+            val zoneMaxX = (startX + (i + 1) * span - 14f).coerceAtLeast(zoneMinX + 4f)
+            var chosenX = (zoneMinX + zoneMaxX) * 0.5f
+            var chosenY = if (i % 2 == 0) 632f else 768f
+            for (attempt in 0 until 45) {
+                val candX = zoneMinX + rng.nextFloat() * (zoneMaxX - zoneMinX)
+                val candY = 588f + rng.nextFloat() * 224f // 588f..812f inside 545..855 runway
+                val clear = placed.all { prev ->
+                    distance(candX, candY, prev.x, prev.y) >= 122f
+                }
+                if (clear) {
+                    chosenX = candX
+                    chosenY = candY
+                    break
+                }
+            }
+            val (shape, col, acc) = palette[(i + rng.nextInt(palette.size)) % palette.size]
+            placed.add(
+                TrackProp(
+                    x = chosenX,
+                    y = chosenY,
+                    radius = 25f,
+                    shape = shape,
+                    colorHex = col,
+                    accentHex = acc,
+                    isSolidObstacle = true
+                )
+            )
+        }
+        return placed.sortedBy { it.x }
+    }
+
     private fun buildStuntTrack(variant: StuntVariant): TrackDefinition {
-        val worldW = 2600f
+        val worldW = 3200f
         val worldH = 1400f
         val theme = variant.themeTrackId
         val runwayPoints = (0..24).map { step ->
             val x = 160f + step * 50f // 160f..1360f shared runway
             TrackPoint(x = x, y = 700f, halfWidth = 155f)
         }
-        // Progressive triple boost runway before the mega ramp
+        // Gentle progressive boost runway before the mega ramp
         val boosts = listOf(
             BoostPad(x = 1005f, y = 700f, angleRad = 0f, radius = 48f),
             BoostPad(x = 1130f, y = 700f, angleRad = 0f, radius = 48f),
             BoostPad(x = 1250f, y = 700f, angleRad = 0f, radius = 50f)
         )
-        // Staggered slalom obstacles on the shared runway that every player must weave around
-        val slalomProps = listOf(
-            TrackProp(465f, 635f, 27f, PropShape.PYLON, 0xFFFF6D00, 0xFFFFFFFF, isSolidObstacle = true),
-            TrackProp(615f, 765f, 27f, PropShape.CRATE, 0xFF455A64, 0xFFFFAB00, isSolidObstacle = true),
-            TrackProp(765f, 632f, 27f, PropShape.PYLON, 0xFF00E5FF, 0xFFFFFFFF, isSolidObstacle = true),
-            TrackProp(900f, 762f, 27f, PropShape.CRATE, 0xFF546E7A, 0xFFFFD54F, isSolidObstacle = true)
-        )
+        val initialObstacles = generateRandomRunwayObstacles(Random(variant.ordinal * 97L + 13L))
         val megaRamp = listOf(
-            TrackRamp(x = 1350f, y = 700f, angleRad = 0f, radius = 78f, impulse = 1.55f)
+            TrackRamp(x = 1350f, y = 700f, angleRad = 0f, radius = 78f, impulse = 1.22f)
         )
         return TrackDefinition(
             id = theme,
@@ -1071,7 +1189,7 @@ object TrackCatalog {
             centerline = runwayPoints,
             boostPads = boosts,
             itemSpawns = emptyList(),
-            props = slalomProps,
+            props = initialObstacles,
             ramps = megaRamp,
             defaultLaps = 4,
             customName = variant.displayName,
@@ -1081,17 +1199,17 @@ object TrackCatalog {
     }
 
     fun defaultBowlingPins(): List<StuntPinState> {
-        // 9 bowling pins in a 1-2-3-2-1 diamond formation centered at (1980, 700)
+        // 9 bowling pins in a 1-2-3-2-1 diamond formation centered at (2060, 700)
         val coords = listOf(
-            1850f to 700f,
-            1915f to 662f,
-            1915f to 738f,
-            1980f to 624f,
-            1980f to 700f,
-            1980f to 776f,
-            2045f to 662f,
-            2045f to 738f,
-            2110f to 700f
+            1930f to 700f,
+            1995f to 662f,
+            1995f to 738f,
+            2060f to 624f,
+            2060f to 700f,
+            2060f to 776f,
+            2125f to 662f,
+            2125f to 738f,
+            2190f to 700f
         )
         return coords.mapIndexed { idx, (px, py) ->
             StuntPinState(id = idx, x = px, y = py, knocked = false)
@@ -1113,13 +1231,13 @@ object TrackCatalog {
         for (i in specs.indices) {
             val (radius, pts) = specs[i]
             val number = holeNumbers[i]
-            var chosenX = 1760f + i * 95f
+            var chosenX = 1720f + i * 195f
             var chosenY = if (i % 2 == 0) 500f else 900f
             for (attempt in 0 until 100) {
-                val candX = rng.nextFloat() * 620f + 1710f // 1710..2330
-                val candY = rng.nextFloat() * 720f + 340f  // 340..1060
+                val candX = rng.nextFloat() * 1140f + 1690f // 1690..2830 across expanded green
+                val candY = rng.nextFloat() * 720f + 340f   // 340..1060
                 val clear = placed.all { existing ->
-                    distance(candX, candY, existing.x, existing.y) >= (existing.radius + radius + 36f)
+                    distance(candX, candY, existing.x, existing.y) >= (existing.radius + radius + 42f)
                 }
                 if (clear) {
                     chosenX = candX
