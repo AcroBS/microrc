@@ -5,6 +5,9 @@ import com.example.model.BoostPad
 import com.example.model.CustomTrackData
 import com.example.model.ItemBoxSpawn
 import com.example.model.PropShape
+import com.example.model.StuntGolfHole
+import com.example.model.StuntPinState
+import com.example.model.StuntVariant
 import com.example.model.TrackDefinition
 import com.example.model.TrackId
 import com.example.model.TrackPoint
@@ -27,6 +30,10 @@ object TrackCatalog {
         buildArenaTrack(shape)
     }
 
+    private val stunts: Map<StuntVariant, TrackDefinition> = StuntVariant.entries.associateWith { variant ->
+        buildStuntTrack(variant)
+    }
+
     fun getTrack(id: TrackId): TrackDefinition = tracks.getValue(id)
 
     fun getTrack(idName: String): TrackDefinition {
@@ -44,6 +51,15 @@ object TrackCatalog {
     }
 
     fun allArenas(): List<TrackDefinition> = ArenaShape.entries.map { getArenaTrack(it) }
+
+    fun getStuntTrack(variant: StuntVariant): TrackDefinition = stunts.getValue(variant)
+
+    fun getStuntTrack(variantName: String?): TrackDefinition {
+        val variant = variantName?.let { runCatching { StuntVariant.valueOf(it) }.getOrNull() } ?: StuntVariant.LONG_JUMP
+        return getStuntTrack(variant)
+    }
+
+    fun allStunts(): List<TrackDefinition> = StuntVariant.entries.map { getStuntTrack(it) }
 
     private fun buildTrack(id: TrackId): TrackDefinition {
         val worldW = 2200f
@@ -93,160 +109,185 @@ object TrackCatalog {
             }
 
             TrackId.BACKYARD_DIRT -> {
+                // Counter-clockwise wide off-road rallycross with twin northern peaks & central mud valley
                 val ctrl = listOf(
-                    TrackPoint(540f, 340f, 122f),
-                    TrackPoint(1100f, 270f, 122f),
-                    TrackPoint(1700f, 350f, 122f),
-                    TrackPoint(1900f, 740f, 120f),
-                    TrackPoint(1680f, 1170f, 122f),
-                    TrackPoint(1140f, 1230f, 120f),
-                    TrackPoint(760f, 1020f, 118f),
-                    TrackPoint(460f, 1180f, 120f),
-                    TrackPoint(290f, 760f, 122f)
+                    TrackPoint(720f, 1250f, 124f),
+                    TrackPoint(1380f, 1260f, 124f),
+                    TrackPoint(1880f, 1120f, 124f),
+                    TrackPoint(1920f, 620f, 124f),
+                    TrackPoint(1640f, 260f, 124f),
+                    TrackPoint(1240f, 340f, 124f),
+                    TrackPoint(940f, 680f, 124f),
+                    TrackPoint(620f, 320f, 124f),
+                    TrackPoint(260f, 580f, 124f),
+                    TrackPoint(320f, 1080f, 124f)
                 )
-                val spline = subdivideClosedSpline(ctrl, samplesPerSegment = 16)
+                val spline = subdivideClosedSpline(ctrl, samplesPerSegment = 14)
                 val boosts = listOf(
-                    boostAt(spline, 12),
-                    boostAt(spline, 68)
+                    boostAt(spline, 10),
+                    boostAt(spline, 52),
+                    boostAt(spline, 108)
                 )
                 val items = listOf(
-                    itemAt(spline, 22, 0),
-                    itemAt(spline, 48, 1),
-                    itemAt(spline, 84, 2),
-                    itemAt(spline, 108, 3),
-                    itemAt(spline, 128, 4)
+                    itemAt(spline, 20, 0),
+                    itemAt(spline, 44, 1),
+                    itemAt(spline, 70, 2),
+                    itemAt(spline, 96, 3),
+                    itemAt(spline, 122, 4)
                 )
                 val ramps = listOf(
-                    rampAt(spline, 34),
-                    rampAt(spline, 96)
+                    rampAt(spline, 30, impulse = 1.12f),
+                    rampAt(spline, 82, impulse = 1.15f),
+                    rampAt(spline, 118, impulse = 1.08f)
                 )
                 val props = listOf(
-                    TrackProp(1060f, 680f, 68f, PropShape.TREE, 0xFF2E7D32, 0xFF81C784, isSolidObstacle = true),
-                    TrackProp(1400f, 740f, 56f, PropShape.TREE, 0xFF388E3C, 0xFFA5D6A7, isSolidObstacle = true),
-                    TrackProp(680f, 660f, 52f, PropShape.MUD_POOL, 0xFF4E342E, 0xFF795548, isSolidObstacle = false),
-                    TrackProp(180f, 220f, 58f, PropShape.TREE, 0xFF1B5E20, 0xFF66BB6A, isSolidObstacle = false),
-                    TrackProp(2020f, 240f, 54f, PropShape.TREE, 0xFF2E7D32, 0xFF81C784, isSolidObstacle = false),
-                    TrackProp(1990f, 1290f, 60f, PropShape.TREE, 0xFF33691E, 0xFF9CCC65, isSolidObstacle = false)
+                    // On-track wide-line mud slicks (non-solid: slow ground cars unless jumped or avoided)
+                    TrackProp(940f, 752f, 36f, PropShape.MUD_POOL, 0xFF4E342E, 0xFF8D6E63, isSolidObstacle = false),
+                    TrackProp(1815f, 870f, 36f, PropShape.MUD_POOL, 0xFF4E342E, 0xFF8D6E63, isSolidObstacle = false),
+                    TrackProp(355f, 830f, 34f, PropShape.MUD_POOL, 0xFF3E2723, 0xFF795548, isSolidObstacle = false),
+                    // Safe infield & perimeter garden trees
+                    TrackProp(1500f, 780f, 58f, PropShape.TREE, 0xFF2E7D32, 0xFF81C784, isSolidObstacle = true),
+                    TrackProp(660f, 930f, 44f, PropShape.TREE, 0xFF388E3C, 0xFFA5D6A7, isSolidObstacle = true),
+                    TrackProp(140f, 180f, 56f, PropShape.TREE, 0xFF1B5E20, 0xFF66BB6A, isSolidObstacle = false),
+                    TrackProp(2060f, 200f, 52f, PropShape.TREE, 0xFF2E7D32, 0xFF81C784, isSolidObstacle = false),
+                    TrackProp(2060f, 1360f, 58f, PropShape.TREE, 0xFF33691E, 0xFF9CCC65, isSolidObstacle = false)
                 )
                 TrackDefinition(id, worldW, worldH, spline, boosts, items, props, ramps = ramps)
             }
 
             TrackId.NEON_ROOFTOP -> {
+                // Clockwise supersonic diagonal Delta Wing / Tri-Oval speedway with 5 turbo pads
                 val ctrl = listOf(
-                    TrackPoint(420f, 280f, 108f),
-                    TrackPoint(1150f, 250f, 108f),
-                    TrackPoint(1840f, 310f, 108f),
-                    TrackPoint(1900f, 640f, 106f),
-                    TrackPoint(1400f, 680f, 106f),
-                    TrackPoint(1400f, 940f, 108f),
-                    TrackPoint(1860f, 1080f, 108f),
-                    TrackPoint(1580f, 1300f, 108f),
-                    TrackPoint(960f, 1290f, 108f),
-                    TrackPoint(430f, 1180f, 108f),
-                    TrackPoint(320f, 720f, 108f)
+                    TrackPoint(700f, 320f, 106f),
+                    TrackPoint(1240f, 440f, 106f),
+                    TrackPoint(1760f, 580f, 106f),
+                    TrackPoint(1920f, 860f, 106f),
+                    TrackPoint(1520f, 1140f, 106f),
+                    TrackPoint(960f, 1260f, 106f),
+                    TrackPoint(420f, 1200f, 106f),
+                    TrackPoint(280f, 780f, 106f),
+                    TrackPoint(340f, 380f, 106f)
                 )
-                val spline = subdivideClosedSpline(ctrl, samplesPerSegment = 14)
+                val spline = subdivideClosedSpline(ctrl, samplesPerSegment = 15)
                 val boosts = listOf(
-                    boostAt(spline, 15),
+                    boostAt(spline, 8),
+                    boostAt(spline, 26),
                     boostAt(spline, 62),
-                    boostAt(spline, 114)
+                    boostAt(spline, 86),
+                    boostAt(spline, 112)
                 )
                 val items = listOf(
-                    itemAt(spline, 24, 0),
-                    itemAt(spline, 46, 1),
-                    itemAt(spline, 80, 2),
-                    itemAt(spline, 104, 3),
-                    itemAt(spline, 134, 4)
+                    itemAt(spline, 16, 0),
+                    itemAt(spline, 38, 1),
+                    itemAt(spline, 56, 2),
+                    itemAt(spline, 76, 3),
+                    itemAt(spline, 98, 4),
+                    itemAt(spline, 120, 5)
                 )
                 val ramps = listOf(
-                    rampAt(spline, 34),
-                    rampAt(spline, 92),
-                    rampAt(spline, 124)
+                    rampAt(spline, 20, impulse = 1.14f),
+                    rampAt(spline, 68, impulse = 1.10f),
+                    rampAt(spline, 104, impulse = 1.12f)
                 )
                 val props = listOf(
-                    TrackProp(960f, 620f, 44f, PropShape.PYLON, 0xFF00E5FF, 0xFFE040FB, isSolidObstacle = true),
-                    TrackProp(660f, 760f, 40f, PropShape.PYLON, 0xFFE040FB, 0xFF00E5FF, isSolidObstacle = true),
-                    TrackProp(160f, 1020f, 46f, PropShape.CRATE, 0xFF1A233A, 0xFF00E5FF, isSolidObstacle = false),
-                    TrackProp(2050f, 150f, 44f, PropShape.CRATE, 0xFF1A233A, 0xFFE040FB, isSolidObstacle = false),
-                    TrackProp(960f, 940f, 36f, PropShape.PYLON, 0xFF00E5FF, 0xFFFFFFFF, isSolidObstacle = true)
+                    TrackProp(820f, 800f, 44f, PropShape.PYLON, 0xFF00E5FF, 0xFFE040FB, isSolidObstacle = true),
+                    TrackProp(1220f, 820f, 42f, PropShape.PYLON, 0xFFE040FB, 0xFF00E5FF, isSolidObstacle = true),
+                    TrackProp(640f, 880f, 38f, PropShape.PYLON, 0xFF00E5FF, 0xFFFFFFFF, isSolidObstacle = true),
+                    TrackProp(1960f, 220f, 50f, PropShape.CRATE, 0xFF1A233A, 0xFFE040FB, isSolidObstacle = false),
+                    TrackProp(140f, 1340f, 48f, PropShape.CRATE, 0xFF1A233A, 0xFF00E5FF, isSolidObstacle = false),
+                    TrackProp(2040f, 1340f, 48f, PropShape.CRATE, 0xFF1A233A, 0xFF00E5FF, isSolidObstacle = false)
                 )
                 TrackDefinition(id, worldW, worldH, spline, boosts, items, props, ramps = ramps)
             }
 
             TrackId.SANDBOX_DUNES -> {
+                // Counter-clockwise symmetric Desert Hourglass / 6-switchback canyon serpentine
                 val ctrl = listOf(
-                    TrackPoint(390f, 390f, 116f),
-                    TrackPoint(920f, 250f, 116f),
-                    TrackPoint(1420f, 450f, 116f),
-                    TrackPoint(1860f, 340f, 116f),
-                    TrackPoint(1930f, 830f, 116f),
-                    TrackPoint(1500f, 1210f, 116f),
-                    TrackPoint(960f, 1010f, 114f),
-                    TrackPoint(560f, 1250f, 116f),
-                    TrackPoint(270f, 940f, 116f)
+                    TrackPoint(1880f, 920f, 110f),
+                    TrackPoint(1880f, 420f, 110f),
+                    TrackPoint(1460f, 250f, 110f),
+                    TrackPoint(1120f, 540f, 110f),
+                    TrackPoint(680f, 260f, 110f),
+                    TrackPoint(270f, 480f, 110f),
+                    TrackPoint(280f, 980f, 110f),
+                    TrackPoint(720f, 1260f, 110f),
+                    TrackPoint(1080f, 960f, 110f),
+                    TrackPoint(1520f, 1250f, 110f)
                 )
-                val spline = subdivideClosedSpline(ctrl, samplesPerSegment = 16)
+                val spline = subdivideClosedSpline(ctrl, samplesPerSegment = 14)
                 val boosts = listOf(
-                    boostAt(spline, 18),
-                    boostAt(spline, 76)
+                    boostAt(spline, 8),
+                    boostAt(spline, 52),
+                    boostAt(spline, 96)
                 )
                 val items = listOf(
-                    itemAt(spline, 26, 0),
-                    itemAt(spline, 52, 1),
-                    itemAt(spline, 88, 2),
-                    itemAt(spline, 112, 3),
-                    itemAt(spline, 132, 4)
+                    itemAt(spline, 22, 0),
+                    itemAt(spline, 44, 1),
+                    itemAt(spline, 72, 2),
+                    itemAt(spline, 104, 3),
+                    itemAt(spline, 124, 4)
                 )
                 val ramps = listOf(
-                    rampAt(spline, 40),
-                    rampAt(spline, 100)
+                    rampAt(spline, 16, impulse = 1.08f),
+                    rampAt(spline, 62, impulse = 1.12f),
+                    rampAt(spline, 114, impulse = 1.08f)
                 )
                 val props = listOf(
-                    TrackProp(1040f, 680f, 52f, PropShape.MUD_POOL, 0xFF0288D1, 0xFF81D4FA, isSolidObstacle = false),
-                    TrackProp(640f, 660f, 42f, PropShape.CACTUS, 0xFF2E7D32, 0xFFA5D6A7, isSolidObstacle = true),
-                    TrackProp(1420f, 820f, 46f, PropShape.CACTUS, 0xFF388E3C, 0xFFC8E6C9, isSolidObstacle = true),
-                    TrackProp(180f, 210f, 44f, PropShape.CACTUS, 0xFF2E7D32, 0xFFA5D6A7, isSolidObstacle = false),
-                    TrackProp(2020f, 1300f, 50f, PropShape.CACTUS, 0xFF1B5E20, 0xFF81C784, isSolidObstacle = false)
+                    // Central desert oasis lagoon + shallow water slicks on switchback apexes
+                    TrackProp(1100f, 750f, 54f, PropShape.MUD_POOL, 0xFF0288D1, 0xFF81D4FA, isSolidObstacle = false),
+                    TrackProp(1120f, 608f, 33f, PropShape.MUD_POOL, 0xFF0288D1, 0xFFB3E5FC, isSolidObstacle = false),
+                    TrackProp(1080f, 892f, 33f, PropShape.MUD_POOL, 0xFF0288D1, 0xFFB3E5FC, isSolidObstacle = false),
+                    // West & East dune basin saguaro cacti
+                    TrackProp(660f, 750f, 42f, PropShape.CACTUS, 0xFF2E7D32, 0xFFA5D6A7, isSolidObstacle = true),
+                    TrackProp(1520f, 740f, 42f, PropShape.CACTUS, 0xFF388E3C, 0xFFC8E6C9, isSolidObstacle = true),
+                    TrackProp(140f, 190f, 44f, PropShape.CACTUS, 0xFF2E7D32, 0xFFA5D6A7, isSolidObstacle = false),
+                    TrackProp(2060f, 1340f, 48f, PropShape.CACTUS, 0xFF1B5E20, 0xFF81C784, isSolidObstacle = false)
                 )
                 TrackDefinition(id, worldW, worldH, spline, boosts, items, props, ramps = ramps)
             }
 
             TrackId.WAREHOUSE_DRIFT -> {
+                // Clockwise compact L-Boot concrete gymkhana with 90° drift hairpins & loading-dock straight
                 val ctrl = listOf(
-                    TrackPoint(380f, 290f, 108f),
-                    TrackPoint(1100f, 280f, 108f),
-                    TrackPoint(1860f, 290f, 108f),
-                    TrackPoint(1880f, 610f, 106f),
-                    TrackPoint(1180f, 620f, 106f),
-                    TrackPoint(1180f, 960f, 106f),
-                    TrackPoint(1860f, 970f, 106f),
-                    TrackPoint(1840f, 1270f, 108f),
-                    TrackPoint(960f, 1270f, 108f),
-                    TrackPoint(360f, 1240f, 108f),
-                    TrackPoint(340f, 760f, 108f)
+                    TrackPoint(290f, 820f, 96f),
+                    TrackPoint(310f, 360f, 96f),
+                    TrackPoint(780f, 270f, 96f),
+                    TrackPoint(920f, 720f, 96f),
+                    TrackPoint(1420f, 760f, 96f),
+                    TrackPoint(1890f, 800f, 96f),
+                    TrackPoint(1880f, 1220f, 96f),
+                    TrackPoint(1400f, 1270f, 96f),
+                    TrackPoint(860f, 1260f, 96f),
+                    TrackPoint(380f, 1220f, 96f)
                 )
                 val spline = subdivideClosedSpline(ctrl, samplesPerSegment = 14)
                 val boosts = listOf(
-                    boostAt(spline, 14),
-                    boostAt(spline, 108)
+                    boostAt(spline, 12),
+                    boostAt(spline, 50),
+                    boostAt(spline, 88),
+                    boostAt(spline, 116)
                 )
                 val items = listOf(
-                    itemAt(spline, 25, 0),
-                    itemAt(spline, 48, 1),
-                    itemAt(spline, 74, 2),
-                    itemAt(spline, 98, 3),
-                    itemAt(spline, 136, 4)
+                    itemAt(spline, 22, 0),
+                    itemAt(spline, 40, 1),
+                    itemAt(spline, 64, 2),
+                    itemAt(spline, 80, 3),
+                    itemAt(spline, 104, 4),
+                    itemAt(spline, 124, 5)
                 )
                 val ramps = listOf(
-                    rampAt(spline, 36),
-                    rampAt(spline, 122)
+                    rampAt(spline, 98, impulse = 1.05f)
                 )
                 val props = listOf(
-                    TrackProp(760f, 760f, 64f, PropShape.CRATE, 0xFF455A64, 0xFFFFAB00, isSolidObstacle = true),
-                    TrackProp(1540f, 790f, 44f, PropShape.CRATE, 0xFF37474F, 0xFFFFAB00, isSolidObstacle = true),
-                    TrackProp(760f, 530f, 42f, PropShape.PYLON, 0xFFFF6D00, 0xFFFFFFFF, isSolidObstacle = true),
-                    TrackProp(760f, 1000f, 42f, PropShape.PYLON, 0xFFFF6D00, 0xFFFFFFFF, isSolidObstacle = true),
-                    TrackProp(160f, 180f, 48f, PropShape.CRATE, 0xFF263238, 0xFF90A4AE, isSolidObstacle = false)
+                    // Outer clipping-zone industrial oil slicks
+                    TrackProp(865f, 775f, 32f, PropShape.MUD_POOL, 0xFF1C242B, 0xFF4FC3F7, isSolidObstacle = false),
+                    TrackProp(1830f, 1010f, 32f, PropShape.MUD_POOL, 0xFF1C242B, 0xFF4FC3F7, isSolidObstacle = false),
+                    // Infield & North-East container yard obstacles
+                    TrackProp(600f, 780f, 46f, PropShape.CRATE, 0xFF455A64, 0xFFFFAB00, isSolidObstacle = true),
+                    TrackProp(1400f, 1015f, 40f, PropShape.CRATE, 0xFF37474F, 0xFFFFAB00, isSolidObstacle = true),
+                    TrackProp(1360f, 340f, 58f, PropShape.CRATE, 0xFF455A64, 0xFFFFAB00, isSolidObstacle = true),
+                    TrackProp(1740f, 360f, 54f, PropShape.CRATE, 0xFF37474F, 0xFFFF6D00, isSolidObstacle = true),
+                    TrackProp(1550f, 440f, 38f, PropShape.PYLON, 0xFFFF6D00, 0xFFFFFFFF, isSolidObstacle = true)
                 )
                 TrackDefinition(id, worldW, worldH, spline, boosts, items, props, ramps = ramps)
             }
@@ -312,6 +353,7 @@ object TrackCatalog {
         enabled: Boolean,
         seed: Long = System.currentTimeMillis()
     ): TrackDefinition {
+        if (track.isStunt) return track
         if (!enabled) return track.copy(ramps = emptyList())
         val rng = Random(seed)
         if (track.isArena) {
@@ -656,6 +698,13 @@ object TrackCatalog {
      * or evenly spaced around the central arena ring facing inward for Arena mode.
      */
     fun gridStartTransform(track: TrackDefinition, slotIndex: Int): Triple<Float, Float, Float> {
+        if (track.isStunt) {
+            return if (slotIndex <= 0) {
+                Triple(230f, 700f, 0f)
+            } else {
+                Triple(240f + slotIndex * 85f, 320f, 0f)
+            }
+        }
         if (track.isArena) {
             val cx = track.worldWidth / 2f
             val cy = track.worldHeight / 2f
@@ -777,12 +826,36 @@ object TrackCatalog {
             }
         }
 
-        val boosts = listOf(
-            BoostPad(cx - 330f, cy, -PI.toFloat() / 2f),
-            BoostPad(cx + 330f, cy, PI.toFloat() / 2f),
-            BoostPad(cx, cy - 250f, 0f),
-            BoostPad(cx, cy + 250f, PI.toFloat())
-        )
+        val boosts: List<BoostPad> = when (shape) {
+            ArenaShape.SQUARE -> listOf(
+                BoostPad(cx - 480f, cy - 280f, 0f),
+                BoostPad(cx + 480f, cy - 280f, PI.toFloat() / 2f),
+                BoostPad(cx + 480f, cy + 280f, PI.toFloat()),
+                BoostPad(cx - 480f, cy + 280f, -PI.toFloat() / 2f)
+            )
+            ArenaShape.CIRCLE -> (0 until 6).map { k ->
+                val a = (k.toFloat() / 6f) * (2f * PI.toFloat())
+                BoostPad(cx + cos(a) * 430f, cy + sin(a) * 320f, a + PI.toFloat() / 2f)
+            }
+            ArenaShape.STAR -> (0 until 5).map { k ->
+                val a = -PI.toFloat() / 2f + (k.toFloat() / 5f) * (2f * PI.toFloat())
+                val bx = cx + cos(a) * 510f
+                val by = cy + sin(a) * 370f
+                BoostPad(bx, by, atan2(cy - by, cx - bx))
+            }
+            ArenaShape.HEXAGON -> listOf(
+                BoostPad(cx - 340f, cy, -PI.toFloat() / 2f),
+                BoostPad(cx + 340f, cy, PI.toFloat() / 2f),
+                BoostPad(cx, cy - 260f, 0f),
+                BoostPad(cx, cy + 260f, PI.toFloat())
+            )
+            ArenaShape.CLOVER -> listOf(
+                BoostPad(cx + 520f, cy, PI.toFloat()),
+                BoostPad(cx - 520f, cy, 0f),
+                BoostPad(cx, cy - 370f, PI.toFloat() / 2f),
+                BoostPad(cx, cy + 370f, -PI.toFloat() / 2f)
+            )
+        }
 
         val items = (0 until 6).map { idx ->
             val a = (idx.toFloat() / 6f) * (2f * PI.toFloat()) + 0.35f
@@ -793,33 +866,65 @@ object TrackCatalog {
             )
         }
 
-        val defaultRamps = listOf(
-            TrackRamp(cx - 210f, cy - 150f, 0.65f, radius = 48f, impulse = 1.05f),
-            TrackRamp(cx + 210f, cy + 150f, -2.45f, radius = 48f, impulse = 1.05f),
-            TrackRamp(cx + 220f, cy - 155f, 2.35f, radius = 48f, impulse = 1.0f)
-        )
-
-        // Two oil/puddle slick patches inside the arena (causing flag carriers to spin & drop the flag!)
-        val props = listOf(
-            TrackProp(
-                x = cx - 260f,
-                y = cy + 165f,
-                radius = 44f,
-                shape = PropShape.MUD_POOL,
-                colorHex = 0xFF263238,
-                accentHex = 0xFF4FC3F7,
-                isSolidObstacle = false
-            ),
-            TrackProp(
-                x = cx + 260f,
-                y = cy - 165f,
-                radius = 44f,
-                shape = PropShape.MUD_POOL,
-                colorHex = 0xFF263238,
-                accentHex = 0xFF4FC3F7,
-                isSolidObstacle = false
+        val defaultRamps: List<TrackRamp> = when (shape) {
+            ArenaShape.SQUARE -> listOf(
+                TrackRamp(cx - 240f, cy - 160f, 0.55f, radius = 48f, impulse = 1.05f),
+                TrackRamp(cx + 240f, cy + 160f, -2.55f, radius = 48f, impulse = 1.05f)
             )
-        )
+            ArenaShape.CIRCLE -> listOf(
+                TrackRamp(cx - 220f, cy - 140f, 0.75f, radius = 48f, impulse = 1.10f),
+                TrackRamp(cx + 220f, cy - 140f, 2.35f, radius = 48f, impulse = 1.10f),
+                TrackRamp(cx, cy + 190f, -1.57f, radius = 48f, impulse = 1.10f)
+            )
+            ArenaShape.STAR -> listOf(
+                TrackRamp(cx - 210f, cy - 150f, 0.65f, radius = 48f, impulse = 1.05f),
+                TrackRamp(cx + 210f, cy + 150f, -2.45f, radius = 48f, impulse = 1.05f),
+                TrackRamp(cx + 220f, cy - 155f, 2.35f, radius = 48f, impulse = 1.05f),
+                TrackRamp(cx - 220f, cy + 155f, -0.75f, radius = 48f, impulse = 1.05f)
+            )
+            ArenaShape.HEXAGON -> listOf(
+                TrackRamp(cx - 250f, cy - 150f, 0.55f, radius = 48f, impulse = 1.12f),
+                TrackRamp(cx + 250f, cy + 150f, -2.55f, radius = 48f, impulse = 1.12f),
+                TrackRamp(cx, cy - 190f, 1.57f, radius = 48f, impulse = 1.08f)
+            )
+            ArenaShape.CLOVER -> listOf(
+                TrackRamp(cx - 210f, cy, 0f, radius = 48f, impulse = 1.10f),
+                TrackRamp(cx + 210f, cy, PI.toFloat(), radius = 48f, impulse = 1.10f),
+                TrackRamp(cx, cy - 165f, PI.toFloat() / 2f, radius = 48f, impulse = 1.05f),
+                TrackRamp(cx, cy + 165f, -PI.toFloat() / 2f, radius = 48f, impulse = 1.05f)
+            )
+        }
+
+        // First props are always non-solid oil/mud slicks (causes flag carriers to spin & drop the flag),
+        // followed by shape-specific tactical obstacles inside the central zone.
+        val props: List<TrackProp> = when (shape) {
+            ArenaShape.SQUARE -> listOf(
+                TrackProp(cx - 270f, cy + 165f, 44f, PropShape.MUD_POOL, 0xFF263238, 0xFF4FC3F7, isSolidObstacle = false),
+                TrackProp(cx + 270f, cy - 165f, 44f, PropShape.MUD_POOL, 0xFF263238, 0xFF4FC3F7, isSolidObstacle = false),
+                TrackProp(cx - 190f, cy, 34f, PropShape.CRATE, 0xFF455A64, 0xFFFFAB00, isSolidObstacle = true),
+                TrackProp(cx + 190f, cy, 34f, PropShape.CRATE, 0xFF455A64, 0xFFFFAB00, isSolidObstacle = true)
+            )
+            ArenaShape.CIRCLE -> listOf(
+                TrackProp(cx - 260f, cy + 165f, 44f, PropShape.MUD_POOL, 0xFF263238, 0xFF4FC3F7, isSolidObstacle = false),
+                TrackProp(cx + 260f, cy - 165f, 44f, PropShape.MUD_POOL, 0xFF263238, 0xFF4FC3F7, isSolidObstacle = false)
+            )
+            ArenaShape.STAR -> listOf(
+                TrackProp(cx - 250f, cy + 160f, 42f, PropShape.MUD_POOL, 0xFF263238, 0xFF4FC3F7, isSolidObstacle = false),
+                TrackProp(cx + 250f, cy - 160f, 42f, PropShape.MUD_POOL, 0xFF263238, 0xFF4FC3F7, isSolidObstacle = false),
+                TrackProp(cx, cy - 175f, 32f, PropShape.PYLON, 0xFFFF7043, 0xFFFFF8E1, isSolidObstacle = true)
+            )
+            ArenaShape.HEXAGON -> listOf(
+                TrackProp(cx - 270f, cy, 48f, PropShape.MUD_POOL, 0xFF4E342E, 0xFF8D6E63, isSolidObstacle = false),
+                TrackProp(cx + 270f, cy, 48f, PropShape.MUD_POOL, 0xFF4E342E, 0xFF8D6E63, isSolidObstacle = false),
+                TrackProp(cx, cy + 175f, 34f, PropShape.TREE, 0xFF2E7D32, 0xFF81C784, isSolidObstacle = true)
+            )
+            ArenaShape.CLOVER -> listOf(
+                TrackProp(cx - 250f, cy - 165f, 44f, PropShape.MUD_POOL, 0xFF0288D1, 0xFF81D4FA, isSolidObstacle = false),
+                TrackProp(cx + 250f, cy + 165f, 44f, PropShape.MUD_POOL, 0xFF0288D1, 0xFF81D4FA, isSolidObstacle = false),
+                TrackProp(cx - 185f, cy + 110f, 30f, PropShape.CACTUS, 0xFF2E7D32, 0xFFA5D6A7, isSolidObstacle = true),
+                TrackProp(cx + 185f, cy - 110f, 30f, PropShape.CACTUS, 0xFF2E7D32, 0xFFA5D6A7, isSolidObstacle = true)
+            )
+        }
 
         return TrackDefinition(
             id = theme,
@@ -933,6 +1038,107 @@ object TrackCatalog {
         // Fallback: safe offset inside center
         val angle = rng.nextFloat() * (2f * PI.toFloat())
         return (track.worldWidth / 2f + cos(angle) * 65f) to (track.worldHeight / 2f + sin(angle) * 50f)
+    }
+
+    private fun buildStuntTrack(variant: StuntVariant): TrackDefinition {
+        val worldW = 2600f
+        val worldH = 1400f
+        val theme = variant.themeTrackId
+        val runwayPoints = (0..24).map { step ->
+            val x = 160f + step * 50f // 160f..1360f shared runway
+            TrackPoint(x = x, y = 700f, halfWidth = 155f)
+        }
+        // Progressive triple boost runway before the mega ramp
+        val boosts = listOf(
+            BoostPad(x = 1005f, y = 700f, angleRad = 0f, radius = 48f),
+            BoostPad(x = 1130f, y = 700f, angleRad = 0f, radius = 48f),
+            BoostPad(x = 1250f, y = 700f, angleRad = 0f, radius = 50f)
+        )
+        // Staggered slalom obstacles on the shared runway that every player must weave around
+        val slalomProps = listOf(
+            TrackProp(465f, 635f, 27f, PropShape.PYLON, 0xFFFF6D00, 0xFFFFFFFF, isSolidObstacle = true),
+            TrackProp(615f, 765f, 27f, PropShape.CRATE, 0xFF455A64, 0xFFFFAB00, isSolidObstacle = true),
+            TrackProp(765f, 632f, 27f, PropShape.PYLON, 0xFF00E5FF, 0xFFFFFFFF, isSolidObstacle = true),
+            TrackProp(900f, 762f, 27f, PropShape.CRATE, 0xFF546E7A, 0xFFFFD54F, isSolidObstacle = true)
+        )
+        val megaRamp = listOf(
+            TrackRamp(x = 1350f, y = 700f, angleRad = 0f, radius = 78f, impulse = 1.55f)
+        )
+        return TrackDefinition(
+            id = theme,
+            worldWidth = worldW,
+            worldHeight = worldH,
+            centerline = runwayPoints,
+            boostPads = boosts,
+            itemSpawns = emptyList(),
+            props = slalomProps,
+            ramps = megaRamp,
+            defaultLaps = 4,
+            customName = variant.displayName,
+            isStunt = true,
+            stuntVariant = variant
+        )
+    }
+
+    fun defaultBowlingPins(): List<StuntPinState> {
+        // 9 bowling pins in a 1-2-3-2-1 diamond formation centered at (1980, 700)
+        val coords = listOf(
+            1850f to 700f,
+            1915f to 662f,
+            1915f to 738f,
+            1980f to 624f,
+            1980f to 700f,
+            1980f to 776f,
+            2045f to 662f,
+            2045f to 738f,
+            2110f to 700f
+        )
+        return coords.mapIndexed { idx, (px, py) ->
+            StuntPinState(id = idx, x = px, y = py, knocked = false)
+        }
+    }
+
+    fun generateGolfHoles(rng: Random = Random.Default): List<StuntGolfHole> {
+        // 6 holes with mixed bigger & smaller radii — smaller cups award bigger scores!
+        val specs = listOf(
+            84f to 200,
+            74f to 300,
+            64f to 450,
+            54f to 600,
+            44f to 800,
+            36f to 1000
+        )
+        val holeNumbers = (1..6).shuffled(rng)
+        val placed = mutableListOf<StuntGolfHole>()
+        for (i in specs.indices) {
+            val (radius, pts) = specs[i]
+            val number = holeNumbers[i]
+            var chosenX = 1760f + i * 95f
+            var chosenY = if (i % 2 == 0) 500f else 900f
+            for (attempt in 0 until 100) {
+                val candX = rng.nextFloat() * 620f + 1710f // 1710..2330
+                val candY = rng.nextFloat() * 720f + 340f  // 340..1060
+                val clear = placed.all { existing ->
+                    distance(candX, candY, existing.x, existing.y) >= (existing.radius + radius + 36f)
+                }
+                if (clear) {
+                    chosenX = candX
+                    chosenY = candY
+                    break
+                }
+            }
+            placed.add(
+                StuntGolfHole(
+                    number = number,
+                    x = chosenX,
+                    y = chosenY,
+                    radius = radius,
+                    points = pts,
+                    captured = false
+                )
+            )
+        }
+        return placed.sortedBy { it.number }
     }
 
     fun distance(x1: Float, y1: Float, x2: Float, y2: Float): Float = hypot(x2 - x1, y2 - y1)

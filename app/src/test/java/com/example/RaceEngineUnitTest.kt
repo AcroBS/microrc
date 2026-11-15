@@ -622,7 +622,7 @@ class RaceEngineUnitTest {
     }
 
     @Test
-    fun oneMinePerPlayerPerRound_grantsAtStartNoRefillOnLap2AndExplodesWithSlipSpin() {
+    fun circuitOnlyPerLapMines_noneInLap1OnePerLapFromLap2OnwardAndDisabledInArena() {
         val track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP).copy(
             ramps = emptyList(),
             itemSpawns = emptyList()
@@ -641,40 +641,67 @@ class RaceEngineUnitTest {
 
         repeat(68) { engine.step(0.05f) }
         var snap = engine.step(0.016f)
-        assertEquals("Every player must start the round with 1 mine", 1, snap.racers.first { it.playerId == "p1" }.minesAvailable)
-        assertEquals("Every player must start the round with 1 mine", 1, snap.racers.first { it.playerId == "p2" }.minesAvailable)
+        assertEquals("No mine in first lap (Lap 1)", 0, snap.racers.first { it.playerId == "p1" }.minesAvailable)
+        assertEquals("No mine in first lap (Lap 1)", 0, snap.racers.first { it.playerId == "p2" }.minesAvailable)
 
-        // Drop p1's single round mine on Lap 1
+        // Pressing dropMine in Lap 1 must NOT drop any mine
+        engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f, dropMine = true))
+        snap = engine.step(0.016f)
+        assertEquals("Zero mines may be dropped in Lap 1", 0, snap.hazards.count { it.hazardTypeEnum == HazardType.MINE })
+
+        // Helper to drive p1 cleanly until targetLap
+        fun driveP1UntilLap(targetLap: Int) {
+            var steps = 0
+            while (snap.racers.first { it.playerId == "p1" }.lap < targetLap && steps < 2400) {
+                val r = snap.racers.first { it.playerId == "p1" }
+                val proj = TrackCatalog.nearestTrackSegmentLocal(track, r.x, r.y, r.checkpointIndex)
+                val target = track.centerline[(proj.index + 7) % track.centerline.size]
+                val desired = kotlin.math.atan2(target.y - r.y, target.x - r.x)
+                val diff = RacePhysicsEngine.normalizeAngle(desired - r.angleRad)
+                engine.submitInput("p1", ControlInput(throttle = 1f, steer = (diff / 0.6f).coerceIn(-1f, 1f)))
+                engine.submitInput("p2", ControlInput(throttle = 0f, steer = 0f))
+                snap = engine.step(0.016f)
+                steps++
+            }
+        }
+
+        // Complete Lap 1 -> enter Lap 2: p1 receives 1 mine for Lap 2!
+        driveP1UntilLap(2)
+        val p1Lap2 = snap.racers.first { it.playerId == "p1" }
+        assertEquals(2, p1Lap2.lap)
+        assertEquals("Crossing into Lap 2 must grant 1 mine", 1, p1Lap2.minesAvailable)
+
+        // Drop p1's Lap 2 mine -> minesAvailable becomes 0, second press in Lap 2 drops nothing
         engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f, dropMine = true))
         snap = engine.step(0.016f)
         assertEquals(0, snap.racers.first { it.playerId == "p1" }.minesAvailable)
-        val droppedMine = snap.hazards.firstOrNull { it.hazardTypeEnum == HazardType.MINE }
-        assertNotNull("Dropped flashing red mine should exist in hazards", droppedMine)
+        assertEquals(1, snap.hazards.count { it.hazardTypeEnum == HazardType.MINE })
+        val lap2MineId = snap.hazards.first { it.hazardTypeEnum == HazardType.MINE }.id
 
-        // Attempting to drop another mine does nothing
         engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f, dropMine = true))
         snap = engine.step(0.016f)
-        assertEquals(1, snap.hazards.count { it.hazardTypeEnum == HazardType.MINE })
+        assertEquals("Only 1 mine allowed during Lap 2", listOf(lap2MineId), snap.hazards.filter { it.hazardTypeEnum == HazardType.MINE }.map { it.id })
 
-        // Drive p1 around Lap 1 until crossing into Lap 2 -> must NOT receive a second mine!
-        var steps = 0
-        while (snap.racers.first { it.playerId == "p1" }.lap < 2 && steps < 2000) {
-            val r = snap.racers.first { it.playerId == "p1" }
-            val (idx, _) = TrackCatalog.nearestTrackPoint(track, r.x, r.y)
-            val target = track.centerline[(idx + 7) % track.centerline.size]
-            val desired = kotlin.math.atan2(target.y - r.y, target.x - r.x)
-            val diff = RacePhysicsEngine.normalizeAngle(desired - r.angleRad)
-            engine.submitInput("p1", ControlInput(throttle = 1f, steer = (diff / 0.6f).coerceIn(-1f, 1f)))
-            engine.submitInput("p2", ControlInput(throttle = 0f, steer = 0f))
-            snap = engine.step(0.016f)
-            steps++
-        }
+        // Complete Lap 2 -> enter Lap 3: p1 receives 1 new mine for Lap 3!
+        driveP1UntilLap(3)
+        val p1Lap3 = snap.racers.first { it.playerId == "p1" }
+        assertEquals(3, p1Lap3.lap)
+        assertEquals("Crossing into Lap 3 must grant 1 new mine for Lap 3", 1, p1Lap3.minesAvailable)
 
-        val p1Lap2 = snap.racers.first { it.playerId == "p1" }
-        assertEquals(2, p1Lap2.lap)
-        assertEquals("Strictly 1 mine per player per round — no extra mine on Lap 2", 0, p1Lap2.minesAvailable)
+        engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f, dropMine = true))
+        snap = engine.step(0.016f)
+        assertEquals(0, snap.racers.first { it.playerId == "p1" }.minesAvailable)
+        val lap3Mines = snap.hazards.filter { it.hazardTypeEnum == HazardType.MINE }
+        val newestMine = lap3Mines.maxByOrNull { it.id }!!
+        assertTrue("Dropping Lap 3 mine must spawn a brand-new mine after Lap 2 mine", newestMine.id > lap2MineId && newestMine.remainingMs >= 44_900L)
 
-        // Also verify Arena round grants 1 mine per player per round
+        // Pressing dropMine again in Lap 3 must NOT spawn another mine
+        val countAfterLap3Drop = lap3Mines.size
+        engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f, dropMine = true))
+        snap = engine.step(0.016f)
+        assertEquals("Only 1 mine allowed during Lap 3", countAfterLap3Drop, snap.hazards.count { it.hazardTypeEnum == HazardType.MINE })
+
+        // Verify Arena mode has NO mines at all
         val arena = TrackCatalog.getArenaTrack(ArenaShape.CIRCLE).copy(
             ramps = emptyList(),
             props = emptyList(),
@@ -689,13 +716,13 @@ class RaceEngineUnitTest {
         )
         repeat(68) { arenaEngine.step(0.05f) }
         var aSnap = arenaEngine.step(0.02f)
-        assertEquals(1, aSnap.racers.first { it.playerId == "p1" }.minesAvailable)
+        assertEquals("Arena mode must have 0 mines", 0, aSnap.racers.first { it.playerId == "p1" }.minesAvailable)
+        arenaEngine.grantMineForTest("p1", count = 1)
         arenaEngine.submitInput("p1", ControlInput(throttle = 0f, steer = 0f, dropMine = true))
         aSnap = arenaEngine.step(0.02f)
-        assertEquals(0, aSnap.racers.first { it.playerId == "p1" }.minesAvailable)
-        assertEquals(1, aSnap.hazards.count { it.hazardTypeEnum == HazardType.MINE })
+        assertEquals("Arena mode must never allow dropping mines", 0, aSnap.hazards.count { it.hazardTypeEnum == HazardType.MINE })
 
-        // Now test hitting a mine: spawns explosion, spins out like oil/puddle, and increments collisionSeq
+        // Now test hitting a mine in Circuit mode: spawns explosion, spins out like oil/puddle, and increments collisionSeq
         val hitEngine = RacePhysicsEngine(
             track = track.copy(props = emptyList()),
             totalLaps = 3,
@@ -706,7 +733,6 @@ class RaceEngineUnitTest {
         repeat(68) { hitEngine.step(0.05f) }
         var hSnap = hitEngine.step(0.02f)
         hitEngine.grantMineForTest("p1", count = 1)
-        // Drop mine behind p1, then position p2 to drive right onto it
         hitEngine.submitInput("p1", ControlInput(throttle = 0f, steer = 0f, dropMine = true))
         hSnap = hitEngine.step(0.02f)
         val mine = hSnap.hazards.first { it.hazardTypeEnum == HazardType.MINE }
@@ -1149,10 +1175,26 @@ class RaceEngineUnitTest {
     }
 
     @Test
-    fun builtInTracks_haveNoOverlappingInvisibleWallsOrBlockingProps_andLivingRoomGpLowerRightIsClear() {
-        for (track in TrackCatalog.allTracks()) {
+    fun builtInTracks_haveNoOverlappingInvisibleWallsOrBlockingProps_andAreVersatileAndDrivable() {
+        val allTracks = TrackCatalog.allTracks()
+        var hasClockwise = false
+        var hasCounterClockwise = false
+        val distinctWidths = mutableSetOf<Int>()
+
+        for (track in allTracks) {
             val pts = track.centerline
             val n = pts.size
+            distinctWidths.add(pts.first().halfWidth.toInt())
+
+            // Signed polygon area (screen Y-down: > 0 is clockwise, < 0 is counter-clockwise)
+            var twiceSignedArea = 0f
+            for (i in 0 until n) {
+                val a = pts[i]
+                val b = pts[(i + 1) % n]
+                twiceSignedArea += (a.x * b.y - b.x * a.y)
+            }
+            if (twiceSignedArea > 0f) hasClockwise = true
+            if (twiceSignedArea < 0f) hasCounterClockwise = true
 
             // 1. Every solid obstacle prop must stay well outside the road + kerb corridor
             for (prop in track.props.filter { it.isSolidObstacle }) {
@@ -1181,41 +1223,49 @@ class RaceEngineUnitTest {
                     }
                 }
             }
+
+            // 3. Drive every default circuit cleanly through a full lap with hard boundaries enabled
+            val cleanTrack = track.copy(ramps = emptyList())
+            val players = listOf(
+                LobbyPlayer("p1", "Tester", isHost = true, isBot = false, carType = RcCarType.APEX_FORMULA.name)
+            )
+            val engine = RacePhysicsEngine(
+                track = cleanTrack,
+                totalLaps = 1,
+                players = players,
+                rules = RaceRulesSettings(hardTrackBoundary = true, randomConditionsEnabled = false)
+            )
+            repeat(68) { engine.step(0.05f) }
+            var snap = engine.step(0.016f)
+            var visitedLowerRight = false
+            var minSpeedInLowerRight = Float.MAX_VALUE
+            var steps = 0
+            while (!snap.racers.first().finished && steps < 2000) {
+                val r = snap.racers.first()
+                if (track.id == TrackId.LIVING_ROOM_GP && r.x > 1450f && r.y > 1000f) {
+                    visitedLowerRight = true
+                    if (r.speed < minSpeedInLowerRight) minSpeedInLowerRight = r.speed
+                }
+                val proj = TrackCatalog.nearestTrackSegmentLocal(cleanTrack, r.x, r.y, r.checkpointIndex)
+                val target = cleanTrack.centerline[(proj.index + 7) % cleanTrack.centerline.size]
+                val desired = kotlin.math.atan2(target.y - r.y, target.x - r.x)
+                val diff = RacePhysicsEngine.normalizeAngle(desired - r.angleRad)
+                engine.submitInput("p1", ControlInput(throttle = 1f, steer = (diff / 0.6f).coerceIn(-1f, 1f)))
+                snap = engine.step(0.016f)
+                steps++
+            }
+            assertTrue("Car must finish a clean lap on ${track.id}", snap.racers.first().finished)
+            if (track.id == TrackId.LIVING_ROOM_GP) {
+                assertTrue("Car must traverse lower-right corner of LIVING_ROOM_GP", visitedLowerRight)
+                assertTrue(
+                    "Car must maintain clean speed through lower-right corner without slamming invisible wall ($minSpeedInLowerRight)",
+                    minSpeedInLowerRight > 280f
+                )
+            }
         }
 
-        // 3. Drive LIVING_ROOM_GP cleanly through the lower-right corner and complete a full lap
-        val livingRoom = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP).copy(ramps = emptyList())
-        val players = listOf(
-            LobbyPlayer("p1", "CornerTester", isHost = true, isBot = false, carType = RcCarType.APEX_FORMULA.name)
-        )
-        val engine = RacePhysicsEngine(
-            track = livingRoom,
-            totalLaps = 1,
-            players = players,
-            rules = RaceRulesSettings(hardTrackBoundary = true, randomConditionsEnabled = false)
-        )
-        repeat(68) { engine.step(0.05f) }
-        var snap = engine.step(0.016f)
-        var visitedLowerRight = false
-        var minSpeedInLowerRight = Float.MAX_VALUE
-        var steps = 0
-        while (!snap.racers.first().finished && steps < 1800) {
-            val r = snap.racers.first()
-            if (r.x > 1450f && r.y > 1000f) {
-                visitedLowerRight = true
-                if (r.speed < minSpeedInLowerRight) minSpeedInLowerRight = r.speed
-            }
-            val proj = TrackCatalog.nearestTrackSegmentLocal(livingRoom, r.x, r.y, r.checkpointIndex)
-            val target = livingRoom.centerline[(proj.index + 7) % livingRoom.centerline.size]
-            val desired = kotlin.math.atan2(target.y - r.y, target.x - r.x)
-            val diff = RacePhysicsEngine.normalizeAngle(desired - r.angleRad)
-            engine.submitInput("p1", ControlInput(throttle = 1f, steer = (diff / 0.6f).coerceIn(-1f, 1f)))
-            snap = engine.step(0.016f)
-            steps++
-        }
-        assertTrue("Car must traverse lower-right corner of LIVING_ROOM_GP", visitedLowerRight)
-        assertTrue("Car must maintain clean speed through lower-right corner without slamming invisible wall ($minSpeedInLowerRight)", minSpeedInLowerRight > 280f)
-        assertTrue("Car must finish LIVING_ROOM_GP lap cleanly", snap.racers.first().finished)
+        assertTrue("Built-in tracks should include both clockwise and counter-clockwise circuits", hasClockwise && hasCounterClockwise)
+        assertTrue("Built-in tracks should offer varied road widths (${distinctWidths.size} >= 4)", distinctWidths.size >= 4)
     }
 
     @Test
@@ -1260,4 +1310,479 @@ class RaceEngineUnitTest {
         assertEquals(44L, decodedInput?.ackedHostUdpSeq)
         assertEquals(0.42f, decodedInput?.input?.steer ?: 0f, 0.002f)
     }
+
+    @Test
+    fun electroShock_freezesNearbyCarsMotionlessDropsFlagAndShieldAbsorbs() {
+        val arena = TrackCatalog.getArenaTrack(ArenaShape.CIRCLE).copy(
+            ramps = emptyList(),
+            props = emptyList(),
+            itemSpawns = emptyList()
+        )
+        val players = listOf(
+            LobbyPlayer("p1", "Shocker", isHost = true, isBot = false, carType = RcCarType.VOLT_BUGGY.name),
+            LobbyPlayer("p2", "VictimOne", isHost = false, isBot = false, carType = RcCarType.APEX_FORMULA.name),
+            LobbyPlayer("p3", "ShieldedCar", isHost = false, isBot = false, carType = RcCarType.DRIFT_PHANTOM.name),
+            LobbyPlayer("p4", "DistantCar", isHost = false, isBot = false, carType = RcCarType.TUNDRA_MONSTER.name)
+        )
+        val rules = RaceRulesSettings(
+            gameMode = GameMode.ARENA.name,
+            arenaTargetMinutes = 3,
+            autoAccelerate = false,
+            randomConditionsEnabled = false
+        )
+        val engine = RacePhysicsEngine(arena, totalLaps = 3, players = players, rules = rules, random = Random(901L))
+
+        var snap = engine.step(0.05f)
+        while (snap.phase == RacePhase.COUNTDOWN.name) {
+            snap = engine.step(0.05f)
+        }
+
+        // Steer p1 and p3 within 115px of p2 (without colliding) while p4 stays far across the arena
+        var approachSteps = 0
+        while (approachSteps < 140) {
+            val r1 = snap.racers.first { it.playerId == "p1" }
+            val r2 = snap.racers.first { it.playerId == "p2" }
+            val r3 = snap.racers.first { it.playerId == "p3" }
+            val d12 = TrackCatalog.distance(r1.x, r1.y, r2.x, r2.y)
+            val d32 = TrackCatalog.distance(r3.x, r3.y, r2.x, r2.y)
+            if (d12 <= 115f && d32 <= 115f) break
+
+            if (d12 > 105f) {
+                val desired1 = kotlin.math.atan2(r2.y - r1.y, r2.x - r1.x)
+                val diff1 = RacePhysicsEngine.normalizeAngle(desired1 - r1.angleRad)
+                engine.submitInput("p1", ControlInput(throttle = 0.85f, steer = (diff1 / 0.5f).coerceIn(-1f, 1f)))
+            } else {
+                engine.submitInput("p1", ControlInput(throttle = 0f, steer = 0f))
+            }
+
+            if (d32 > 105f) {
+                val desired3 = kotlin.math.atan2(r2.y - r3.y, r2.x - r3.x)
+                val diff3 = RacePhysicsEngine.normalizeAngle(desired3 - r3.angleRad)
+                engine.submitInput("p3", ControlInput(throttle = 0.85f, steer = (diff3 / 0.5f).coerceIn(-1f, 1f)))
+            } else {
+                engine.submitInput("p3", ControlInput(throttle = 0f, steer = 0f))
+            }
+
+            engine.submitInput("p2", ControlInput(throttle = 0f, steer = 0f))
+            engine.submitInput("p4", ControlInput(throttle = 0f, steer = 0f))
+            snap = engine.step(0.03f)
+            approachSteps++
+        }
+
+        val r1Near = snap.racers.first { it.playerId == "p1" }
+        val r2Near = snap.racers.first { it.playerId == "p2" }
+        val r3Near = snap.racers.first { it.playerId == "p3" }
+        assertTrue(
+            "p1 and p2 should be within Electro Shock 155px radius",
+            TrackCatalog.distance(r1Near.x, r1Near.y, r2Near.x, r2Near.y) < 145f
+        )
+        assertTrue(
+            "p1 and p3 should be within Electro Shock 155px radius",
+            TrackCatalog.distance(r1Near.x, r1Near.y, r3Near.x, r3Near.y) < 145f
+        )
+
+        // Give p2 the Arena flag, give p3 an active Shield, and give p1 Electro Shock to trigger via input
+        engine.setFlagStateForTest(r2Near.x, r2Near.y, carrierId = "p2")
+        engine.givePowerUpForTest("p3", PowerUpType.SHIELD, triggerImmediately = true)
+        engine.givePowerUpForTest("p1", PowerUpType.ELECTRO_SHOCK, triggerImmediately = false)
+        engine.submitInput("p1", ControlInput(throttle = 0f, steer = 0f, usePowerUp = true))
+        snap = engine.step(0.04f)
+
+        val p1AfterShock = snap.racers.first { it.playerId == "p1" }
+        val p2AfterShock = snap.racers.first { it.playerId == "p2" }
+        val p3AfterShock = snap.racers.first { it.playerId == "p3" }
+        val p4AfterShock = snap.racers.first { it.playerId == "p4" }
+
+        assertTrue("Activating car must have ~4s Electro Shock aura (${p1AfterShock.electroShockAuraMs})", p1AfterShock.electroShockAuraMs >= 3900L)
+        assertTrue("Nearby unshielded car p2 must be electro-paralyzed (${p2AfterShock.electroParalyzedMs})", p2AfterShock.electroParalyzedMs >= 2700L)
+        assertEquals("Paralyzed car velocity must immediately zero out", 0f, p2AfterShock.speed, 0.01f)
+        assertEquals("Paralyzed Arena flag carrier must drop the flag", null, snap.arenaFlag?.carrierId)
+        assertEquals("Shielded car p3 must not be paralyzed", 0L, p3AfterShock.electroParalyzedMs)
+        assertEquals("Shield on p3 must break when absorbing Electro Shock", 0L, p3AfterShock.shieldMs)
+        assertEquals("Distant car p4 outside proximity must be unaffected", 0L, p4AfterShock.electroParalyzedMs)
+
+        // Hold full throttle + steering on paralyzed p2 for 1.2s -> p2 must stay completely motionless!
+        val frozenX = p2AfterShock.x
+        val frozenY = p2AfterShock.y
+        repeat(30) {
+            engine.submitInput("p1", ControlInput(throttle = -0.8f, steer = 0f)) // back p1 away so aura doesn't re-hit
+            engine.submitInput("p2", ControlInput(throttle = 1f, steer = 1f))
+            snap = engine.step(0.04f)
+        }
+        val p2WhileParalyzed = snap.racers.first { it.playerId == "p2" }
+        assertTrue("p2 should still be paralyzed after 1.2s (${p2WhileParalyzed.electroParalyzedMs})", p2WhileParalyzed.electroParalyzedMs > 1000L)
+        assertEquals("Paralyzed car speed must remain 0", 0f, p2WhileParalyzed.speed, 0.01f)
+        assertEquals("Paralyzed car X must remain motionless", frozenX, p2WhileParalyzed.x, 0.01f)
+        assertEquals("Paralyzed car Y must remain motionless", frozenY, p2WhileParalyzed.y, 0.01f)
+
+        // Wait for paralysis to expire (~1.8s more), then verify p2 accelerates normally again
+        repeat(50) {
+            engine.submitInput("p1", ControlInput(throttle = 0f, steer = 0f))
+            engine.submitInput("p2", ControlInput(throttle = 1f, steer = 0f))
+            snap = engine.step(0.05f)
+        }
+        val p2Recovered = snap.racers.first { it.playerId == "p2" }
+        assertEquals(0L, p2Recovered.electroParalyzedMs)
+        assertTrue("Recovered car must regain forward speed (${p2Recovered.speed} > 80f)", p2Recovered.speed > 80f)
+    }
+
+    @Test
+    fun stuntsMode_providesStartingNitroParksSpectatorsAndRotatesAllFourStuntsInRandomOrder() {
+        val players = listOf(
+            LobbyPlayer("p1", "Alice", isHost = true, isBot = false, carType = RcCarType.APEX_FORMULA.name),
+            LobbyPlayer("p2", "Bob", isHost = false, isBot = false, carType = RcCarType.VOLT_BUGGY.name),
+            LobbyPlayer("b1", "BotRex", isHost = false, isBot = true, carType = RcCarType.DRIFT_PHANTOM.name)
+        )
+        val rules = RaceRulesSettings(
+            gameMode = GameMode.STUNTS.name,
+            autoAccelerate = false,
+            randomConditionsEnabled = false
+        )
+
+        // Verify 4 distinct stunts are generated and shuffled across seeds
+        val seqA = RacePhysicsEngine(
+            track = TrackCatalog.getStuntTrack(com.example.model.StuntVariant.LONG_JUMP),
+            totalLaps = 3,
+            players = players,
+            rules = rules,
+            random = Random(10L)
+        ).stuntSequence()
+        val sequencesSeen = (1..8).map { seed ->
+            RacePhysicsEngine(
+                track = TrackCatalog.getStuntTrack(com.example.model.StuntVariant.LONG_JUMP),
+                totalLaps = 3,
+                players = players,
+                rules = rules,
+                random = Random(seed * 137L)
+            ).stuntSequence()
+        }.toSet()
+
+        assertEquals(4, seqA.size)
+        assertEquals(com.example.model.StuntVariant.entries.toSet(), seqA.toSet())
+        assertTrue("Stunt gauntlets should play in randomized orders across runs", sequencesSeen.size >= 3)
+
+        val engine = RacePhysicsEngine(
+            track = TrackCatalog.getStuntTrack(com.example.model.StuntVariant.LONG_JUMP),
+            totalLaps = 3,
+            players = players,
+            rules = rules,
+            random = Random(42L)
+        )
+        var snap = engine.step(0.05f)
+        while (snap.phase == RacePhase.COUNTDOWN.name) {
+            snap = engine.step(0.05f)
+        }
+        assertEquals(RacePhase.RACING.name, snap.phase)
+        assertEquals(GameMode.STUNTS.name, snap.gameMode)
+
+        // Check initial Turn 0: p1 is active on shared runway with 1x TURBO_NITRO; p2 & b1 are spectators at y=235
+        val p1Turn0 = snap.racers.first { it.playerId == "p1" }
+        val p2Spec0 = snap.racers.first { it.playerId == "p2" }
+        val b1Spec0 = snap.racers.first { it.playerId == "b1" }
+        assertEquals("p1", snap.stuntState?.activePlayerId)
+        assertEquals(PowerUpType.TURBO_NITRO.name, p1Turn0.heldPowerUp)
+        assertEquals(0, p1Turn0.minesAvailable)
+        assertEquals(230f, p1Turn0.x, 1f)
+        assertEquals(700f, p1Turn0.y, 1f)
+        assertEquals(235f, p2Spec0.y, 1f)
+        assertEquals(235f, b1Spec0.y, 1f)
+        assertEquals(null, p2Spec0.heldPowerUp)
+
+        // Submitting throttle/steer for spectator p2 must NOT move p2 out of the spectator paddock!
+        repeat(10) {
+            engine.submitInput("p2", ControlInput(throttle = 1f, steer = 1f))
+            snap = engine.step(0.05f)
+        }
+        val p2StillSpectator = snap.racers.first { it.playerId == "p2" }
+        assertEquals("Spectator car must remain parked at y=235 during another player's turn", 235f, p2StillSpectator.y, 0.5f)
+        assertEquals(0f, p2StillSpectator.speed, 0.01f)
+
+        // Step through all 4 stunt rounds x 3 players = 12 turns and verify turn-based order & starting Nitro every turn
+        val visitedTurns = mutableListOf<Triple<Int, String, String>>()
+        var safetyLoops = 0
+        while (snap.phase != RacePhase.FINISHED.name && safetyLoops < 12_000) {
+            val st = snap.stuntState!!
+            val turnKey = Triple(st.roundIndex, st.activePlayerId, st.variant)
+            if (visitedTurns.lastOrNull() != turnKey) {
+                visitedTurns.add(turnKey)
+                val activeRacer = snap.racers.first { it.playerId == st.activePlayerId }
+                assertEquals(
+                    "Every player must start their stunt turn with 1x TURBO_NITRO (${turnKey})",
+                    PowerUpType.TURBO_NITRO.name,
+                    activeRacer.heldPowerUp
+                )
+            }
+            // Drive active player forward (bots drive & fire Nitro automatically; humans get throttle + Nitro past slalom)
+            val activeRacer = snap.racers.first { it.playerId == st.activePlayerId }
+            if (!activeRacer.isBot) {
+                val targetY = when {
+                    activeRacer.x < 460f -> 728f
+                    activeRacer.x < 610f -> 672f
+                    activeRacer.x < 760f -> 728f
+                    activeRacer.x < 910f -> 676f
+                    else -> 700f
+                }
+                val desired = kotlin.math.atan2(targetY - activeRacer.y, (activeRacer.x + 140f) - activeRacer.x)
+                val diff = RacePhysicsEngine.normalizeAngle(desired - activeRacer.angleRad)
+                val popNitro = activeRacer.x >= 950f && activeRacer.heldPowerUp == PowerUpType.TURBO_NITRO.name
+                engine.submitInput(
+                    activeRacer.playerId,
+                    ControlInput(throttle = 1f, steer = (diff / 0.5f).coerceIn(-1f, 1f), usePowerUp = popNitro)
+                )
+            }
+            snap = engine.step(0.05f)
+            safetyLoops++
+        }
+
+        assertEquals("Stunt gauntlet should finish after all 4 rounds x 3 players", RacePhase.FINISHED.name, snap.phase)
+        assertEquals("Exactly 12 turns (4 stunts x 3 players) must be played", 12, visitedTurns.size)
+        assertEquals(
+            "Each round must cycle p1 -> p2 -> b1",
+            listOf("p1", "p2", "b1", "p1", "p2", "b1", "p1", "p2", "b1", "p1", "p2", "b1"),
+            visitedTurns.map { it.second }
+        )
+        assertEquals(
+            "All 4 stunt variants must be played across the 4 rounds",
+            com.example.model.StuntVariant.entries.map { it.name }.toSet(),
+            visitedTurns.map { it.third }.toSet()
+        )
+    }
+
+    @Test
+    fun stuntsMode_scoresLongJumpSoccerGoalBowlingAndGolfHoles() {
+        val twoPlayers = listOf(
+            LobbyPlayer("p1", "DriverA", isHost = true, isBot = false, carType = RcCarType.APEX_FORMULA.name),
+            LobbyPlayer("p2", "DriverB", isHost = false, isBot = false, carType = RcCarType.VOLT_BUGGY.name)
+        )
+        val stuntRules = RaceRulesSettings(
+            gameMode = GameMode.STUNTS.name,
+            autoAccelerate = false,
+            randomConditionsEnabled = false
+        )
+
+        // 1) LONG JUMP: faster ramp launch jumps farther & scores higher!
+        val jumpEngine = RacePhysicsEngine(
+            track = TrackCatalog.getStuntTrack(com.example.model.StuntVariant.LONG_JUMP),
+            totalLaps = 1,
+            players = twoPlayers,
+            rules = stuntRules,
+            random = Random(11L),
+            stuntSequenceOverride = listOf(com.example.model.StuntVariant.LONG_JUMP)
+        )
+        var jSnap = jumpEngine.step(0.05f)
+        while (jSnap.phase == RacePhase.COUNTDOWN.name) jSnap = jumpEngine.step(0.05f)
+
+        // p1 moderate ramp launch
+        jumpEngine.positionActiveStuntRacerForTest(x = 1340f, y = 700f, vx = 320f, vy = 0f)
+        while (jSnap.stuntState?.turnPhase == "DRIVING") {
+            jSnap = jumpEngine.step(0.04f)
+        }
+        val p1JumpScore = jSnap.stuntState?.lastAttemptScore ?: 0
+        assertTrue("Moderate jump should score positive distance points ($p1JumpScore > 0)", p1JumpScore > 0)
+
+        // Advance to p2's turn -> high-speed Nitro ramp launch
+        while (jSnap.stuntState?.activePlayerId == "p1") {
+            jSnap = jumpEngine.step(0.05f)
+        }
+        jumpEngine.positionActiveStuntRacerForTest(x = 1340f, y = 700f, vx = 640f, vy = 0f)
+        while (jSnap.stuntState?.turnPhase == "DRIVING") {
+            jSnap = jumpEngine.step(0.04f)
+        }
+        val p2JumpScore = jSnap.stuntState?.lastAttemptScore ?: 0
+        assertTrue(
+            "Faster ramp jump ($p2JumpScore) must jump farther and outscore slower jump ($p1JumpScore)",
+            p2JumpScore > p1JumpScore + 80
+        )
+
+        // 2) SOCCER BALL GOAL: center bullseye scores 1000, side goal scores lower!
+        val soccerEngine = RacePhysicsEngine(
+            track = TrackCatalog.getStuntTrack(com.example.model.StuntVariant.SOCCER_BALL),
+            totalLaps = 1,
+            players = twoPlayers,
+            rules = stuntRules,
+            random = Random(22L),
+            stuntSequenceOverride = listOf(com.example.model.StuntVariant.SOCCER_BALL)
+        )
+        var sSnap = soccerEngine.step(0.05f)
+        while (sSnap.phase == RacePhase.COUNTDOWN.name) sSnap = soccerEngine.step(0.05f)
+
+        // p1 strikes ball dead-center along y = 700 -> Bullseye 1000 pts
+        soccerEngine.positionActiveStuntRacerForTest(x = 1765f, y = 700f, vx = 580f, vy = 0f)
+        while (sSnap.stuntState?.turnPhase == "DRIVING") {
+            sSnap = soccerEngine.step(0.03f)
+        }
+        assertEquals("Center goal strike must award maximum 1000 pts", 1000, sSnap.stuntState?.lastAttemptScore)
+
+        // Advance to p2 -> angled hit sending ball into outer side of goal (lower score than center)
+        while (sSnap.stuntState?.activePlayerId == "p1") {
+            sSnap = soccerEngine.step(0.05f)
+        }
+        soccerEngine.positionActiveStuntRacerForTest(x = 1775f, y = 668f, vx = 560f, vy = 175f)
+        while (sSnap.stuntState?.turnPhase == "DRIVING") {
+            sSnap = soccerEngine.step(0.03f)
+        }
+        val sideGoalPts = sSnap.stuntState?.lastAttemptScore ?: 0
+        assertTrue(
+            "Off-center goal strike ($sideGoalPts) must score goal points > 100 but < 1000 center bullseye",
+            sideGoalPts in listOf(250, 500, 750)
+        )
+
+        // 3) BOWLING: 9 pins in diamond formation -> knocking pins awards 100/pin + 100 strike bonus = 1000!
+        val bowlEngine = RacePhysicsEngine(
+            track = TrackCatalog.getStuntTrack(com.example.model.StuntVariant.BOWLING),
+            totalLaps = 1,
+            players = listOf(twoPlayers.first()),
+            rules = stuntRules,
+            random = Random(33L),
+            stuntSequenceOverride = listOf(com.example.model.StuntVariant.BOWLING)
+        )
+        var bSnap = bowlEngine.step(0.05f)
+        while (bSnap.phase == RacePhase.COUNTDOWN.name) bSnap = bowlEngine.step(0.05f)
+        assertEquals("Bowling stunt must set up 9 standing pins", 9, bSnap.stuntState?.pins?.size)
+        assertTrue(bSnap.stuntState?.pins?.none { it.knocked } == true)
+
+        // Smash through the 9-pin rack; sweep any remaining standing pins so all 9 knock for a Strike!
+        bowlEngine.positionActiveStuntRacerForTest(x = 1825f, y = 700f, vx = 720f, vy = 0f)
+        var bTicks = 0
+        while (bSnap.stuntState?.turnPhase == "DRIVING" && bTicks < 60) {
+            val standing = bSnap.stuntState?.pins?.firstOrNull { !it.knocked }
+            if (standing != null && bTicks > 3) {
+                bowlEngine.positionActiveStuntRacerForTest(x = standing.x - 10f, y = standing.y, vx = 520f, vy = 0f)
+            }
+            bSnap = bowlEngine.step(0.03f)
+            bTicks++
+        }
+        assertEquals("Knocking all 9 bowling pins must award 1000 strike points", 1000, bSnap.stuntState?.lastAttemptScore)
+
+        // 4) GOLF HOLES: 6 random numbered holes (#1..#6) of smaller & bigger sizes with inverse point values!
+        val golfEngine = RacePhysicsEngine(
+            track = TrackCatalog.getStuntTrack(com.example.model.StuntVariant.GOLF_HOLES),
+            totalLaps = 1,
+            players = listOf(twoPlayers.first()),
+            rules = stuntRules,
+            random = Random(44L),
+            stuntSequenceOverride = listOf(com.example.model.StuntVariant.GOLF_HOLES)
+        )
+        var gSnap = golfEngine.step(0.05f)
+        while (gSnap.phase == RacePhase.COUNTDOWN.name) gSnap = golfEngine.step(0.05f)
+        val holes = gSnap.stuntState?.golfHoles.orEmpty()
+        assertEquals(listOf(1, 2, 3, 4, 5, 6), holes.map { it.number }.sorted())
+        val smallestHole = holes.minByOrNull { it.radius }!!
+        val biggestHole = holes.maxByOrNull { it.radius }!!
+        assertTrue(
+            "Smaller golf hole (${smallestHole.radius}px -> ${smallestHole.points}) must award more points than bigger hole (${biggestHole.radius}px -> ${biggestHole.points})",
+            smallestHole.radius < biggestHole.radius && smallestHole.points > biggestHole.points
+        )
+
+        golfEngine.positionActiveStuntRacerForTest(
+            x = smallestHole.x,
+            y = smallestHole.y,
+            vx = 40f,
+            vy = 0f,
+            jumpZ = 0f
+        )
+        gSnap = golfEngine.step(0.04f)
+        assertEquals("SCORED", gSnap.stuntState?.turnPhase)
+        assertEquals("Landing in smallest hole must award its exact high score", smallestHole.points, gSnap.stuntState?.lastAttemptScore)
+        assertTrue(
+            "Captured golf hole must be marked captured in snapshot",
+            gSnap.stuntState?.golfHoles?.first { it.number == smallestHole.number }?.captured == true
+        )
+    }
+
+    @Test
+    fun telemetryCodec_roundTripsElectroShockHybridAndStuntState() {
+        val roster = listOf(
+            LobbyPlayer("p1", "Host", isHost = true, carType = RcCarType.VOLT_BUGGY.name),
+            LobbyPlayer("p2", "Guest", isHost = false, carType = RcCarType.APEX_FORMULA.name)
+        )
+
+        // 1. Round-trip Stunt + Hybrid Tour state (Golf Holes & pins)
+        val golfTrack = TrackCatalog.getStuntTrack(com.example.model.StuntVariant.GOLF_HOLES)
+        val stuntEngine = RacePhysicsEngine(
+            track = golfTrack,
+            totalLaps = 1,
+            players = roster,
+            rules = RaceRulesSettings(gameMode = GameMode.STUNTS.name),
+            random = Random(77L),
+            stuntSequenceOverride = listOf(com.example.model.StuntVariant.GOLF_HOLES),
+            isHybridTour = true,
+            hybridStageNumber = 3,
+            nextHybridModeName = GameMode.RACE.name
+        )
+        var sSnap = stuntEngine.step(0.05f)
+        while (sSnap.phase == RacePhase.COUNTDOWN.name) sSnap = stuntEngine.step(0.05f)
+
+        val encodedStuntLine = String(RaceTelemetryCodec.encodeSnapshot(seq = 301L, snap = sSnap), Charsets.UTF_8)
+        assertFalse("Compact TCP/UDP snapshot line must not contain embedded newlines", encodedStuntLine.contains('\n'))
+        val decodedStunt = RaceTelemetryCodec.decodeSnapshot(
+            text = encodedStuntLine,
+            roster = roster,
+            previousSnapshot = null,
+            activeTrack = golfTrack
+        )
+        assertNotNull(decodedStunt)
+        assertEquals(GameMode.STUNTS.name, decodedStunt?.snapshot?.gameMode)
+        assertEquals(true, decodedStunt?.snapshot?.isHybridTour)
+        assertEquals(3, decodedStunt?.snapshot?.hybridStageNumber)
+        assertEquals(GameMode.RACE.name, decodedStunt?.snapshot?.nextHybridMode)
+        assertEquals(com.example.model.StuntVariant.GOLF_HOLES.name, decodedStunt?.snapshot?.stuntState?.variant)
+        assertEquals(6, decodedStunt?.snapshot?.stuntState?.golfHoles?.size)
+        assertEquals(PowerUpType.TURBO_NITRO.name, decodedStunt?.snapshot?.racers?.first { it.playerId == "p1" }?.heldPowerUp)
+
+        // 2. Round-trip Electro Shock aura & paralysis timers
+        val baseSnap = sSnap.copy(
+            racers = sSnap.racers.mapIndexed { idx, r ->
+                if (idx == 0) r.copy(electroShockAuraMs = 3650L)
+                else r.copy(electroParalyzedMs = 2450L)
+            }
+        )
+        val decodedShock = RaceTelemetryCodec.decodeSnapshot(
+            text = String(RaceTelemetryCodec.encodeSnapshot(seq = 302L, snap = baseSnap), Charsets.UTF_8),
+            roster = roster,
+            previousSnapshot = null,
+            activeTrack = golfTrack
+        )
+        assertEquals(3650L, decodedShock?.snapshot?.racers?.first { it.playerId == "p1" }?.electroShockAuraMs)
+        assertEquals(2450L, decodedShock?.snapshot?.racers?.first { it.playerId == "p2" }?.electroParalyzedMs)
+    }
+
+    @Test
+    fun hybridMode_rotatesIncludedGameTypesAndSupportsRandomOrder() {
+        val allThreeRotation = RaceRulesSettings(
+            gameMode = GameMode.HYBRID.name,
+            hybridIncludeCircuit = true,
+            hybridIncludeArena = true,
+            hybridIncludeStunts = true,
+            hybridRandomOrder = false
+        )
+        assertEquals(GameMode.RACE, WifiP2pRaceManager.resolveHybridStageMode(allThreeRotation, stageIndexZeroBased = 0))
+        assertEquals(GameMode.ARENA, WifiP2pRaceManager.resolveHybridStageMode(allThreeRotation, stageIndexZeroBased = 1))
+        assertEquals(GameMode.STUNTS, WifiP2pRaceManager.resolveHybridStageMode(allThreeRotation, stageIndexZeroBased = 2))
+        assertEquals(GameMode.RACE, WifiP2pRaceManager.resolveHybridStageMode(allThreeRotation, stageIndexZeroBased = 3))
+
+        val circuitAndStuntsOnly = allThreeRotation.copy(hybridIncludeArena = false)
+        assertEquals(listOf(GameMode.RACE, GameMode.STUNTS), circuitAndStuntsOnly.enabledHybridModes())
+        assertEquals(GameMode.RACE, WifiP2pRaceManager.resolveHybridStageMode(circuitAndStuntsOnly, stageIndexZeroBased = 0))
+        assertEquals(GameMode.STUNTS, WifiP2pRaceManager.resolveHybridStageMode(circuitAndStuntsOnly, stageIndexZeroBased = 1))
+        assertEquals(GameMode.RACE, WifiP2pRaceManager.resolveHybridStageMode(circuitAndStuntsOnly, stageIndexZeroBased = 2))
+
+        val randomTwoModes = circuitAndStuntsOnly.copy(hybridRandomOrder = true)
+        val rng = Random(555L)
+        var prev: GameMode? = null
+        repeat(10) { idx ->
+            val next = WifiP2pRaceManager.resolveHybridStageMode(
+                rules = randomTwoModes,
+                stageIndexZeroBased = idx,
+                previousMode = prev,
+                random = rng
+            )
+            assertTrue("Random hybrid play must only choose included modes", next in setOf(GameMode.RACE, GameMode.STUNTS))
+            if (prev != null) {
+                assertTrue("With 2+ modes enabled, random hybrid order should alternate cleanly instead of repeating", next != prev)
+            }
+            prev = next
+        }
+    }
 }
+

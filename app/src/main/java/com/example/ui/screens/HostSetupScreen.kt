@@ -30,10 +30,12 @@ import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SportsScore
 import androidx.compose.material.icons.filled.Thunderstorm
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -41,6 +43,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -64,6 +67,7 @@ import com.example.model.WinCondition
 fun HostSetupScreen(
     initialRules: RaceRulesSettings,
     onCreateLobby: (RaceRulesSettings) -> Unit,
+    onOpenHybridSetup: (RaceRulesSettings) -> Unit = {},
     onBack: () -> Unit
 ) {
     BackHandler { onBack() }
@@ -107,7 +111,7 @@ fun HostSetupScreen(
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Text(
-                        text = "Choose Circuit Race or Arena Hold-the-Flag before opening lobby",
+                        text = "Choose Circuit, Arena, Stunts, or Hybrid Tour before opening lobby",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -122,7 +126,7 @@ fun HostSetupScreen(
                     .padding(horizontal = 16.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Play Mode Selector Card (Circuit Race vs Arena)
+                // Play Mode Selector Card (2x2 Grid: Circuit Race, Arena, Stunts, Hybrid Tour)
                 Card(
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceContainer
@@ -139,7 +143,12 @@ fun HostSetupScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Icon(
-                                if (selectedMode == GameMode.ARENA) Icons.Default.Flag else Icons.Default.SportsScore,
+                                when (selectedMode) {
+                                    GameMode.ARENA -> Icons.Default.Flag
+                                    GameMode.STUNTS -> Icons.Default.FlightTakeoff
+                                    GameMode.HYBRID -> Icons.Default.Shuffle
+                                    GameMode.RACE -> Icons.Default.SportsScore
+                                },
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.primary
                             )
@@ -150,73 +159,77 @@ fun HostSetupScreen(
                             )
                         }
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            GameMode.entries.forEach { mode ->
-                                val isSelected = selectedMode == mode
-                                Surface(
-                                    color = if (isSelected) {
-                                        MaterialTheme.colorScheme.primaryContainer
-                                    } else {
-                                        MaterialTheme.colorScheme.surfaceContainerHigh
-                                    },
-                                    shape = RoundedCornerShape(16.dp),
-                                    border = if (isSelected) {
-                                        BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
-                                    } else {
-                                        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                                    },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .clickable {
-                                            draft = draft.copy(gameMode = mode.name)
-                                        }
-                                        .testTag("mode_option_${mode.name}")
-                                ) {
-                                    Column(
-                                        modifier = Modifier.padding(14.dp),
-                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        GameMode.entries.chunked(2).forEach { modePair ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                modePair.forEach { mode ->
+                                    val isSelected = selectedMode == mode
+                                    val modeIcon = when (mode) {
+                                        GameMode.ARENA -> Icons.Default.Flag
+                                        GameMode.STUNTS -> Icons.Default.FlightTakeoff
+                                        GameMode.HYBRID -> Icons.Default.Shuffle
+                                        GameMode.RACE -> Icons.Default.SportsScore
+                                    }
+                                    Surface(
+                                        color = if (isSelected) {
+                                            MaterialTheme.colorScheme.primaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceContainerHigh
+                                        },
+                                        shape = RoundedCornerShape(16.dp),
+                                        border = if (isSelected) {
+                                            BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+                                        } else {
+                                            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                        },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .clickable {
+                                                draft = draft.copy(gameMode = mode.name)
+                                            }
+                                            .testTag("mode_option_${mode.name}")
                                     ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        Column(
+                                            modifier = Modifier.padding(12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp)
                                         ) {
-                                            Icon(
-                                                imageVector = if (mode == GameMode.ARENA) {
-                                                    Icons.Default.Flag
-                                                } else {
-                                                    Icons.Default.SportsScore
-                                                },
-                                                contentDescription = null,
-                                                tint = if (isSelected) {
-                                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                                } else {
-                                                    MaterialTheme.colorScheme.primary
-                                                },
-                                                modifier = Modifier.size(18.dp)
-                                            )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Icon(
+                                                    imageVector = modeIcon,
+                                                    contentDescription = null,
+                                                    tint = if (isSelected) {
+                                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                                    } else {
+                                                        MaterialTheme.colorScheme.primary
+                                                    },
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                                Text(
+                                                    text = mode.displayName,
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    color = if (isSelected) {
+                                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                                    } else {
+                                                        MaterialTheme.colorScheme.onSurface
+                                                    }
+                                                )
+                                            }
                                             Text(
-                                                text = mode.displayName,
-                                                style = MaterialTheme.typography.titleMedium,
+                                                text = mode.description,
+                                                style = MaterialTheme.typography.bodySmall,
                                                 color = if (isSelected) {
-                                                    MaterialTheme.colorScheme.onPrimaryContainer
+                                                    MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
                                                 } else {
-                                                    MaterialTheme.colorScheme.onSurface
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
                                                 }
                                             )
                                         }
-                                        Text(
-                                            text = mode.description,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = if (isSelected) {
-                                                MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
-                                            } else {
-                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                            }
-                                        )
                                     }
                                 }
                             }
@@ -224,7 +237,130 @@ fun HostSetupScreen(
                     }
                 }
 
-                if (selectedMode == GameMode.ARENA) {
+                when (selectedMode) {
+                    GameMode.STUNTS -> {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainer
+                            ),
+                            shape = RoundedCornerShape(22.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.FlightTakeoff,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.secondary
+                                    )
+                                    Text(
+                                        text = "4-Stunt Turn-Based Gauntlet",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Text(
+                                    text = "Drivers take turns one after another while everyone else spectates live! Each turn starts with 1x Turbo Nitro on the slalom boost runway before launching into all 4 stunts in random order: Mega Long Jump, Rocket Goal Strike, 9-Pin Bowling & RC Golf.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    GameMode.HYBRID -> {
+                        val enabledCount = listOf(
+                            draft.hybridIncludeCircuit,
+                            draft.hybridIncludeArena,
+                            draft.hybridIncludeStunts
+                        ).count { it }
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainer
+                            ),
+                            shape = RoundedCornerShape(22.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.Shuffle,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.secondary
+                                    )
+                                    Text(
+                                        text = "Hybrid Event Game Types",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                Text(
+                                    text = "All players rotate through your chosen game types stage after stage — e.g. Circuit map, then Arena battle, then Stunt event!",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    FilterChip(
+                                        selected = draft.hybridIncludeCircuit,
+                                        onClick = {
+                                            if (!draft.hybridIncludeCircuit || enabledCount > 1) {
+                                                draft = draft.copy(hybridIncludeCircuit = !draft.hybridIncludeCircuit)
+                                            }
+                                        },
+                                        label = { Text("Circuit") },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    FilterChip(
+                                        selected = draft.hybridIncludeArena,
+                                        onClick = {
+                                            if (!draft.hybridIncludeArena || enabledCount > 1) {
+                                                draft = draft.copy(hybridIncludeArena = !draft.hybridIncludeArena)
+                                            }
+                                        },
+                                        label = { Text("Arena") },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    FilterChip(
+                                        selected = draft.hybridIncludeStunts,
+                                        onClick = {
+                                            if (!draft.hybridIncludeStunts || enabledCount > 1) {
+                                                draft = draft.copy(hybridIncludeStunts = !draft.hybridIncludeStunts)
+                                            }
+                                        },
+                                        label = { Text("Stunts") },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                OutlinedButton(
+                                    onClick = { onOpenHybridSetup(draft) },
+                                    shape = RoundedCornerShape(14.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp)
+                                        .testTag("open_hybrid_setup_button")
+                                ) {
+                                    Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Open Hybrid Event Setup")
+                                }
+                            }
+                        }
+                    }
+                    GameMode.ARENA -> {
                     // Arena Winning Condition: Flag Hold Duration in Minutes
                     Card(
                         colors = CardDefaults.cardColors(
@@ -277,7 +413,8 @@ fun HostSetupScreen(
                             }
                         }
                     }
-                } else {
+                    }
+                    GameMode.RACE -> {
                     // Circuit Race Winning Condition Card
                     Card(
                         colors = CardDefaults.cardColors(
@@ -458,6 +595,7 @@ fun HostSetupScreen(
                             }
                         }
                     }
+                    }
                 }
 
                 // General Car Speed Selector Card (Low, Medium, Fast — default Fast)
@@ -582,10 +720,11 @@ fun HostSetupScreen(
                         Icon(Icons.Default.Hub, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (selectedMode == GameMode.ARENA) {
-                                "Open Arena Wi-Fi Lobby"
-                            } else {
-                                "Open Wi-Fi Lobby"
+                            text = when (selectedMode) {
+                                GameMode.ARENA -> "Open Arena Wi-Fi Lobby"
+                                GameMode.STUNTS -> "Open Stunts Wi-Fi Lobby"
+                                GameMode.HYBRID -> "Open Hybrid Tour Lobby"
+                                GameMode.RACE -> "Open Wi-Fi Lobby"
                             },
                             style = MaterialTheme.typography.labelLarge
                         )

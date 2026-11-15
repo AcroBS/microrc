@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.HowToVote
 import androidx.compose.material.icons.filled.PlayArrow
@@ -86,18 +87,27 @@ fun ResultsScreen(
     }
 
     val isArena = results?.gameMode == GameMode.ARENA.name
+    val isStunts = results?.gameMode == GameMode.STUNTS.name
+    val isHybridTour = results?.isHybridTour == true
+    val nextHybridModeLabel = results?.nextHybridMode?.let {
+        runCatching { GameMode.valueOf(it).displayName }.getOrNull()
+    }
     val arenaTargetMs = (results?.arenaTargetMs ?: 120_000L).coerceAtLeast(1000L)
     val sortedRacers = results?.racers.orEmpty().sortedBy { it.rank }
     val leaderTime = sortedRacers.firstOrNull()?.finishTimeMs ?: 0L
     val overallBestLap = sortedRacers.mapNotNull { it.bestLapMs }.minOrNull()
-    val trackName = if (isArena) {
-        results?.arenaShape?.let {
-            runCatching { ArenaShape.valueOf(it).displayName }.getOrNull()
-        } ?: "Battle Arena"
-    } else {
-        lobby?.activeCustomTrack?.name ?: runCatching {
-            TrackId.valueOf(results?.trackId ?: TrackId.LIVING_ROOM_GP.name).displayName
-        }.getOrDefault("Circuit")
+    val trackName = when {
+        isStunts -> "4-Stunt Gauntlet"
+        isArena -> {
+            results?.arenaShape?.let {
+                runCatching { ArenaShape.valueOf(it).displayName }.getOrNull()
+            } ?: "Battle Arena"
+        }
+        else -> {
+            lobby?.activeCustomTrack?.name ?: runCatching {
+                TrackId.valueOf(results?.trackId ?: TrackId.LIVING_ROOM_GP.name).displayName
+            }.getOrDefault("Circuit")
+        }
     }
     val winCond = runCatching {
         WinCondition.valueOf(results?.winCondition ?: WinCondition.FIRST_TO_FINISH.name)
@@ -132,7 +142,11 @@ fun ResultsScreen(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                if (isArena) Icons.Default.Flag else Icons.Default.EmojiEvents,
+                                when {
+                                    isStunts -> Icons.Default.FlightTakeoff
+                                    isArena -> Icons.Default.Flag
+                                    else -> Icons.Default.EmojiEvents
+                                },
                                 contentDescription = null,
                                 tint = GoldTrophy,
                                 modifier = Modifier.size(28.dp)
@@ -140,23 +154,39 @@ fun ResultsScreen(
                         }
                     }
                     Column {
+                        if (isHybridTour) {
+                            Text(
+                                text = "HYBRID TOUR • STAGE #${results?.hybridStageNumber ?: 1}" +
+                                    (nextHybridModeLabel?.let { " • NEXT: ${it.uppercase()}" } ?: ""),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.tertiary
+                            )
+                        }
                         Text(
-                            text = if (isArena) "ARENA CHAMPION" else "CHECKERED FLAG",
+                            text = when {
+                                isStunts -> "STUNT CHAMPION"
+                                isArena -> "ARENA CHAMPION"
+                                else -> "CHECKERED FLAG"
+                            },
                             style = MaterialTheme.typography.headlineLarge,
                             color = MaterialTheme.colorScheme.onBackground
                         )
                         val suddenDeathWave = results?.arenaSuddenDeathStage ?: 0
-                        val modeDesc = if (isArena) {
-                            if (suddenDeathWave > 0) {
-                                "Sudden Death Finale (Wave $suddenDeathWave/3)"
-                            } else {
-                                "${arenaTargetMs / 60_000L} Min Flag Hold Target"
+                        val modeDesc = when {
+                            isStunts -> "${results?.stuntState?.totalRounds ?: 4} Turn-Based Stunt Events"
+                            isArena -> {
+                                if (suddenDeathWave > 0) {
+                                    "Sudden Death Finale (Wave $suddenDeathWave/3)"
+                                } else {
+                                    "${arenaTargetMs / 60_000L} Min Flag Hold Target"
+                                }
                             }
-                        } else {
-                            when (winCond) {
-                                WinCondition.TIME_TRIAL_DISTANCE -> "${results?.timeLimitSec ?: 90}s Time Limit"
-                                WinCondition.CHAMPIONSHIP_POINTS -> "Points & Hits (${results?.totalLaps ?: 3} Laps)"
-                                WinCondition.FIRST_TO_FINISH -> "${results?.totalLaps ?: 3} Laps"
+                            else -> {
+                                when (winCond) {
+                                    WinCondition.TIME_TRIAL_DISTANCE -> "${results?.timeLimitSec ?: 90}s Time Limit"
+                                    WinCondition.CHAMPIONSHIP_POINTS -> "Points & Hits (${results?.totalLaps ?: 3} Laps)"
+                                    WinCondition.FIRST_TO_FINISH -> "${results?.totalLaps ?: 3} Laps"
+                                }
                             }
                         }
                         Text(
@@ -175,17 +205,19 @@ fun ResultsScreen(
                         3 -> BronzeMedal
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
-                    val rightMetric = if (isArena) {
-                        formatRaceTime(racer.flagCarryMs)
-                    } else {
-                        when (winCond) {
-                            WinCondition.CHAMPIONSHIP_POINTS -> "${racer.racePoints} PTS"
-                            WinCondition.TIME_TRIAL_DISTANCE -> "Lap ${racer.lap}"
-                            WinCondition.FIRST_TO_FINISH -> {
-                                if (racer.rank == 1 || racer.finishTimeMs == null) {
-                                    racer.finishTimeMs?.let { formatRaceTime(it) } ?: "--:--"
-                                } else {
-                                    "+${String.format("%.2fs", ((racer.finishTimeMs - leaderTime).coerceAtLeast(0L)) / 1000f)}"
+                    val rightMetric = when {
+                        isStunts -> "${racer.racePoints} PTS"
+                        isArena -> formatRaceTime(racer.flagCarryMs)
+                        else -> {
+                            when (winCond) {
+                                WinCondition.CHAMPIONSHIP_POINTS -> "${racer.racePoints} PTS"
+                                WinCondition.TIME_TRIAL_DISTANCE -> "Lap ${racer.lap}"
+                                WinCondition.FIRST_TO_FINISH -> {
+                                    if (racer.rank == 1 || racer.finishTimeMs == null) {
+                                        racer.finishTimeMs?.let { formatRaceTime(it) } ?: "--:--"
+                                    } else {
+                                        "+${String.format("%.2fs", ((racer.finishTimeMs - leaderTime).coerceAtLeast(0L)) / 1000f)}"
+                                    }
                                 }
                             }
                         }
@@ -226,22 +258,32 @@ fun ResultsScreen(
                                     style = MaterialTheme.typography.titleMedium,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
-                                if (isArena) {
-                                    Text(
-                                        text = "Flag Carried: ${racer.flagCarryMs / 1000L}s • Steals & Hits: ${racer.powerUpHits}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                } else {
-                                    Text(
-                                        text = "Best Lap: ${racer.bestLapMs?.let { formatRaceTime(it) } ?: "--"} • Hits: ${racer.powerUpHits}",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = if (racer.bestLapMs != null && racer.bestLapMs == overallBestLap) {
-                                            MaterialTheme.colorScheme.tertiary
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        }
-                                    )
+                                when {
+                                    isStunts -> {
+                                        Text(
+                                            text = "Stunt Gauntlet Score: ${racer.racePoints} pts",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    isArena -> {
+                                        Text(
+                                            text = "Flag Carried: ${racer.flagCarryMs / 1000L}s • Steals & Hits: ${racer.powerUpHits}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    else -> {
+                                        Text(
+                                            text = "Best Lap: ${racer.bestLapMs?.let { formatRaceTime(it) } ?: "--"} • Hits: ${racer.powerUpHits}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (racer.bestLapMs != null && racer.bestLapMs == overallBestLap) {
+                                                MaterialTheme.colorScheme.tertiary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        )
+                                    }
                                 }
                             }
                             Text(
@@ -253,19 +295,81 @@ fun ResultsScreen(
                     }
                 }
 
-                // 10-Second Auto-Rematch & Next Track/Arena Voting Loop
+                // 10-Second Auto-Rematch & Next Track/Arena/Stunt/Hybrid Voting Loop
                 if (rematchState != null) {
                     RematchCountdownCard(
                         rematchState = rematchState,
                         localPlayerId = localPlayerId,
                         isHostOrSolo = isHostOrSolo,
                         isArena = isArena,
+                        isStunts = isStunts,
+                        isHybridTour = isHybridTour,
+                        nextHybridModeLabel = nextHybridModeLabel,
                         onVoteRematch = onVoteRematch,
                         onLaunchRematchNow = onLaunchRematchNow
                     )
                 }
 
-                if (isArena) {
+                if (isStunts) {
+                    val maxStuntPts = (sortedRacers.maxOfOrNull { it.racePoints } ?: 1000).coerceAtLeast(100)
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.FlightTakeoff,
+                                    contentDescription = null,
+                                    tint = GoldTrophy,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "STUNT GAUNTLET TOTALS",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                            sortedRacers.forEach { racer ->
+                                val frac = (racer.racePoints.toFloat() / maxStuntPts.toFloat()).coerceIn(0f, 1f)
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = racer.name,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = "${racer.racePoints} PTS",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    LinearProgressIndicator(
+                                        progress = { frac },
+                                        color = if (racer.rank == 1) GoldTrophy else Color(racer.primaryColorArgb),
+                                        trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(8.dp)
+                                            .clip(RoundedCornerShape(50))
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else if (isArena) {
                     // Arena Flag Hold Breakdown Card
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
@@ -489,6 +593,9 @@ private fun RematchCountdownCard(
     localPlayerId: String,
     isHostOrSolo: Boolean,
     isArena: Boolean,
+    isStunts: Boolean = false,
+    isHybridTour: Boolean = false,
+    nextHybridModeLabel: String? = null,
     onVoteRematch: (String) -> Unit,
     onLaunchRematchNow: () -> Unit
 ) {
@@ -549,14 +656,23 @@ private fun RematchCountdownCard(
                     }
                     Column {
                         Text(
-                            text = if (isArena) "NEXT BATTLE IN ${secLeft}S" else "NEXT RACE IN ${secLeft}S",
+                            text = when {
+                                isHybridTour -> "NEXT HYBRID STAGE IN ${secLeft}S"
+                                isStunts -> "NEXT STUNT GAUNTLET IN ${secLeft}S"
+                                isArena -> "NEXT BATTLE IN ${secLeft}S"
+                                else -> "NEXT RACE IN ${secLeft}S"
+                            },
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.ExtraBold,
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.testTag("rematch_countdown_timer")
                         )
                         Text(
-                            text = "Up Next: ${leadingOption?.displayName ?: "Random"} • Tap below to vote!",
+                            text = if (isHybridTour && nextHybridModeLabel != null) {
+                                "Next Mode: $nextHybridModeLabel (${leadingOption?.displayName ?: "Random"}) • Tap to vote!"
+                            } else {
+                                "Up Next: ${leadingOption?.displayName ?: "Random"} • Tap below to vote!"
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.secondary
                         )

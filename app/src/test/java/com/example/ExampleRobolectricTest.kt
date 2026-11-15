@@ -110,6 +110,7 @@ class ExampleRobolectricTest {
                 Thread.sleep(15L)
             }
             composeTestRule.onNodeWithTag("drop_mine_button").assertIsDisplayed()
+            composeTestRule.onNodeWithText("LAP 2").assertIsDisplayed()
             composeTestRule.onNodeWithTag("use_powerup_button").assertIsDisplayed()
             composeTestRule.onNodeWithTag("race_pause_button").performClick()
             composeTestRule.mainClock.advanceTimeBy(100L)
@@ -139,7 +140,22 @@ class ExampleRobolectricTest {
             }.getOrDefault(false)
         }
         composeTestRule.onNodeWithTag("arena_card_CIRCLE").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("lobby_leave_button").performClick()
+        composeTestRule.mainClock.autoAdvance = false
+        try {
+            composeTestRule.onNodeWithTag("start_race_button").performClick()
+            repeat(12) {
+                composeTestRule.mainClock.advanceTimeBy(50L)
+                Thread.sleep(15L)
+            }
+            composeTestRule.onNodeWithTag("drop_mine_button").assertDoesNotExist()
+            composeTestRule.onNodeWithTag("use_powerup_button").assertIsDisplayed()
+            composeTestRule.onNodeWithTag("race_pause_button").performClick()
+            composeTestRule.mainClock.advanceTimeBy(100L)
+            composeTestRule.onNodeWithText("Exit Race").performClick()
+            composeTestRule.mainClock.advanceTimeBy(150L)
+        } finally {
+            composeTestRule.mainClock.autoAdvance = true
+        }
         composeTestRule.waitForIdle()
     }
 
@@ -348,4 +364,72 @@ class ExampleRobolectricTest {
             scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
         }
     }
+
+    @Test
+    fun hybridSetupScreen_configuresGameTypesAndOpensHybridLobby() {
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_hybrid_tour_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+
+        // Verify Hybrid Event Setup screen game type switches & play order controls
+        composeTestRule.onNodeWithTag("hybrid_toggle_circuit").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("hybrid_toggle_arena").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("hybrid_toggle_stunts").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("hybrid_order_random").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+
+        // Launch Hybrid Tour Lobby via fixed bottom bar button (no performScrollTo on fixed bar!)
+        composeTestRule.onNodeWithTag("start_hybrid_wifi_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("start_hybrid_wifi_button").performClick()
+
+        composeTestRule.waitUntil(timeoutMillis = 5_000L) {
+            runCatching {
+                composeTestRule.onNodeWithTag("lobby_configure_hybrid_button").performScrollTo().assertIsDisplayed()
+                true
+            }.getOrDefault(false)
+        }
+        composeTestRule.onNodeWithText("HYBRID EVENT TOUR").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("start_race_button").assertIsDisplayed()
+    }
+
+    @Test
+    fun hostSetup_selectsStuntsModeAndStartsTurnBasedStuntSession() {
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("host_race_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("mode_option_STUNTS").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("host_setup_open_lobby_button").performClick()
+
+        composeTestRule.waitUntil(timeoutMillis = 5_000L) {
+            runCatching {
+                composeTestRule.onNodeWithTag("stunt_card_LONG_JUMP").performScrollTo().assertIsDisplayed()
+                true
+            }.getOrDefault(false)
+        }
+        composeTestRule.onNodeWithTag("add_bot_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.mainClock.autoAdvance = false
+        try {
+            composeTestRule.onNodeWithTag("start_race_button").performClick()
+            repeat(12) {
+                composeTestRule.mainClock.advanceTimeBy(50L)
+                Thread.sleep(15L)
+            }
+            composeTestRule.onNodeWithTag("stunt_turn_banner").assertIsDisplayed()
+            composeTestRule.onNodeWithTag("drop_mine_button").assertDoesNotExist()
+            composeTestRule.onNodeWithTag("use_powerup_button").assertIsDisplayed()
+            composeTestRule.onNodeWithTag("race_pause_button").performClick()
+            composeTestRule.mainClock.advanceTimeBy(100L)
+            composeTestRule.onNodeWithText("Exit Race").performClick()
+            composeTestRule.mainClock.advanceTimeBy(150L)
+        } finally {
+            composeTestRule.mainClock.autoAdvance = true
+        }
+        composeTestRule.waitForIdle()
+    }
 }
+

@@ -15,6 +15,10 @@ import com.example.model.PowerUpType
 import com.example.model.RacePhase
 import com.example.model.RaceSnapshot
 import com.example.model.RacerState
+import com.example.model.StuntGolfHole
+import com.example.model.StuntPinState
+import com.example.model.StuntStateSnapshot
+import com.example.model.StuntVariant
 import com.example.model.TrackDefinition
 import com.example.model.TrackExplosion
 import com.example.model.TrackFieldPickup
@@ -47,6 +51,8 @@ object RaceTelemetryCodec {
         raw.replace("|", "")
             .replace(";", "")
             .replace(",", "")
+            .replace("~", "")
+            .replace(":", "")
             .replace("\n", "")
             .replace("\r", "")
 
@@ -167,7 +173,9 @@ object RaceTelemetryCodec {
                 .append(r.minesAvailable).append(',')
                 .append(r.invertedSteerMs).append(',')
                 .append(r.collisionSeq).append(',')
-                .append(r.portalWarpSeq)
+                .append(r.portalWarpSeq).append(',')
+                .append(r.electroShockAuraMs).append(',')
+                .append(r.electroParalyzedMs)
         }
         sb.append('|')
 
@@ -204,7 +212,10 @@ object RaceTelemetryCodec {
             .append(String.format(Locale.US, "%.1f", flag?.x ?: 1100f)).append(',')
             .append(String.format(Locale.US, "%.1f", flag?.y ?: 750f)).append(',')
             .append(snap.arenaSuddenDeathStage).append(',')
-            .append(snap.arenaSuddenDeathRemainingMs)
+            .append(snap.arenaSuddenDeathRemainingMs).append(',')
+            .append(if (snap.isHybridTour) 1 else 0).append(',')
+            .append(snap.hybridStageNumber).append(',')
+            .append(sanitizeToken(snap.nextHybridMode ?: ""))
         sb.append('|')
 
         // Rain puddles (index 12)
@@ -249,6 +260,57 @@ object RaceTelemetryCodec {
                 .append(String.format(Locale.US, "%.1f", ex.y)).append(',')
                 .append(ex.ageMs).append(',')
                 .append(ex.durationMs)
+        }
+        sb.append('|')
+
+        // Stunt Mode State (index 16)
+        val st = snap.stuntState
+        if (st != null) {
+            val varOrd = st.variantEnum.ordinal
+            val safeSummary = st.lastAttemptSummary
+                .replace("|", "")
+                .replace(";", "")
+                .replace(",", "")
+                .replace("~", "")
+                .replace("\n", "")
+                .replace("\r", "")
+            sb.append(varOrd).append(',')
+                .append(st.roundIndex).append(',')
+                .append(st.totalRounds).append(',')
+                .append(st.turnIndex).append(',')
+                .append(sanitizeToken(st.activePlayerId)).append(',')
+                .append(sanitizeToken(st.activePlayerName)).append(',')
+                .append(sanitizeToken(st.turnPhase)).append(',')
+                .append(st.turnTimeRemainingMs).append(',')
+                .append(st.lastAttemptScore).append(',')
+                .append(safeSummary).append(',')
+                .append(String.format(Locale.US, "%.1f", st.bestDistanceMeters)).append(',')
+                .append(String.format(Locale.US, "%.1f", st.landingX)).append(',')
+                .append(String.format(Locale.US, "%.1f", st.landingY)).append(',')
+                .append(if (st.hasLanded) 1 else 0).append(',')
+                .append(String.format(Locale.US, "%.1f", st.ballX)).append(',')
+                .append(String.format(Locale.US, "%.1f", st.ballY)).append(',')
+                .append(String.format(Locale.US, "%.1f", st.ballVx)).append(',')
+                .append(String.format(Locale.US, "%.1f", st.ballVy)).append(',')
+                .append(st.ballScoredPoints)
+                .append(';')
+            st.pins.forEachIndexed { idx, p ->
+                if (idx > 0) sb.append('~')
+                sb.append(p.id).append(':')
+                    .append(String.format(Locale.US, "%.0f", p.x)).append(':')
+                    .append(String.format(Locale.US, "%.0f", p.y)).append(':')
+                    .append(if (p.knocked) 1 else 0)
+            }
+            sb.append(';')
+            st.golfHoles.forEachIndexed { idx, gh ->
+                if (idx > 0) sb.append('~')
+                sb.append(gh.number).append(':')
+                    .append(String.format(Locale.US, "%.0f", gh.x)).append(':')
+                    .append(String.format(Locale.US, "%.0f", gh.y)).append(':')
+                    .append(String.format(Locale.US, "%.0f", gh.radius)).append(':')
+                    .append(gh.points).append(':')
+                    .append(if (gh.captured) 1 else 0)
+            }
         }
 
         return sb.toString().toByteArray(Charsets.UTF_8)
@@ -299,6 +361,9 @@ object RaceTelemetryCodec {
         val flagY = metaFields.getOrNull(12)?.toFloatOrNull() ?: 750f
         val suddenDeathStage = metaFields.getOrNull(13)?.toIntOrNull() ?: 0
         val suddenDeathRemMs = metaFields.getOrNull(14)?.toLongOrNull() ?: 0L
+        val isHybridTour = metaFields.getOrNull(15) == "1"
+        val hybridStageNumber = metaFields.getOrNull(16)?.toIntOrNull() ?: 1
+        val nextHybridMode = metaFields.getOrNull(17)?.ifEmpty { null }
 
         val rosterMap = roster.associateBy { it.id }
         val prevMap = previousSnapshot?.racers?.associateBy { it.playerId }.orEmpty()
@@ -332,6 +397,8 @@ object RaceTelemetryCodec {
                 val invertedSteerMs = f.getOrNull(25)?.toLongOrNull() ?: 0L
                 val collisionSeq = f.getOrNull(26)?.toIntOrNull() ?: 0
                 val portalWarpSeq = f.getOrNull(27)?.toIntOrNull() ?: 0
+                val electroAuraMs = f.getOrNull(28)?.toLongOrNull() ?: 0L
+                val electroParalyzedMs = f.getOrNull(29)?.toLongOrNull() ?: 0L
 
                 val vx = f[4].toFloatOrNull() ?: 0f
                 val vy = f[5].toFloatOrNull() ?: 0f
@@ -369,15 +436,91 @@ object RaceTelemetryCodec {
                     minesAvailable = minesAvailable,
                     invertedSteerMs = invertedSteerMs,
                     collisionSeq = collisionSeq,
-                    portalWarpSeq = portalWarpSeq
+                    portalWarpSeq = portalWarpSeq,
+                    electroShockAuraMs = electroAuraMs,
+                    electroParalyzedMs = electroParalyzedMs
                 )
             }
         }
 
-        val trackDef = activeTrack ?: if (gameModeEnum == GameMode.ARENA) {
-            TrackCatalog.getArenaTrack(arenaShapeEnum ?: ArenaShape.SQUARE)
+        val stuntRaw = parts.getOrNull(16).orEmpty()
+        val stuntState: StuntStateSnapshot? = if (stuntRaw.isEmpty()) {
+            null
         } else {
-            TrackCatalog.getTrack(trackId)
+            val sections = stuntRaw.split(';')
+            val h = sections.getOrNull(0)?.split(',').orEmpty()
+            if (h.size >= 19) {
+                val varOrd = h[0].toIntOrNull() ?: 0
+                val variant = StuntVariant.entries.getOrElse(varOrd) { StuntVariant.LONG_JUMP }
+                val pinsRaw = sections.getOrNull(1).orEmpty()
+                val pins = if (pinsRaw.isEmpty()) {
+                    emptyList()
+                } else {
+                    pinsRaw.split('~').mapNotNull { pEntry ->
+                        val pf = pEntry.split(':')
+                        if (pf.size < 4) return@mapNotNull null
+                        StuntPinState(
+                            id = pf[0].toIntOrNull() ?: return@mapNotNull null,
+                            x = pf[1].toFloatOrNull() ?: return@mapNotNull null,
+                            y = pf[2].toFloatOrNull() ?: return@mapNotNull null,
+                            knocked = pf[3] == "1"
+                        )
+                    }
+                }
+                val holesRaw = sections.getOrNull(2).orEmpty()
+                val holes = if (holesRaw.isEmpty()) {
+                    emptyList()
+                } else {
+                    holesRaw.split('~').mapNotNull { gEntry ->
+                        val gf = gEntry.split(':')
+                        if (gf.size < 6) return@mapNotNull null
+                        StuntGolfHole(
+                            number = gf[0].toIntOrNull() ?: return@mapNotNull null,
+                            x = gf[1].toFloatOrNull() ?: return@mapNotNull null,
+                            y = gf[2].toFloatOrNull() ?: return@mapNotNull null,
+                            radius = gf[3].toFloatOrNull() ?: 50f,
+                            points = gf[4].toIntOrNull() ?: 200,
+                            captured = gf[5] == "1"
+                        )
+                    }
+                }
+                StuntStateSnapshot(
+                    variant = variant.name,
+                    roundIndex = h[1].toIntOrNull() ?: 1,
+                    totalRounds = h[2].toIntOrNull() ?: 4,
+                    turnIndex = h[3].toIntOrNull() ?: 0,
+                    activePlayerId = h[4],
+                    activePlayerName = h[5],
+                    turnPhase = h[6].ifEmpty { "DRIVING" },
+                    turnTimeRemainingMs = h[7].toLongOrNull() ?: 15000L,
+                    lastAttemptScore = h[8].toIntOrNull() ?: 0,
+                    lastAttemptSummary = h[9],
+                    bestDistanceMeters = h[10].toFloatOrNull() ?: 0f,
+                    landingX = h[11].toFloatOrNull() ?: 0f,
+                    landingY = h[12].toFloatOrNull() ?: 700f,
+                    hasLanded = h[13] == "1",
+                    ballX = h[14].toFloatOrNull() ?: 1830f,
+                    ballY = h[15].toFloatOrNull() ?: 700f,
+                    ballVx = h[16].toFloatOrNull() ?: 0f,
+                    ballVy = h[17].toFloatOrNull() ?: 0f,
+                    ballScoredPoints = h[18].toIntOrNull() ?: 0,
+                    pins = pins,
+                    golfHoles = holes
+                )
+            } else {
+                null
+            }
+        }
+
+        val trackDef = when {
+            gameModeEnum == GameMode.STUNTS -> {
+                TrackCatalog.getStuntTrack(stuntState?.variantEnum ?: StuntVariant.LONG_JUMP)
+            }
+            activeTrack != null -> activeTrack
+            gameModeEnum == GameMode.ARENA -> {
+                TrackCatalog.getArenaTrack(arenaShapeEnum ?: ArenaShape.SQUARE)
+            }
+            else -> TrackCatalog.getTrack(trackId)
         }
         val mask = parts[9]
         val boxes = trackDef.itemSpawns.mapIndexed { idx, spawn ->
@@ -530,7 +673,11 @@ object RaceTelemetryCodec {
                 portalPair = portalPair,
                 explosions = explosions,
                 arenaSuddenDeathStage = suddenDeathStage,
-                arenaSuddenDeathRemainingMs = suddenDeathRemMs
+                arenaSuddenDeathRemainingMs = suddenDeathRemMs,
+                stuntState = stuntState,
+                isHybridTour = isHybridTour,
+                hybridStageNumber = hybridStageNumber,
+                nextHybridMode = nextHybridMode
             )
         )
     }

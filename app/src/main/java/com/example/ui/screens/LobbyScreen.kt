@@ -38,9 +38,11 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.SportsScore
 import androidx.compose.material.icons.filled.Star
@@ -79,6 +81,7 @@ import com.example.model.GameMode
 import com.example.model.LobbyStatePayload
 import com.example.model.RaceRulesSettings
 import com.example.model.RcCarType
+import com.example.model.StuntVariant
 import com.example.model.TrackId
 import com.example.model.WinCondition
 import com.example.network.SessionRole
@@ -94,10 +97,13 @@ fun LobbyScreen(
     customTracks: List<CustomTrackData>,
     onSelectTrack: (TrackId) -> Unit,
     onSelectArenaShape: (ArenaShape) -> Unit = {},
+    onSelectStuntVariant: (StuntVariant) -> Unit = {},
     onSelectCustomTrack: (CustomTrackData) -> Unit,
     onGenerateRandomTrack: () -> Unit,
     onSelectRandomArena: () -> Unit = {},
+    onSelectRandomStunt: () -> Unit = {},
     onUpdateRules: (RaceRulesSettings) -> Unit = {},
+    onOpenHybridSetup: () -> Unit = {},
     onOpenTrackEditor: () -> Unit,
     onOpenSettings: () -> Unit,
     onSelectLaps: (Int) -> Unit,
@@ -123,7 +129,10 @@ fun LobbyScreen(
     }
 
     val activeRules = lobby?.rules
-    val isArenaMode = activeRules?.gameModeEnum == GameMode.ARENA
+    val selectedMode = activeRules?.gameModeEnum ?: GameMode.RACE
+    val isArenaMode = selectedMode == GameMode.ARENA
+    val isStuntsMode = selectedMode == GameMode.STUNTS
+    val isHybridMode = selectedMode == GameMode.HYBRID
 
     Surface(
         color = MaterialTheme.colorScheme.background,
@@ -170,7 +179,12 @@ fun LobbyScreen(
                         )
                     } else {
                         Text(
-                            text = if (isArenaMode) "Offline Arena vs AI" else "Offline Practice vs AI",
+                            text = when {
+                                isHybridMode -> "Offline Hybrid Tour vs AI"
+                                isStuntsMode -> "Offline Stunt Gauntlet vs AI"
+                                isArenaMode -> "Offline Arena vs AI"
+                                else -> "Offline Practice vs AI"
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.tertiary
                         )
@@ -217,6 +231,11 @@ fun LobbyScreen(
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         item {
                             val label = when {
+                                isHybridMode -> {
+                                    val inc = activeRules.enabledHybridModes().joinToString("+") { it.displayName }
+                                    "HYBRID TOUR • $inc"
+                                }
+                                isStuntsMode -> "STUNTS • 4 RANDOM CHALLENGES • 1x NITRO"
                                 isArenaMode -> "ARENA • ${activeRules.arenaTargetMinutes}M FLAG"
                                 activeRules.winConditionEnum == WinCondition.TIME_TRIAL_DISTANCE ->
                                     "MAX TIME • ${activeRules.timeLimitSec}s"
@@ -237,10 +256,10 @@ fun LobbyScreen(
                         if (activeRules.hardTrackBoundary) {
                             item { LobbyRuleBadge("BOUNCE WALLS", MaterialTheme.colorScheme.primary, onOpenSettings) }
                         }
-                        if (activeRules.randomJumpsEnabled) {
+                        if (activeRules.randomJumpsEnabled && !isStuntsMode) {
                             item { LobbyRuleBadge("JUMPS", MaterialTheme.colorScheme.secondary, onOpenSettings) }
                         }
-                        if (activeRules.randomConditionsEnabled) {
+                        if (activeRules.randomConditionsEnabled && !isStuntsMode) {
                             item { LobbyRuleBadge("RANDOM WEATHER", MaterialTheme.colorScheme.secondary, onOpenSettings) }
                         }
                         if (activeRules.showPlayerNames) {
@@ -249,8 +268,26 @@ fun LobbyScreen(
                     }
                 }
 
-                // Host / Solo Quick Car Speed Selector (Low / Medium / Fast)
+                // Host / Solo Quick Mode & Car Speed Selectors
                 if (isHostOrSolo && activeRules != null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "MATCH MODE",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(GameMode.entries) { mode ->
+                                FilterChip(
+                                    selected = activeRules.gameModeEnum == mode,
+                                    onClick = { onUpdateRules(activeRules.copy(gameMode = mode.name)) },
+                                    label = { Text(mode.displayName, style = MaterialTheme.typography.labelSmall) },
+                                    modifier = Modifier.testTag("lobby_game_mode_${mode.name}")
+                                )
+                            }
+                        }
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -274,7 +311,137 @@ fun LobbyScreen(
                     }
                 }
 
-                if (isArenaMode) {
+                if (isHybridMode) {
+                    val enabledNames = activeRules?.enabledHybridModes()
+                        ?.joinToString(" → ") { it.displayName } ?: "Circuit → Arena → Stunts"
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(Icons.Default.Shuffle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Text(
+                                    text = "HYBRID EVENT TOUR",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Text(
+                                text = if (activeRules?.hybridRandomOrder == true) {
+                                    "Random Stage Order across: $enabledNames"
+                                } else {
+                                    "Rotating Stage Order: $enabledNames"
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (isHostOrSolo) {
+                                OutlinedButton(
+                                    onClick = onOpenHybridSetup,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(44.dp)
+                                        .testTag("lobby_configure_hybrid_button")
+                                ) {
+                                    Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Configure Included Game Types", style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
+                        }
+                    }
+                } else if (isStuntsMode) {
+                    val selectedStunt = runCatching {
+                        StuntVariant.valueOf(lobby?.stuntVariant ?: StuntVariant.LONG_JUMP.name)
+                    }.getOrDefault(StuntVariant.LONG_JUMP)
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "4 RANDOM STUNTS • TURN-BASED SPECTATOR MODE",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (isHostOrSolo) {
+                            OutlinedButton(
+                                onClick = onSelectRandomStunt,
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                modifier = Modifier
+                                    .height(34.dp)
+                                    .testTag("lobby_random_stunt_button")
+                            ) {
+                                Icon(Icons.Default.Casino, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Shuffle", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(TrackCatalog.allStunts(), key = { "stunt_${it.stuntVariant?.name}" }) { stuntTrack ->
+                            val variant = stuntTrack.stuntVariant ?: StuntVariant.LONG_JUMP
+                            val active = variant == selectedStunt
+                            Surface(
+                                color = if (active) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainer
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(
+                                    width = if (active) 2.dp else 1.dp,
+                                    color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                ),
+                                modifier = Modifier
+                                    .width(172.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .clickable(enabled = isHostOrSolo) { onSelectStuntVariant(variant) }
+                                    .testTag("stunt_card_${variant.name}")
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(68.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(Color(stuntTrack.id.baseBgColorHex).copy(alpha = 0.88f))
+                                    ) {
+                                        Canvas(modifier = Modifier.fillMaxSize()) {
+                                            drawTrackMiniMap(track = stuntTrack)
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = variant.displayName,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "Slalom + 1x Nitro + Ramp",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else if (isArenaMode) {
                     // Arena Shape Selector + Flag Hold Minutes
                     val selectedArena = runCatching {
                         ArenaShape.valueOf(lobby?.arenaShape ?: ArenaShape.SQUARE.name)
@@ -296,7 +463,7 @@ fun LobbyScreen(
                                 FilterChip(
                                     selected = active,
                                     onClick = {
-                                        if (isHostOrSolo) {
+                                        if (isHostOrSolo && activeRules != null) {
                                             onUpdateRules(activeRules.copy(arenaTargetMinutes = mins))
                                         }
                                     },
@@ -304,40 +471,6 @@ fun LobbyScreen(
                                     label = { Text("${mins}m", style = MaterialTheme.typography.labelSmall) },
                                     modifier = Modifier.testTag("lobby_arena_min_$mins")
                                 )
-                            }
-                        }
-                    }
-
-                    if (isHostOrSolo) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = onSelectRandomArena,
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
-                                    .testTag("lobby_random_arena_button")
-                            ) {
-                                Icon(Icons.Default.Casino, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Random Arena", style = MaterialTheme.typography.labelMedium)
-                            }
-                            OutlinedButton(
-                                onClick = {
-                                    onUpdateRules(activeRules.copy(gameMode = GameMode.RACE.name))
-                                },
-                                shape = RoundedCornerShape(14.dp),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
-                                    .testTag("lobby_switch_mode_button")
-                            ) {
-                                Icon(Icons.Default.SportsScore, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Circuit Mode", style = MaterialTheme.typography.labelMedium)
                             }
                         }
                     }
@@ -397,6 +530,40 @@ fun LobbyScreen(
                                         maxLines = 1
                                     )
                                 }
+                            }
+                        }
+                    }
+
+                    if (isHostOrSolo && activeRules != null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = onSelectRandomArena,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("lobby_random_arena_button")
+                            ) {
+                                Icon(Icons.Default.Casino, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Random Arena", style = MaterialTheme.typography.labelMedium)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    onUpdateRules(activeRules.copy(gameMode = GameMode.RACE.name))
+                                },
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("lobby_switch_mode_button")
+                            ) {
+                                Icon(Icons.Default.SportsScore, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Circuit Mode", style = MaterialTheme.typography.labelMedium)
                             }
                         }
                     }
@@ -920,6 +1087,10 @@ fun LobbyScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = when {
+                                    isHybridMode && playerCount < 2 -> "START SOLO HYBRID TOUR (OR ADD BOT)"
+                                    isHybridMode -> "START HYBRID TOUR ($playerCount RACERS)"
+                                    isStuntsMode && playerCount < 2 -> "START SOLO STUNTS (OR ADD BOT)"
+                                    isStuntsMode -> "START STUNTS ($playerCount RACERS)"
                                     isArenaMode && playerCount < 2 -> "START SOLO ARENA (OR ADD BOT)"
                                     isArenaMode -> "START ARENA ($playerCount RACERS)"
                                     playerCount < 2 -> "START SOLO RACE (OR ADD BOT)"

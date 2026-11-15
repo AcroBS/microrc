@@ -23,6 +23,7 @@ import com.example.model.RcCarType
 import com.example.model.RcColorPresets
 import com.example.model.RematchCountdownState
 import com.example.model.RematchVoteOption
+import com.example.model.StuntVariant
 import com.example.model.TrackDefinition
 import com.example.model.TrackId
 import com.squareup.moshi.Moshi
@@ -83,55 +84,96 @@ class WifiP2pRaceManager(
         const val REMATCH_COUNTDOWN_SECONDS = 10
         const val REMATCH_OPTION_RANDOM = "RANDOM"
 
+        fun resolveHybridStageMode(
+            rules: RaceRulesSettings,
+            stageIndexZeroBased: Int,
+            previousMode: GameMode? = null,
+            random: Random = Random.Default
+        ): GameMode {
+            val enabled = rules.enabledHybridModes()
+            if (enabled.size == 1) return enabled.first()
+            return if (rules.hybridRandomOrder) {
+                val filtered = if (previousMode != null) enabled.filter { it != previousMode } else enabled
+                val pool = filtered.ifEmpty { enabled }
+                pool[random.nextInt(pool.size)]
+            } else {
+                enabled[stageIndexZeroBased.mod(enabled.size)]
+            }
+        }
+
         fun buildRematchVoteOptions(
             gameMode: GameMode,
             currentTrackId: TrackId,
             currentArenaShape: ArenaShape,
+            currentStuntVariant: StuntVariant = StuntVariant.LONG_JUMP,
             hasActiveCustomTrack: Boolean = false,
             random: Random = Random.Default
         ): List<RematchVoteOption> {
-            return if (gameMode == GameMode.ARENA) {
-                val candidates = ArenaShape.entries
-                    .filter { it != currentArenaShape }
-                    .shuffled(random)
-                    .take(2)
-                    .map { shape ->
-                        RematchVoteOption(
-                            id = shape.name,
-                            displayName = shape.displayName,
-                            subtitle = "${shape.shapeLabel} Arena",
-                            isRandom = false
-                        )
-                    }
-                candidates + RematchVoteOption(
-                    id = REMATCH_OPTION_RANDOM,
-                    displayName = "Random Arena",
-                    subtitle = "Surprise battleground",
-                    isRandom = true
-                )
-            } else {
-                val pool = if (hasActiveCustomTrack) {
-                    TrackId.entries.toList()
-                } else {
-                    TrackId.entries.filter { it != currentTrackId }
+            return when (gameMode) {
+                GameMode.ARENA -> {
+                    val candidates = ArenaShape.entries
+                        .filter { it != currentArenaShape }
+                        .shuffled(random)
+                        .take(2)
+                        .map { shape ->
+                            RematchVoteOption(
+                                id = shape.name,
+                                displayName = shape.displayName,
+                                subtitle = "${shape.shapeLabel} Arena",
+                                isRandom = false
+                            )
+                        }
+                    candidates + RematchVoteOption(
+                        id = REMATCH_OPTION_RANDOM,
+                        displayName = "Random Arena",
+                        subtitle = "Surprise battleground",
+                        isRandom = true
+                    )
                 }
-                val candidates = pool
-                    .shuffled(random)
-                    .take(2)
-                    .map { track ->
-                        RematchVoteOption(
-                            id = track.name,
-                            displayName = track.displayName,
-                            subtitle = "${track.surfaceLabel} • ${track.difficulty}",
-                            isRandom = false
-                        )
+                GameMode.STUNTS -> {
+                    val candidates = StuntVariant.entries
+                        .filter { it != currentStuntVariant }
+                        .shuffled(random)
+                        .take(2)
+                        .map { st ->
+                            RematchVoteOption(
+                                id = st.name,
+                                displayName = st.displayName,
+                                subtitle = "Stunt • ${st.shortName}",
+                                isRandom = false
+                            )
+                        }
+                    candidates + RematchVoteOption(
+                        id = REMATCH_OPTION_RANDOM,
+                        displayName = "Random Stunt",
+                        subtitle = "Surprise stunt gauntlet",
+                        isRandom = true
+                    )
+                }
+                else -> {
+                    val pool = if (hasActiveCustomTrack) {
+                        TrackId.entries.toList()
+                    } else {
+                        TrackId.entries.filter { it != currentTrackId }
                     }
-                candidates + RematchVoteOption(
-                    id = REMATCH_OPTION_RANDOM,
-                    displayName = "Random Circuit",
-                    subtitle = "Mystery circuit or generated layout",
-                    isRandom = true
-                )
+                    val candidates = pool
+                        .shuffled(random)
+                        .take(2)
+                        .map { track ->
+                            RematchVoteOption(
+                                id = track.name,
+                                displayName = track.displayName,
+                                subtitle = "${track.surfaceLabel} • ${track.difficulty}",
+                                isRandom = false
+                            )
+                        }
+                    candidates + RematchVoteOption(
+                        id = REMATCH_OPTION_RANDOM,
+                        displayName = "Random Circuit",
+                        subtitle = "Mystery circuit or generated layout",
+                        isRandom = true
+                    )
+                }
             }
         }
 
@@ -271,8 +313,12 @@ class WifiP2pRaceManager(
     private val playersList = mutableListOf<LobbyPlayer>()
     private var currentTrackId: TrackId = TrackId.LIVING_ROOM_GP
     private var currentArenaShape: ArenaShape = ArenaShape.SQUARE
+    private var currentStuntVariant: StuntVariant = StuntVariant.LONG_JUMP
     private var currentCustomTrack: CustomTrackData? = null
     private var currentRules: RaceRulesSettings = RaceRulesSettings()
+    private var hybridStageNumber: Int = 1
+    private var activeConcreteMode: GameMode = GameMode.RACE
+    private var nextPlannedHybridMode: GameMode? = null
     private var currentTotalLaps: Int = 3
     private var inRace: Boolean = false
     private var tcpPort: Int = DEFAULT_TCP_PORT
@@ -282,6 +328,64 @@ class WifiP2pRaceManager(
     private var rematchOptions: List<RematchVoteOption> = emptyList()
     private val rematchVotes = ConcurrentHashMap<String, String>()
     @Volatile private var rematchSecondsLeft: Int = REMATCH_COUNTDOWN_SECONDS
+
+    private fun configureInitialSessionMode(rules: RaceRulesSettings, initialCustomTrack: CustomTrackData?) {
+        hybridStageNumber = 1
+        currentRules = rules
+        currentTotalLaps = rules.totalLaps.coerceIn(1, 9)
+        currentCustomTrack = initialCustomTrack
+
+        when (rules.gameModeEnum) {
+            GameMode.HYBRID -> {
+                activeConcreteMode = resolveHybridStageMode(rules, 0, null)
+                nextPlannedHybridMode = resolveHybridStageMode(rules, 1, activeConcreteMode)
+                when (activeConcreteMode) {
+                    GameMode.ARENA -> {
+                        currentCustomTrack = null
+                        currentArenaShape = ArenaShape.entries.random()
+                        currentTrackId = currentArenaShape.themeTrackId
+                        _activeTrack.value = TrackCatalog.getArenaTrack(currentArenaShape)
+                    }
+                    GameMode.STUNTS -> {
+                        currentCustomTrack = null
+                        currentStuntVariant = StuntVariant.entries.random()
+                        currentTrackId = currentStuntVariant.themeTrackId
+                        _activeTrack.value = TrackCatalog.getStuntTrack(currentStuntVariant)
+                    }
+                    else -> {
+                        currentCustomTrack = null
+                        currentTrackId = TrackId.entries.random()
+                        _activeTrack.value = TrackCatalog.getTrack(currentTrackId)
+                    }
+                }
+            }
+            GameMode.STUNTS -> {
+                activeConcreteMode = GameMode.STUNTS
+                nextPlannedHybridMode = null
+                currentCustomTrack = null
+                currentStuntVariant = StuntVariant.entries.random()
+                currentTrackId = currentStuntVariant.themeTrackId
+                _activeTrack.value = TrackCatalog.getStuntTrack(currentStuntVariant)
+            }
+            GameMode.ARENA -> {
+                activeConcreteMode = GameMode.ARENA
+                nextPlannedHybridMode = null
+                currentCustomTrack = null
+                currentTrackId = currentArenaShape.themeTrackId
+                _activeTrack.value = TrackCatalog.getArenaTrack(currentArenaShape)
+            }
+            GameMode.RACE -> {
+                activeConcreteMode = GameMode.RACE
+                nextPlannedHybridMode = null
+                if (initialCustomTrack != null) {
+                    currentTrackId = runCatching { TrackId.valueOf(initialCustomTrack.themeId) }.getOrDefault(TrackId.NEON_ROOFTOP)
+                    _activeTrack.value = TrackCatalog.buildCustomTrack(initialCustomTrack)
+                } else {
+                    _activeTrack.value = TrackCatalog.getTrack(currentTrackId)
+                }
+            }
+        }
+    }
 
     fun clearError() {
         _connectionError.value = null
@@ -321,19 +425,7 @@ class WifiP2pRaceManager(
     ) {
         leaveSession()
         localPlayerId = profile.playerId
-        currentRules = initialRules
-        currentTotalLaps = initialRules.totalLaps.coerceIn(1, 9)
-        currentCustomTrack = initialCustomTrack
-        if (initialRules.gameModeEnum == GameMode.ARENA) {
-            currentCustomTrack = null
-            currentTrackId = currentArenaShape.themeTrackId
-            _activeTrack.value = TrackCatalog.getArenaTrack(currentArenaShape)
-        } else if (initialCustomTrack != null) {
-            currentTrackId = runCatching { TrackId.valueOf(initialCustomTrack.themeId) }.getOrDefault(TrackId.NEON_ROOFTOP)
-            _activeTrack.value = TrackCatalog.buildCustomTrack(initialCustomTrack)
-        } else {
-            _activeTrack.value = TrackCatalog.getTrack(currentTrackId)
-        }
+        configureInitialSessionMode(initialRules, initialCustomTrack)
         _role.value = SessionRole.Solo
         inRace = false
         chatLog.clear()
@@ -368,19 +460,7 @@ class WifiP2pRaceManager(
     ) {
         leaveSession()
         localPlayerId = profile.playerId
-        currentRules = initialRules
-        currentTotalLaps = initialRules.totalLaps.coerceIn(1, 9)
-        currentCustomTrack = initialCustomTrack
-        if (initialRules.gameModeEnum == GameMode.ARENA) {
-            currentCustomTrack = null
-            currentTrackId = currentArenaShape.themeTrackId
-            _activeTrack.value = TrackCatalog.getArenaTrack(currentArenaShape)
-        } else if (initialCustomTrack != null) {
-            currentTrackId = runCatching { TrackId.valueOf(initialCustomTrack.themeId) }.getOrDefault(TrackId.NEON_ROOFTOP)
-            _activeTrack.value = TrackCatalog.buildCustomTrack(initialCustomTrack)
-        } else {
-            _activeTrack.value = TrackCatalog.getTrack(currentTrackId)
-        }
+        configureInitialSessionMode(initialRules, initialCustomTrack)
         _role.value = SessionRole.Host
         inRace = false
         chatLog.clear()
@@ -605,10 +685,10 @@ class WifiP2pRaceManager(
                                     _lobbyState.value = payload
                                     currentRules = payload.rules
                                     if (!payload.inRace) {
-                                        _activeTrack.value = if (payload.rules.gameModeEnum == GameMode.ARENA) {
-                                            TrackCatalog.getArenaTrack(payload.arenaShape)
-                                        } else {
-                                            payload.activeCustomTrack?.let {
+                                        _activeTrack.value = when (payload.rules.gameModeEnum) {
+                                            GameMode.ARENA -> TrackCatalog.getArenaTrack(payload.arenaShape)
+                                            GameMode.STUNTS -> TrackCatalog.getStuntTrack(payload.stuntVariant)
+                                            else -> payload.activeCustomTrack?.let {
                                                 TrackCatalog.buildCustomTrack(it)
                                             } ?: TrackCatalog.getTrack(payload.trackId)
                                         }
@@ -637,16 +717,23 @@ class WifiP2pRaceManager(
                                         _lobbyState.value = _lobbyState.value?.copy(rules = r)
                                     }
                                     val startSnap = msg.raceSnapshot
-                                    val isArenaMatch = currentRules.gameModeEnum == GameMode.ARENA ||
-                                        startSnap?.gameMode == GameMode.ARENA.name
-                                    val baseTrack = if (isArenaMatch) {
-                                        TrackCatalog.getArenaTrack(msg.arenaShape ?: startSnap?.arenaShape)
-                                    } else {
-                                        msg.customTrack?.let {
+                                    val snapMode = startSnap?.gameMode
+                                    val isStuntMatch = snapMode == GameMode.STUNTS.name ||
+                                        currentRules.gameModeEnum == GameMode.STUNTS
+                                    val isArenaMatch = !isStuntMatch && (
+                                        snapMode == GameMode.ARENA.name ||
+                                            currentRules.gameModeEnum == GameMode.ARENA
+                                        )
+                                    val baseTrack = when {
+                                        isStuntMatch -> TrackCatalog.getStuntTrack(
+                                            msg.stuntVariant ?: startSnap?.stuntState?.variant
+                                        )
+                                        isArenaMatch -> TrackCatalog.getArenaTrack(msg.arenaShape ?: startSnap?.arenaShape)
+                                        else -> msg.customTrack?.let {
                                             TrackCatalog.buildCustomTrack(it)
                                         } ?: TrackCatalog.getTrack(startSnap?.trackId ?: TrackId.LIVING_ROOM_GP.name)
                                     }
-                                    val syncedTrack = if (msg.ramps != null) {
+                                    val syncedTrack = if (!isStuntMatch && msg.ramps != null) {
                                         baseTrack.copy(ramps = msg.ramps)
                                     } else {
                                         baseTrack
@@ -711,6 +798,12 @@ class WifiP2pRaceManager(
             if (seq > lastAppliedStateSeq || isFinished) {
                 if (seq > lastAppliedStateSeq && seq < Long.MAX_VALUE - 1L) {
                     lastAppliedStateSeq = seq
+                }
+                if (snapshot.gameMode == GameMode.STUNTS.name) {
+                    val vName = snapshot.stuntState?.variant
+                    if (vName != null && _activeTrack.value?.stuntVariant?.name != vName) {
+                        _activeTrack.value = TrackCatalog.getStuntTrack(vName)
+                    }
                 }
                 _raceSnapshot.value = snapshot
                 if (isFinished) {
@@ -1070,28 +1163,40 @@ class WifiP2pRaceManager(
         if (_role.value == SessionRole.Host) broadcastLobbyState() else publishLocalLobbyState()
     }
 
+    fun selectStuntVariant(variant: StuntVariant) {
+        if (_role.value != SessionRole.Host && _role.value != SessionRole.Solo) return
+        currentStuntVariant = variant
+        currentTrackId = variant.themeTrackId
+        currentCustomTrack = null
+        _activeTrack.value = TrackCatalog.getStuntTrack(variant)
+        addSystemChat("Starting stunt set to ${variant.displayName}")
+        if (_role.value == SessionRole.Host) broadcastLobbyState() else publishLocalLobbyState()
+    }
+
     fun updateRules(rules: RaceRulesSettings) {
         if (_role.value != SessionRole.Host && _role.value != SessionRole.Solo) return
-        currentRules = rules
-        currentTotalLaps = rules.totalLaps.coerceIn(1, 9)
-        if (rules.gameModeEnum == GameMode.ARENA) {
-            currentCustomTrack = null
-            currentTrackId = currentArenaShape.themeTrackId
-            _activeTrack.value = TrackCatalog.getArenaTrack(currentArenaShape)
-        }
+        configureInitialSessionMode(rules, if (rules.gameModeEnum == GameMode.RACE) currentCustomTrack else null)
         val summary = buildList {
-            if (rules.gameModeEnum == GameMode.ARENA) {
-                add("Arena (${rules.arenaTargetMinutes} min flag)")
-            } else if (rules.winConditionEnum == com.example.model.WinCondition.TIME_TRIAL_DISTANCE) {
-                add("Max Time: ${rules.timeLimitSec}s")
-            } else {
-                add("${rules.totalLaps} Laps (${rules.winConditionEnum.displayName})")
+            when (rules.gameModeEnum) {
+                GameMode.ARENA -> add("Arena (${rules.arenaTargetMinutes} min flag)")
+                GameMode.STUNTS -> add("Stunts (4 turn-based events)")
+                GameMode.HYBRID -> {
+                    val enabledNames = rules.enabledHybridModes().joinToString("+") { it.displayName }
+                    add("Hybrid Tour ($enabledNames)")
+                }
+                GameMode.RACE -> {
+                    if (rules.winConditionEnum == com.example.model.WinCondition.TIME_TRIAL_DISTANCE) {
+                        add("Max Time: ${rules.timeLimitSec}s")
+                    } else {
+                        add("${rules.totalLaps} Laps (${rules.winConditionEnum.displayName})")
+                    }
+                }
             }
             add("Speed: ${rules.carSpeedEnum.displayName}")
             if (rules.autoAccelerate) add("Auto-Gas")
             if (rules.hardTrackBoundary) add("Bounce Walls")
-            if (rules.randomJumpsEnabled) add("Jumps")
-            if (rules.randomConditionsEnabled) add("Random Weather")
+            if (rules.randomJumpsEnabled && rules.gameModeEnum != GameMode.STUNTS) add("Jumps")
+            if (rules.randomConditionsEnabled && rules.gameModeEnum != GameMode.STUNTS) add("Random Weather")
             if (rules.showPlayerNames) add("Name Tags")
         }.joinToString(" • ").ifEmpty { "Standard Rules" }
         addSystemChat("Match settings updated: $summary")
@@ -1175,25 +1280,60 @@ class WifiP2pRaceManager(
         inRace = true
         pointsAwardedForCurrentRace = false
         hostStateSeq.set(0L)
-        val isArenaMode = currentRules.gameModeEnum == GameMode.ARENA
-        val customData = if (isArenaMode) null else currentCustomTrack
+
+        val isHybrid = currentRules.gameModeEnum == GameMode.HYBRID
+        val concreteMode = if (isHybrid) activeConcreteMode else currentRules.gameModeEnum
+        val upcomingHybridMode = if (isHybrid) {
+            (nextPlannedHybridMode ?: resolveHybridStageMode(currentRules, hybridStageNumber, concreteMode)).also {
+                nextPlannedHybridMode = it
+            }
+        } else {
+            null
+        }
+        val isStuntMode = concreteMode == GameMode.STUNTS
+        val isArenaMode = concreteMode == GameMode.ARENA
+        val customData = if (isArenaMode || isStuntMode) null else currentCustomTrack
+        val stuntSequence: List<StuntVariant>? = if (isStuntMode) {
+            if (isHybrid) {
+                val others = (StuntVariant.entries - currentStuntVariant).shuffled()
+                (listOf(currentStuntVariant) + others).take(currentRules.hybridStuntRounds.coerceIn(1, 4))
+            } else {
+                // Play all 4 different stunts in random order
+                StuntVariant.entries.shuffled()
+            }
+        } else {
+            null
+        }
+        if (stuntSequence != null) {
+            currentStuntVariant = stuntSequence.first()
+        }
+
         val baseTrack = when {
+            isStuntMode -> TrackCatalog.getStuntTrack(currentStuntVariant)
             isArenaMode -> TrackCatalog.getArenaTrack(currentArenaShape)
             customData != null -> TrackCatalog.buildCustomTrack(customData)
             else -> TrackCatalog.getTrack(currentTrackId)
         }
-        val track = if (customData == null) {
-            TrackCatalog.withRandomJumps(baseTrack, enabled = currentRules.randomJumpsEnabled)
-        } else if (!currentRules.randomJumpsEnabled) {
-            baseTrack.copy(ramps = emptyList())
-        } else if (baseTrack.ramps.isEmpty()) {
-            TrackCatalog.withRandomJumps(baseTrack, enabled = true)
-        } else {
-            baseTrack
+        val track = when {
+            isStuntMode -> baseTrack
+            customData == null -> TrackCatalog.withRandomJumps(baseTrack, enabled = currentRules.randomJumpsEnabled)
+            !currentRules.randomJumpsEnabled -> baseTrack.copy(ramps = emptyList())
+            baseTrack.ramps.isEmpty() -> TrackCatalog.withRandomJumps(baseTrack, enabled = true)
+            else -> baseTrack
         }
         _activeTrack.value = track
 
-        val engine = RacePhysicsEngine(track, currentTotalLaps, snapshotPlayers, currentRules)
+        val effectiveStageRules = currentRules.copy(gameMode = concreteMode.name)
+        val engine = RacePhysicsEngine(
+            track = track,
+            totalLaps = currentTotalLaps,
+            players = snapshotPlayers,
+            rules = effectiveStageRules,
+            stuntSequenceOverride = stuntSequence,
+            isHybridTour = isHybrid,
+            hybridStageNumber = hybridStageNumber,
+            nextHybridModeName = upcomingHybridMode?.name
+        )
         physicsEngine = engine
 
         val initialSnap = engine.step(0.016f)
@@ -1210,6 +1350,8 @@ class WifiP2pRaceManager(
                     senderId = localPlayerId,
                     raceSnapshot = initialSnap,
                     arenaShape = if (isArenaMode) currentArenaShape.name else null,
+                    stuntVariant = if (isStuntMode) currentStuntVariant.name else null,
+                    stuntSequence = stuntSequence?.map { it.name },
                     rules = currentRules,
                     customTrack = customData,
                     ramps = track.ramps
@@ -1240,6 +1382,12 @@ class WifiP2pRaceManager(
                 engine.submitInput(localPlayerId, inputToApply)
 
                 val snap = engine.step(dt)
+                if (isStuntMode) {
+                    val vName = snap.stuntState?.variant
+                    if (vName != null && _activeTrack.value?.stuntVariant?.name != vName) {
+                        _activeTrack.value = TrackCatalog.getStuntTrack(vName)
+                    }
+                }
                 _raceSnapshot.value = snap
 
                 tickCounter++
@@ -1413,10 +1561,18 @@ class WifiP2pRaceManager(
         if (_role.value != SessionRole.Host && _role.value != SessionRole.Solo) return
         rematchJob?.cancel()
         rematchVotes.clear()
+        val voteTargetMode = if (currentRules.gameModeEnum == GameMode.HYBRID) {
+            (nextPlannedHybridMode ?: resolveHybridStageMode(currentRules, hybridStageNumber, activeConcreteMode)).also {
+                nextPlannedHybridMode = it
+            }
+        } else {
+            currentRules.gameModeEnum
+        }
         rematchOptions = buildRematchVoteOptions(
-            gameMode = currentRules.gameModeEnum,
+            gameMode = voteTargetMode,
             currentTrackId = currentTrackId,
             currentArenaShape = currentArenaShape,
+            currentStuntVariant = currentStuntVariant,
             hasActiveCustomTrack = currentCustomTrack != null
         )
         rematchSecondsLeft = REMATCH_COUNTDOWN_SECONDS
@@ -1477,43 +1633,69 @@ class WifiP2pRaceManager(
             REMATCH_OPTION_RANDOM
         }
 
-        if (currentRules.gameModeEnum == GameMode.ARENA) {
-            val nextShape = if (winnerId == REMATCH_OPTION_RANDOM) {
-                ArenaShape.entries.filter { it != currentArenaShape }.randomOrNull() ?: currentArenaShape
-            } else {
-                runCatching { ArenaShape.valueOf(winnerId) }.getOrDefault(currentArenaShape)
-            }
-            currentArenaShape = nextShape
-            currentTrackId = nextShape.themeTrackId
-            currentCustomTrack = null
-            _activeTrack.value = TrackCatalog.getArenaTrack(nextShape)
-            addSystemChat("Rematch locked in: ${nextShape.displayName}!")
+        val targetMode = if (currentRules.gameModeEnum == GameMode.HYBRID) {
+            val nextMode = nextPlannedHybridMode
+                ?: resolveHybridStageMode(currentRules, hybridStageNumber, activeConcreteMode)
+            hybridStageNumber += 1
+            activeConcreteMode = nextMode
+            nextPlannedHybridMode = resolveHybridStageMode(currentRules, hybridStageNumber, nextMode)
+            nextMode
         } else {
-            if (winnerId == REMATCH_OPTION_RANDOM) {
-                if (Random.nextFloat() < 0.35f) {
-                    val generated = TrackCatalog.generateRandomTrack(seed = System.currentTimeMillis())
-                    currentCustomTrack = generated
-                    currentTrackId = runCatching { TrackId.valueOf(generated.themeId) }.getOrDefault(TrackId.NEON_ROOFTOP)
-                    _activeTrack.value = TrackCatalog.buildCustomTrack(generated)
-                    addSystemChat("Rematch locked in: ${generated.name}!")
+            currentRules.gameModeEnum
+        }
+
+        when (targetMode) {
+            GameMode.ARENA -> {
+                val nextShape = if (winnerId == REMATCH_OPTION_RANDOM) {
+                    ArenaShape.entries.filter { it != currentArenaShape }.randomOrNull() ?: currentArenaShape
                 } else {
-                    val choices = if (currentCustomTrack != null) {
-                        TrackId.entries.toList()
+                    runCatching { ArenaShape.valueOf(winnerId) }.getOrDefault(currentArenaShape)
+                }
+                currentArenaShape = nextShape
+                currentTrackId = nextShape.themeTrackId
+                currentCustomTrack = null
+                _activeTrack.value = TrackCatalog.getArenaTrack(nextShape)
+                addSystemChat("Next up: ${nextShape.displayName}!")
+            }
+            GameMode.STUNTS -> {
+                val nextStunt = if (winnerId == REMATCH_OPTION_RANDOM) {
+                    StuntVariant.entries.filter { it != currentStuntVariant }.randomOrNull() ?: currentStuntVariant
+                } else {
+                    runCatching { StuntVariant.valueOf(winnerId) }.getOrDefault(currentStuntVariant)
+                }
+                currentStuntVariant = nextStunt
+                currentTrackId = nextStunt.themeTrackId
+                currentCustomTrack = null
+                _activeTrack.value = TrackCatalog.getStuntTrack(nextStunt)
+                addSystemChat("Next stunt event: ${nextStunt.displayName}!")
+            }
+            else -> {
+                if (winnerId == REMATCH_OPTION_RANDOM) {
+                    if (Random.nextFloat() < 0.35f) {
+                        val generated = TrackCatalog.generateRandomTrack(seed = System.currentTimeMillis())
+                        currentCustomTrack = generated
+                        currentTrackId = runCatching { TrackId.valueOf(generated.themeId) }.getOrDefault(TrackId.NEON_ROOFTOP)
+                        _activeTrack.value = TrackCatalog.buildCustomTrack(generated)
+                        addSystemChat("Next circuit: ${generated.name}!")
                     } else {
-                        TrackId.entries.filter { it != currentTrackId }
+                        val choices = if (currentCustomTrack != null) {
+                            TrackId.entries.toList()
+                        } else {
+                            TrackId.entries.filter { it != currentTrackId }
+                        }
+                        val nextTrack = choices.randomOrNull() ?: currentTrackId
+                        currentTrackId = nextTrack
+                        currentCustomTrack = null
+                        _activeTrack.value = TrackCatalog.getTrack(nextTrack)
+                        addSystemChat("Next circuit: ${nextTrack.displayName}!")
                     }
-                    val nextTrack = choices.randomOrNull() ?: currentTrackId
+                } else {
+                    val nextTrack = runCatching { TrackId.valueOf(winnerId) }.getOrDefault(currentTrackId)
                     currentTrackId = nextTrack
                     currentCustomTrack = null
                     _activeTrack.value = TrackCatalog.getTrack(nextTrack)
-                    addSystemChat("Rematch locked in: ${nextTrack.displayName}!")
+                    addSystemChat("Vote winner: ${nextTrack.displayName}!")
                 }
-            } else {
-                val nextTrack = runCatching { TrackId.valueOf(winnerId) }.getOrDefault(currentTrackId)
-                currentTrackId = nextTrack
-                currentCustomTrack = null
-                _activeTrack.value = TrackCatalog.getTrack(nextTrack)
-                addSystemChat("Rematch vote winner: ${nextTrack.displayName}!")
             }
         }
 
@@ -1659,18 +1841,24 @@ class WifiP2pRaceManager(
         val playersCopy = synchronized(playersList) { playersList.toList() }
         val chatCopy = synchronized(chatLog) { chatLog.toList() }
         val hostName = playersCopy.firstOrNull { it.isHost }?.name ?: "Host"
+        val effectiveLobbyMode = if (currentRules.gameModeEnum == GameMode.HYBRID) {
+            activeConcreteMode
+        } else {
+            currentRules.gameModeEnum
+        }
         return LobbyStatePayload(
             hostId = playersCopy.firstOrNull { it.isHost }?.id ?: localPlayerId,
             lobbyName = if (_role.value == SessionRole.Solo) "Solo Paddock" else "$hostName's RC Lobby",
             hostIp = discovery.getPrimaryLocalIp(),
             tcpPort = tcpPort,
             udpPort = hostUdpPort,
-            trackId = if (currentRules.gameModeEnum == GameMode.ARENA) {
-                currentArenaShape.themeTrackId.name
-            } else {
-                currentTrackId.name
+            trackId = when (effectiveLobbyMode) {
+                GameMode.ARENA -> currentArenaShape.themeTrackId.name
+                GameMode.STUNTS -> currentStuntVariant.themeTrackId.name
+                else -> currentTrackId.name
             },
             arenaShape = currentArenaShape.name,
+            stuntVariant = currentStuntVariant.name,
             totalLaps = currentTotalLaps,
             players = playersCopy,
             chatHistory = chatCopy,

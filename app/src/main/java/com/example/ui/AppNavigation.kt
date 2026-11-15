@@ -18,6 +18,7 @@ import com.example.network.SessionRole
 import com.example.ui.screens.GarageScreen
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.HostSetupScreen
+import com.example.ui.screens.HybridSetupScreen
 import com.example.ui.screens.JoinBrowserScreen
 import com.example.ui.screens.LobbyScreen
 import com.example.ui.screens.RaceScreen
@@ -28,6 +29,7 @@ import com.example.ui.screens.TrackEditorScreen
 object Routes {
     const val HOME = "home"
     const val HOST_SETUP = "host_setup"
+    const val HYBRID_SETUP = "hybrid_setup"
     const val GARAGE = "garage"
     const val SETTINGS = "settings"
     const val TRACK_EDITOR = "track_editor"
@@ -126,6 +128,7 @@ fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
                 onHostRace = { navController.navigate(Routes.HOST_SETUP) },
                 onJoinRace = { navController.navigate(Routes.BROWSER) },
                 onSoloRace = { viewModel.startSolo() },
+                onOpenHybridSetup = { navController.navigate(Routes.HYBRID_SETUP) },
                 onOpenGarage = { navController.navigate(Routes.GARAGE) },
                 onOpenTrackEditor = { navController.navigate(Routes.TRACK_EDITOR) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
@@ -138,6 +141,29 @@ fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
                 initialRules = rules,
                 onCreateLobby = { setupRules ->
                     viewModel.startHosting(setupRules)
+                },
+                onOpenHybridSetup = { draftRules ->
+                    viewModel.updateRaceRules(draftRules)
+                    navController.navigate(Routes.HYBRID_SETUP)
+                },
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(Routes.HYBRID_SETUP) {
+            val inActiveLobby = sessionRole == SessionRole.Host || sessionRole == SessionRole.Solo
+            HybridSetupScreen(
+                initialRules = effectiveRules,
+                inActiveLobby = inActiveLobby,
+                onHostHybridWifi = { hybridRules ->
+                    viewModel.startHosting(hybridRules)
+                },
+                onStartHybridSolo = { hybridRules ->
+                    viewModel.startSoloWithRules(hybridRules)
+                },
+                onApplyToLobby = { hybridRules ->
+                    viewModel.updateRaceRules(hybridRules)
+                    navController.popBackStack()
                 },
                 onBack = { navController.popBackStack() }
             )
@@ -204,10 +230,13 @@ fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
                 customTracks = customTracks,
                 onSelectTrack = viewModel::selectTrack,
                 onSelectArenaShape = viewModel::selectArenaShape,
+                onSelectStuntVariant = viewModel::selectStuntVariant,
                 onSelectCustomTrack = viewModel::selectCustomTrack,
                 onGenerateRandomTrack = viewModel::generateRandomTrackForLobby,
                 onSelectRandomArena = viewModel::selectRandomArenaForLobby,
+                onSelectRandomStunt = viewModel::selectRandomStuntForLobby,
                 onUpdateRules = viewModel::updateRaceRules,
+                onOpenHybridSetup = { navController.navigate(Routes.HYBRID_SETUP) },
                 onOpenTrackEditor = { navController.navigate(Routes.TRACK_EDITOR) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                 onSelectLaps = viewModel::setTotalLaps,

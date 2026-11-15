@@ -11,12 +11,14 @@ import com.example.model.AudioSettings
 import com.example.model.ControlMode
 import com.example.model.CustomTrackData
 import com.example.model.DiscoveredLobby
+import com.example.model.GameMode
 import com.example.model.LobbyStatePayload
 import com.example.model.PlayerProfile
 import com.example.model.RaceRulesSettings
 import com.example.model.RaceSnapshot
 import com.example.model.RcCarType
 import com.example.model.RematchCountdownState
+import com.example.model.StuntVariant
 import com.example.model.TrackDefinition
 import com.example.model.TrackId
 import com.example.network.RaceNavEvent
@@ -165,7 +167,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startSolo() {
-        raceManager.startSoloSession(profile.value, initialRules = rules.value)
+        val soloRules = rules.value.copy(gameMode = GameMode.RACE.name)
+        raceManager.startSoloSession(profile.value, initialRules = soloRules)
+    }
+
+    fun startSoloWithRules(setupRules: RaceRulesSettings) {
+        viewModelScope.launch {
+            prefsRepo.updateRaceRules(setupRules)
+        }
+        raceManager.startSoloSession(profile.value, initialRules = setupRules)
     }
 
     fun startBrowsing() {
@@ -198,6 +208,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val choices = ArenaShape.entries.filter { it.name != current }.ifEmpty { ArenaShape.entries }
         val picked = choices[(System.currentTimeMillis() % choices.size).toInt().coerceAtLeast(0)]
         raceManager.selectArenaShape(picked)
+    }
+    fun selectStuntVariant(variant: StuntVariant) = raceManager.selectStuntVariant(variant)
+    fun selectRandomStuntForLobby() {
+        val current = lobbyState.value?.stuntVariant
+        val choices = StuntVariant.entries.filter { it.name != current }.ifEmpty { StuntVariant.entries }
+        val picked = choices[(System.currentTimeMillis() % choices.size).toInt().coerceAtLeast(0)]
+        raceManager.selectStuntVariant(picked)
     }
 
     fun setTotalLaps(laps: Int) {

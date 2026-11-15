@@ -31,7 +31,9 @@ fun DrawScope.drawRcCar(
     jumpZ: Float = 0f,
     scale: Float = 1f,
     animTimeSec: Float = 0f,
-    isCarryingFlag: Boolean = false
+    isCarryingFlag: Boolean = false,
+    hasElectroAura: Boolean = false,
+    isElectroParalyzed: Boolean = false
 ) {
     val deg = ((angleRad + spinVisualOffset) * 180f / PI.toFloat())
     val frontWheelAngle = steerVisual * 22f
@@ -40,6 +42,50 @@ fun DrawScope.drawRcCar(
     val shadowDx = airElevation * 38f * scale
     val shadowDy = airElevation * 44f * scale
     val shadowScale = scale * (1f - airElevation * 0.14f)
+
+    // Electro Shock active 155px proximity aura on the track surface
+    if (hasElectroAura) {
+        val auraBase = 155f * scale
+        val pulse = 0.5f + 0.5f * sin(animTimeSec * 16f)
+        drawCircle(
+            color = Color(0xFF7C4DFF).copy(alpha = 0.14f + 0.10f * pulse),
+            radius = auraBase,
+            center = Offset(x, y)
+        )
+        drawCircle(
+            color = Color(0xFF00E5FF).copy(alpha = 0.72f),
+            radius = auraBase * (0.94f + 0.06f * pulse),
+            center = Offset(x, y),
+            style = Stroke(width = 3.2f * scale)
+        )
+        drawCircle(
+            color = Color(0xFFB388FF).copy(alpha = 0.85f),
+            radius = auraBase * 0.62f,
+            center = Offset(x, y),
+            style = Stroke(width = 2.0f * scale)
+        )
+        // Crackling radial lightning bolts from chassis out to proximity perimeter
+        for (bolt in 0 until 6) {
+            val baseAng = animTimeSec * 7.5f + bolt * (PI.toFloat() / 3f)
+            val r1 = 24f * scale
+            val r2 = 76f * scale
+            val r3 = 138f * scale
+            val jitter = sin(animTimeSec * 36f + bolt * 2.1f) * 0.22f
+            val p1 = Offset(x + cos(baseAng) * r1, y + sin(baseAng) * r1)
+            val p2 = Offset(x + cos(baseAng + jitter) * r2, y + sin(baseAng + jitter) * r2)
+            val p3 = Offset(x + cos(baseAng - jitter * 0.7f) * r3, y + sin(baseAng - jitter * 0.7f) * r3)
+            val boltPath = Path().apply {
+                moveTo(p1.x, p1.y)
+                lineTo(p2.x, p2.y)
+                lineTo(p3.x, p3.y)
+            }
+            drawPath(
+                path = boltPath,
+                color = if (bolt % 2 == 0) Color(0xFF00E5FF) else Color(0xFFB388FF),
+                style = Stroke(width = 2.6f * scale, cap = StrokeCap.Round)
+            )
+        }
+    }
 
     // Detached ground shadow (shifts away as car launches airborne)
     withTransform({
@@ -152,6 +198,37 @@ fun DrawScope.drawRcCar(
             drawPath(pennant, Color(0xFFFFAB00))
             drawPath(pennant, Color(0xFFFFF8E1), style = Stroke(width = 1.6f))
             drawCircle(Color.White, radius = 3.6f, center = Offset(2f, -1f))
+        }
+
+        // Electro Shock motionless paralysis lock cage
+        if (isElectroParalyzed) {
+            val flash = 0.5f + 0.5f * sin(animTimeSec * 28f)
+            drawCircle(
+                color = Color(0xFF7C4DFF).copy(alpha = 0.28f + 0.16f * flash),
+                radius = 30f,
+                center = Offset.Zero
+            )
+            drawCircle(
+                color = if (flash > 0.45f) Color(0xFF00E5FF) else Color(0xFFB388FF),
+                radius = 30f,
+                center = Offset.Zero,
+                style = Stroke(width = 3f)
+            )
+            // Zig-zag electric arcs across locked wheels
+            val arc1 = Path().apply {
+                moveTo(-18f, -18f)
+                lineTo(-4f, -7f + (flash - 0.5f) * 8f)
+                lineTo(6f, 8f - (flash - 0.5f) * 8f)
+                lineTo(18f, 18f)
+            }
+            val arc2 = Path().apply {
+                moveTo(-18f, 18f)
+                lineTo(-5f, 6f - (flash - 0.5f) * 8f)
+                lineTo(7f, -6f + (flash - 0.5f) * 8f)
+                lineTo(18f, -18f)
+            }
+            drawPath(arc1, Color(0xFF80D8FF), style = Stroke(width = 2.6f, cap = StrokeCap.Round))
+            drawPath(arc2, Color(0xFFEA80FC), style = Stroke(width = 2.4f, cap = StrokeCap.Round))
         }
 
         // EMP Stun sparks

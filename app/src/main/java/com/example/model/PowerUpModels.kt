@@ -37,6 +37,12 @@ enum class PowerUpType(
         shortName = "GRIP+",
         description = "Max traction & boost for 4s",
         colorHex = 0xFFE040FB
+    ),
+    ELECTRO_SHOCK(
+        displayName = "Electro Shock",
+        shortName = "SHOCK",
+        description = "4s electric aura freezes nearby cars",
+        colorHex = 0xFF7C4DFF
     )
 }
 

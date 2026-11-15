@@ -232,46 +232,107 @@ fun SettingsScreen(
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            GameMode.entries.forEach { mode ->
-                                FilterChip(
-                                    selected = rules.gameModeEnum == mode,
-                                    enabled = canEditRules,
-                                    onClick = { onUpdateRules(rules.copy(gameMode = mode.name)) },
-                                    label = { Text(mode.displayName, style = MaterialTheme.typography.labelMedium) },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("settings_mode_${mode.name}")
-                                )
-                            }
-                        }
-
-                        if (rules.gameModeEnum == GameMode.ARENA) {
-                            Text(
-                                text = "Flag Hold Target: ${rules.arenaTargetMinutes} min",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        GameMode.entries.chunked(2).forEach { rowModes ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                listOf(1, 2, 3, 5).forEach { mins ->
+                                rowModes.forEach { mode ->
                                     FilterChip(
-                                        selected = rules.arenaTargetMinutes == mins,
+                                        selected = rules.gameModeEnum == mode,
                                         enabled = canEditRules,
-                                        onClick = { onUpdateRules(rules.copy(arenaTargetMinutes = mins)) },
-                                        label = { Text("${mins}m", style = MaterialTheme.typography.labelSmall) },
+                                        onClick = { onUpdateRules(rules.copy(gameMode = mode.name)) },
+                                        label = { Text(mode.displayName, style = MaterialTheme.typography.labelMedium) },
                                         modifier = Modifier
                                             .weight(1f)
-                                            .testTag("settings_arena_min_$mins")
+                                            .testTag("settings_mode_${mode.name}")
                                     )
                                 }
                             }
-                        } else {
+                        }
+
+                        when (rules.gameModeEnum) {
+                            GameMode.ARENA -> {
+                                Text(
+                                    text = "Flag Hold Target: ${rules.arenaTargetMinutes} min",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    listOf(1, 2, 3, 5).forEach { mins ->
+                                        FilterChip(
+                                            selected = rules.arenaTargetMinutes == mins,
+                                            enabled = canEditRules,
+                                            onClick = { onUpdateRules(rules.copy(arenaTargetMinutes = mins)) },
+                                            label = { Text("${mins}m", style = MaterialTheme.typography.labelSmall) },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("settings_arena_min_$mins")
+                                        )
+                                    }
+                                }
+                            }
+                            GameMode.STUNTS -> {
+                                Text(
+                                    text = "Turn-based 4-stunt gauntlet (Long Jump, Goal Strike, 9-Pin Bowling & RC Golf) — 1x starting Nitro every turn.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            GameMode.HYBRID -> {
+                                val enabledCount = listOf(
+                                    rules.hybridIncludeCircuit,
+                                    rules.hybridIncludeArena,
+                                    rules.hybridIncludeStunts
+                                ).count { it }
+                                Text(
+                                    text = "Included Hybrid Event Types:",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    FilterChip(
+                                        selected = rules.hybridIncludeCircuit,
+                                        enabled = canEditRules,
+                                        onClick = {
+                                            if (!rules.hybridIncludeCircuit || enabledCount > 1) {
+                                                onUpdateRules(rules.copy(hybridIncludeCircuit = !rules.hybridIncludeCircuit))
+                                            }
+                                        },
+                                        label = { Text("Circuit", style = MaterialTheme.typography.labelSmall) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    FilterChip(
+                                        selected = rules.hybridIncludeArena,
+                                        enabled = canEditRules,
+                                        onClick = {
+                                            if (!rules.hybridIncludeArena || enabledCount > 1) {
+                                                onUpdateRules(rules.copy(hybridIncludeArena = !rules.hybridIncludeArena))
+                                            }
+                                        },
+                                        label = { Text("Arena", style = MaterialTheme.typography.labelSmall) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    FilterChip(
+                                        selected = rules.hybridIncludeStunts,
+                                        enabled = canEditRules,
+                                        onClick = {
+                                            if (!rules.hybridIncludeStunts || enabledCount > 1) {
+                                                onUpdateRules(rules.copy(hybridIncludeStunts = !rules.hybridIncludeStunts))
+                                            }
+                                        },
+                                        label = { Text("Stunts", style = MaterialTheme.typography.labelSmall) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            }
+                            GameMode.RACE -> {
                             Text(
                                 text = "Winning Condition",
                                 style = MaterialTheme.typography.titleMedium,
@@ -342,6 +403,7 @@ fun SettingsScreen(
                                         )
                                     }
                                 }
+                            }
                             }
                         }
 

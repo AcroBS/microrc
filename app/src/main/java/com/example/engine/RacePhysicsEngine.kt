@@ -18,6 +18,7 @@ import com.example.model.RaceRulesSettings
 import com.example.model.RaceSnapshot
 import com.example.model.RacerState
 import com.example.model.RcCarType
+import com.example.model.StuntVariant
 import com.example.model.TrackDefinition
 import com.example.model.TrackExplosion
 import com.example.model.TrackFieldPickup
@@ -36,11 +37,15 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 class RacePhysicsEngine(
-    private val track: TrackDefinition,
+    private var track: TrackDefinition,
     private val totalLaps: Int,
     players: List<LobbyPlayer>,
     private val rules: RaceRulesSettings = RaceRulesSettings(),
-    private val random: Random = Random.Default
+    private val random: Random = Random.Default,
+    stuntSequenceOverride: List<StuntVariant>? = null,
+    private val isHybridTour: Boolean = false,
+    private val hybridStageNumber: Int = 1,
+    private val nextHybridModeName: String? = null
 ) {
     private data class MutableRacer(
         val playerId: String,
@@ -83,27 +88,45 @@ class RacePhysicsEngine(
         var spinImmunityMs: Long = 0L,
         var botLaneOffset: Float = 0f,
         var botPowerUpDelayMs: Long = 0L,
-        var minesAvailable: Int = 1,
-        var roundMineGranted: Boolean = true,
+        var minesAvailable: Int = 0,
+        var lastMineGrantedLap: Int = 1,
         var botMineDelayMs: Long = 0L,
         var invertedSteerMs: Long = 0L,
         var portalCooldownMs: Long = 0L,
         var wallBumpCooldownMs: Long = 0L,
         var collisionSeq: Int = 0,
-        var portalWarpSeq: Int = 0
+        var portalWarpSeq: Int = 0,
+        var electroShockAuraMs: Long = 0L,
+        var electroParalyzedMs: Long = 0L,
+        var electroImmunityMs: Long = 0L
     )
 
-    private val isArenaMode: Boolean = track.isArena || rules.gameModeEnum == GameMode.ARENA
+    private val isStuntMode: Boolean = track.isStunt || rules.gameModeEnum == GameMode.STUNTS
+    private val isArenaMode: Boolean = !isStuntMode && (track.isArena || rules.gameModeEnum == GameMode.ARENA)
     private val winCondition: WinCondition = rules.winConditionEnum
     private val speedPreset: CarSpeedPreset = rules.carSpeedEnum
     private val effectiveLaps: Int = totalLaps.coerceIn(1, 9)
     private val timeLimitMs: Long = rules.timeLimitSec.coerceIn(30, 600) * 1000L
     private val arenaTargetMs: Long = rules.arenaTargetMinutes.coerceIn(1, 10) * 60_000L
 
+    private val stuntController: StuntArenaController? = if (isStuntMode) {
+        val seq = stuntSequenceOverride?.takeIf { it.isNotEmpty() } ?: run {
+            val shuffled = StuntVariant.entries.shuffled(random)
+            if (isHybridTour) {
+                shuffled.take(rules.hybridStuntRounds.coerceIn(1, 4))
+            } else {
+                shuffled
+            }
+        }
+        StuntArenaController(seq, random)
+    } else {
+        null
+    }
+
     private val racers: MutableList<MutableRacer> = players.mapIndexed { idx, p ->
         val (sx, sy, angle) = TrackCatalog.gridStartTransform(track, idx)
         val car = runCatching { RcCarType.valueOf(p.carType) }.getOrDefault(RcCarType.VOLT_BUGGY)
-        val startTrackIdx = (track.centerline.size - 4 - (idx / 2) * 3).mod(track.centerline.size)
+        val startTrackIdx = (track.centerline.size - 4 - (idx / 2) * 3).mod(track.centerline.size.coerceAtLeast(1))
         MutableRacer(
             playerId = p.id,
             name = p.name,
@@ -117,9 +140,9 @@ class RacePhysicsEngine(
             checkpointIndex = startTrackIdx,
             lastTrackIdx = startTrackIdx,
             botLaneOffset = ((idx % 3) - 1) * 26f,
-            minesAvailable = 1,
-            roundMineGranted = true,
-            botMineDelayMs = if (p.isBot) random.nextLong(6500L, 16500L) else 0L
+            minesAvailable = 0,
+            lastMineGrantedLap = 1,
+            botMineDelayMs = 0L
         )
     }.toMutableList()
 
@@ -180,7 +203,13 @@ class RacePhysicsEngine(
     private val pendingMineDropTrigger: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     init {
-        if (isArenaMode) {
+        if (stuntController != null) {
+            track = stuntController.trackForCurrentRound()
+            itemBoxes.clear()
+            stuntController.initializeFirstRound(racers.size) { turnIdx, variant ->
+                setupStuntTurn(turnIdx, variant)
+            }
+        } else if (isArenaMode) {
             val avoid = racers.map { it.x to it.y } + track.props.map { it.x to it.y }
             val (fx, fy) = TrackCatalog.sampleArenaInteriorPoint(
                 track = track,
@@ -192,6 +221,74 @@ class RacePhysicsEngine(
             flagX = fx
             flagY = fy
         }
+    }
+
+    private fun setupStuntTurn(turnIdx: Int, variant: StuntVariant) {
+        track = TrackCatalog.getStuntTrack(variant)
+        latestInputs.clear()
+        pendingPowerUpTrigger.clear()
+        pendingMineDropTrigger.clear()
+        hazards.clear()
+        fieldPickups.clear()
+        portalPair = null
+        racers.forEachIndexed { idx, r ->
+            r.vx = 0f
+            r.vy = 0f
+            r.jumpZ = 0f
+            r.vz = 0f
+            r.boostMs = 0L
+            r.shieldMs = 0L
+            r.stunnedMs = 0L
+            r.overdriveMs = 0L
+            r.invertedSteerMs = 0L
+            r.electroShockAuraMs = 0L
+            r.electroParalyzedMs = 0L
+            r.electroImmunityMs = 0L
+            r.minesAvailable = 0
+            if (idx == turnIdx) {
+                r.x = 230f
+                r.y = 700f
+                r.prevX = 230f
+                r.prevY = 700f
+                r.angleRad = 0f
+                r.heldPowerUp = PowerUpType.TURBO_NITRO
+                r.botPowerUpDelayMs = 1400L
+                r.lap = (stuntController?.roundIndexZeroBased ?: 0) + 1
+            } else {
+                val px = 250f + idx * 95f
+                val py = 235f
+                r.x = px
+                r.y = py
+                r.prevX = px
+                r.prevY = py
+                r.angleRad = (PI / 2.0).toFloat()
+                r.heldPowerUp = null
+            }
+        }
+    }
+
+    fun stuntSequence(): List<StuntVariant> = stuntController?.sequence.orEmpty()
+
+    fun positionActiveStuntRacerForTest(
+        x: Float,
+        y: Float,
+        vx: Float = 0f,
+        vy: Float = 0f,
+        angleRad: Float = 0f,
+        jumpZ: Float = 0f,
+        vz: Float = 0f
+    ) {
+        val sc = stuntController ?: return
+        val r = racers.getOrNull(sc.turnIndex) ?: return
+        r.x = x
+        r.y = y
+        r.prevX = x
+        r.prevY = y
+        r.vx = vx
+        r.vy = vy
+        r.angleRad = angleRad
+        r.jumpZ = jumpZ
+        r.vz = vz
     }
 
     fun submitInput(playerId: String, input: ControlInput) {
@@ -223,9 +320,9 @@ class RacePhysicsEngine(
     }
 
     fun grantMineForTest(playerId: String, count: Int = 1) {
+        if (isArenaMode || isStuntMode) return
         val racer = racers.find { it.playerId == playerId } ?: return
         racer.minesAvailable = count.coerceIn(0, 1)
-        racer.roundMineGranted = true
     }
 
     fun spawnFieldPickupForTest(
@@ -633,14 +730,23 @@ class RacePhysicsEngine(
             if (elapsedMs >= countdownDuration) {
                 phase = RacePhase.RACING
                 raceTimeMs = 0L
-                setBanner(
-                    if (isArenaMode) "GO! CAPTURE THE FLAG!" else "GO! RACE ON!",
-                    1600L
-                )
+                val startBanner = when {
+                    stuntController != null -> {
+                        val starter = racers.getOrNull(stuntController.turnIndex)?.name ?: "DRIVER"
+                        "$starter UP — ${stuntController.activeVariant.displayName.uppercase()}!"
+                    }
+                    isArenaMode -> "GO! CAPTURE THE FLAG!"
+                    else -> "GO! RACE ON!"
+                }
+                setBanner(startBanner, 1800L)
             } else {
                 val secLeft = (((countdownDuration - elapsedMs) / 1000L) + 1).toInt().coerceIn(1, 3)
                 return buildSnapshot(countdownSec = secLeft)
             }
+        }
+
+        if (stuntController != null) {
+            return stepStuntMatch(stuntController, dtMs, dt)
         }
 
         if (phase == RacePhase.RACING) {
@@ -716,7 +822,19 @@ class RacePhysicsEngine(
 
             if (phase == RacePhase.RACING && !racer.finished) {
                 val shouldUsePowerUp = if (racer.isBot) {
-                    racer.heldPowerUp != null && racer.botPowerUpDelayMs <= 0L
+                    val held = racer.heldPowerUp
+                    when {
+                        held == null -> false
+                        held == PowerUpType.ELECTRO_SHOCK -> {
+                            val rivalNear = racers.any {
+                                it.playerId != racer.playerId &&
+                                    !it.finished &&
+                                    TrackCatalog.distance(racer.x, racer.y, it.x, it.y) <= ELECTRO_SHOCK_RADIUS_PX * 0.92f
+                            }
+                            rivalNear || racer.botPowerUpDelayMs <= 0L
+                        }
+                        else -> racer.botPowerUpDelayMs <= 0L
+                    }
                 } else {
                     pendingPowerUpTrigger.remove(racer.playerId)
                 }
@@ -724,7 +842,10 @@ class RacePhysicsEngine(
                     activatePowerUp(racer)
                 }
 
-                val shouldDropMine = if (racer.isBot) {
+                val shouldDropMine = if (isArenaMode || isStuntMode) {
+                    pendingMineDropTrigger.remove(racer.playerId)
+                    false
+                } else if (racer.isBot) {
                     racer.minesAvailable > 0 && racer.botMineDelayMs <= 0L
                 } else {
                     pendingMineDropTrigger.remove(racer.playerId)
@@ -754,6 +875,9 @@ class RacePhysicsEngine(
 
         // Car-to-car bumper collisions (includes Arena flag transfer on collision!)
         resolveCarCollisions()
+
+        // Active Electro Shock proximity aura checks
+        updateElectroShockAuras()
 
         // Arena flag pickup & carry counter
         if (isArenaMode && phase == RacePhase.RACING) {
@@ -839,6 +963,17 @@ class RacePhysicsEngine(
             racer.spinVisualOffset = 0f
         }
         if (racer.overdriveMs > 0L) racer.overdriveMs = (racer.overdriveMs - dtMs).coerceAtLeast(0L)
+        if (racer.electroShockAuraMs > 0L) {
+            racer.electroShockAuraMs = (racer.electroShockAuraMs - dtMs).coerceAtLeast(0L)
+        }
+        if (racer.electroParalyzedMs > 0L) {
+            racer.electroParalyzedMs = (racer.electroParalyzedMs - dtMs).coerceAtLeast(0L)
+            racer.vx = 0f
+            racer.vy = 0f
+        }
+        if (racer.electroImmunityMs > 0L) {
+            racer.electroImmunityMs = (racer.electroImmunityMs - dtMs).coerceAtLeast(0L)
+        }
         if (racer.invertedSteerMs > 0L) racer.invertedSteerMs = (racer.invertedSteerMs - dtMs).coerceAtLeast(0L)
         if (racer.portalCooldownMs > 0L) racer.portalCooldownMs = (racer.portalCooldownMs - dtMs).coerceAtLeast(0L)
         if (racer.wallBumpCooldownMs > 0L) racer.wallBumpCooldownMs = (racer.wallBumpCooldownMs - dtMs).coerceAtLeast(0L)
@@ -1117,8 +1252,8 @@ class RacePhysicsEngine(
             val carrier = racers.find { it.playerId == currentCarrierId }
             if (carrier == null) {
                 flagCarrierId = null
-            } else if (carrier.stunnedMs > 0L) {
-                dropFlagFrom(carrier, "spun out")
+            } else if (carrier.stunnedMs > 0L || carrier.electroParalyzedMs > 0L) {
+                dropFlagFrom(carrier, if (carrier.electroParalyzedMs > 0L) "got electro-shocked" else "spun out")
             } else {
                 flagX = carrier.x
                 flagY = carrier.y
@@ -1132,6 +1267,7 @@ class RacePhysicsEngine(
                     !r.finished &&
                         r.jumpZ < 0.55f &&
                         r.stunnedMs == 0L &&
+                        r.electroParalyzedMs == 0L &&
                         (r.flagPickupImmunityMs == 0L || r.shieldMs > 0L) &&
                         sweptFlagDistance(r, flagX, flagY) <= flagCaptureRadiusFor(r)
                 }
@@ -1151,11 +1287,17 @@ class RacePhysicsEngine(
     private fun integrateCarPhysics(racer: MutableRacer, input: ControlInput, dt: Float) {
         racer.prevX = racer.x
         racer.prevY = racer.y
+        if (racer.electroParalyzedMs > 0L) {
+            racer.vx = 0f
+            racer.vy = 0f
+            racer.steerVisual = 0f
+            return
+        }
         val isAirborne = racer.jumpZ > 0.08f
         var closestIdx = racer.lastTrackIdx
         var isOffRoad = false
 
-        if (!track.isArena) {
+        if (!track.isArena && !track.isStunt) {
             val (idx, distToCenter) = TrackCatalog.nearestTrackPointLocal(
                 track = track,
                 x = racer.x,
@@ -1350,6 +1492,40 @@ class RacePhysicsEngine(
             return
         }
 
+        if (track.isStunt) {
+            val rPx = racer.carType.radiusPx
+            if (racer.x < StuntArenaController.RAMP_EXIT_X && !isAirborne) {
+                val minRunwayY = 700f - 148f + rPx * 0.5f
+                val maxRunwayY = 700f + 148f - rPx * 0.5f
+                if (racer.y < minRunwayY) {
+                    racer.y = minRunwayY
+                    if (racer.vy < 0f) racer.vy = -racer.vy * 0.55f
+                } else if (racer.y > maxRunwayY) {
+                    racer.y = maxRunwayY
+                    if (racer.vy > 0f) racer.vy = -racer.vy * 0.55f
+                }
+                if (racer.x < 160f + rPx) {
+                    racer.x = 160f + rPx
+                    if (racer.vx < 0f) racer.vx = -racer.vx * 0.55f
+                }
+            } else {
+                val minStadiumY = 230f + rPx
+                val maxStadiumY = 1170f - rPx
+                if (racer.y < minStadiumY) {
+                    racer.y = minStadiumY
+                    if (racer.vy < 0f) racer.vy = -racer.vy * 0.55f
+                } else if (racer.y > maxStadiumY) {
+                    racer.y = maxStadiumY
+                    if (racer.vy > 0f) racer.vy = -racer.vy * 0.55f
+                }
+                if (racer.x > 2530f - rPx) {
+                    racer.x = 2530f - rPx
+                    if (racer.vx > 0f) racer.vx = -racer.vx * 0.45f
+                }
+            }
+            return
+        }
+
         // Circuit centerline corridor boundary (continuous spline segment projection)
         val proj = TrackCatalog.nearestTrackSegmentLocal(
             track = track,
@@ -1490,23 +1666,42 @@ class RacePhysicsEngine(
                         PowerUpType.TURBO_NITRO,
                         PowerUpType.TURBO_NITRO,
                         PowerUpType.EMP_ZAP,
+                        PowerUpType.ELECTRO_SHOCK,
                         PowerUpType.OVERDRIVE_GRIP,
                         PowerUpType.SHIELD
                     )
                 } else {
                     PowerUpType.entries
                 }
-                racer.heldPowerUp = pool[random.nextInt(pool.size)]
+                val picked = pool[random.nextInt(pool.size)]
+                racer.heldPowerUp = picked
                 if (racer.isBot) {
-                    racer.botPowerUpDelayMs = random.nextLong(700L, 2200L)
+                    racer.botPowerUpDelayMs = if (picked == PowerUpType.ELECTRO_SHOCK) {
+                        random.nextLong(2200L, 4200L)
+                    } else {
+                        random.nextLong(700L, 2200L)
+                    }
                 }
                 break
             }
         }
     }
 
+    private fun grantLapMineIfEligible(racer: MutableRacer): Boolean {
+        if (isArenaMode || racer.finished) return false
+        if (racer.lap >= 2 && racer.lap > racer.lastMineGrantedLap) {
+            racer.lastMineGrantedLap = racer.lap
+            racer.minesAvailable = 1
+            if (racer.isBot) {
+                racer.botMineDelayMs = random.nextLong(2800L, 9200L)
+            }
+            return true
+        }
+        return false
+    }
+
     private fun dropMine(racer: MutableRacer) {
-        if (racer.minesAvailable <= 0) return
+        if (isArenaMode || racer.minesAvailable <= 0) return
         racer.minesAvailable = 0
         val dropX = racer.x - cos(racer.angleRad) * 54f
         val dropY = racer.y - sin(racer.angleRad) * 54f
@@ -1587,6 +1782,9 @@ class RacePhysicsEngine(
                                 leader.checkpointIndex = rCp
                                 leader.lastTrackIdx = rLastIdx
                                 leader.sectorMask = rMask
+
+                                grantLapMineIfEligible(racer)
+                                grantLapMineIfEligible(leader)
                             }
 
                             racer.powerUpHits += 1
@@ -1748,7 +1946,203 @@ class RacePhysicsEngine(
                 racer.overdriveMs = 4200L
                 setBanner("${racer.name} activated Overdrive!", 1500L)
             }
+            PowerUpType.ELECTRO_SHOCK -> {
+                racer.electroShockAuraMs = ELECTRO_AURA_DURATION_MS
+                setBanner("${racer.name} activated ELECTRO SHOCK!", 1750L)
+                updateElectroShockAuras()
+            }
         }
+    }
+
+    private fun updateElectroShockAuras() {
+        if (phase != RacePhase.RACING) return
+        for (source in racers) {
+            if (source.electroShockAuraMs <= 0L || source.finished) continue
+            for (target in racers) {
+                if (target.playerId == source.playerId || target.finished) continue
+                if (target.electroParalyzedMs > 0L || target.electroImmunityMs > 0L) continue
+                if (abs(source.jumpZ - target.jumpZ) > 0.45f) continue
+                val dist = TrackCatalog.distance(source.x, source.y, target.x, target.y)
+                if (dist <= ELECTRO_SHOCK_RADIUS_PX) {
+                    target.collisionSeq += 1
+                    if (target.shieldMs > 0L) {
+                        target.shieldMs = 0L
+                        target.electroImmunityMs = 1000L
+                        setBanner("${target.name}'s Shield absorbed ${source.name}'s Electro Shock!", 1650L)
+                    } else {
+                        target.electroParalyzedMs = ELECTRO_PARALYZE_DURATION_MS
+                        target.electroImmunityMs = ELECTRO_AURA_DURATION_MS + 300L
+                        target.vx = 0f
+                        target.vy = 0f
+                        source.powerUpHits += 1
+                        source.racePoints += 45
+                        if (isArenaMode && flagCarrierId == target.playerId) {
+                            dropFlagFrom(target, "got frozen by Electro Shock")
+                        } else {
+                            setBanner("SHOCKED! ${source.name} froze ${target.name}!", 1750L)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun stepStuntMatch(
+        sc: StuntArenaController,
+        dtMs: Long,
+        dt: Float
+    ): RaceSnapshot {
+        if (phase == RacePhase.RACING) {
+            raceTimeMs += dtMs
+        }
+
+        val expIt = explosions.iterator()
+        while (expIt.hasNext()) {
+            val exp = expIt.next()
+            val newAge = exp.ageMs + dtMs
+            if (newAge >= exp.durationMs) {
+                expIt.remove()
+            } else {
+                val idx = explosions.indexOf(exp)
+                if (idx >= 0) explosions[idx] = exp.copy(ageMs = newAge)
+            }
+        }
+
+        val activeIdx = sc.turnIndex.coerceIn(0, (racers.size - 1).coerceAtLeast(0))
+        racers.forEachIndexed { idx, racer ->
+            if (idx != activeIdx) {
+                racer.vx = 0f
+                racer.vy = 0f
+                pendingPowerUpTrigger.remove(racer.playerId)
+                pendingMineDropTrigger.remove(racer.playerId)
+            }
+        }
+
+        val activeRacer = racers.getOrNull(activeIdx)
+        if (activeRacer != null && phase == RacePhase.RACING) {
+            val wasAirborne = activeRacer.jumpZ > 0.01f
+            tickTimers(activeRacer, dtMs, dt)
+
+            val input = if (sc.turnPhase != StuntArenaController.PHASE_DRIVING) {
+                pendingPowerUpTrigger.remove(activeRacer.playerId)
+                pendingMineDropTrigger.remove(activeRacer.playerId)
+                ControlInput(throttle = 0f, steer = 0f)
+            } else if (activeRacer.isBot) {
+                val (botInp, fireNitro) = sc.computeBotInput(
+                    carX = activeRacer.x,
+                    carY = activeRacer.y,
+                    carAngleRad = activeRacer.angleRad,
+                    heldPowerUp = activeRacer.heldPowerUp
+                )
+                if (fireNitro && activeRacer.heldPowerUp != null) {
+                    activatePowerUp(activeRacer)
+                }
+                botInp
+            } else {
+                if (pendingPowerUpTrigger.remove(activeRacer.playerId)) {
+                    activatePowerUp(activeRacer)
+                }
+                pendingMineDropTrigger.remove(activeRacer.playerId)
+                val raw = latestInputs[activeRacer.playerId] ?: ControlInput(
+                    throttle = if (rules.autoAccelerate) 1f else 0f,
+                    steer = 0f
+                )
+                if (sc.shouldCutForwardThrottle(activeRacer.x, activeRacer.jumpZ)) {
+                    raw.copy(throttle = raw.throttle.coerceAtMost(0f))
+                } else {
+                    raw
+                }
+            }
+
+            integrateCarPhysics(activeRacer, input, dt)
+            handleWorldAndPropCollisions(activeRacer)
+
+            val baseMaxSpeed = activeRacer.carType.maxSpeedPx * speedPreset.speedMultiplier
+            sc.applyProgressiveRunwayBoost(
+                carX = activeRacer.x,
+                carY = activeRacer.y,
+                jumpZ = activeRacer.jumpZ,
+                baseMaxSpeed = baseMaxSpeed,
+                currentBoostMs = activeRacer.boostMs
+            )?.let { (newBoostMs, targetSpd) ->
+                activeRacer.boostMs = newBoostMs
+                if (hypot(activeRacer.vx, activeRacer.vy) < targetSpd) {
+                    activeRacer.vx = cos(activeRacer.angleRad) * targetSpd
+                    activeRacer.vy = sin(activeRacer.angleRad) * targetSpd
+                }
+            }
+
+            sc.checkMegaRampLaunch(
+                carX = activeRacer.x,
+                carY = activeRacer.y,
+                jumpZ = activeRacer.jumpZ,
+                vx = activeRacer.vx,
+                vy = activeRacer.vy,
+                baseMaxSpeed = baseMaxSpeed
+            )?.let { (nvx, nvy, nvz) ->
+                activeRacer.vx = nvx
+                activeRacer.vy = nvy
+                activeRacer.vz = nvz
+                activeRacer.jumpZ = 0.05f
+                activeRacer.jumpCooldownMs = 800L
+            }
+
+            val outcome = sc.stepTurn(
+                dtMs = dtMs,
+                dt = dt,
+                carX = activeRacer.x,
+                carY = activeRacer.y,
+                carVx = activeRacer.vx,
+                carVy = activeRacer.vy,
+                carRadius = activeRacer.carType.radiusPx,
+                jumpZ = activeRacer.jumpZ,
+                wasAirborneBeforeTick = wasAirborne,
+                nextExplosionId = { nextExplosionId++ },
+                snapCarTo = { sx, sy ->
+                    activeRacer.x = sx
+                    activeRacer.y = sy
+                    activeRacer.vx = 0f
+                    activeRacer.vy = 0f
+                }
+            )
+
+            if (outcome.bumpedCollision) {
+                activeRacer.collisionSeq += 1
+            }
+            outcome.spawnedExplosion?.let { explosions.add(it) }
+            if (outcome.pointsAwarded > 0) {
+                activeRacer.racePoints += outcome.pointsAwarded
+                activeRacer.lap = sc.roundIndexZeroBased + 1
+            }
+            outcome.bannerMessage?.let { msg ->
+                setBanner("${activeRacer.name}: $msg", 1550L)
+            }
+            if (outcome.advanceToNextTurn) {
+                val matchDone = sc.advanceTurnOrRound(racers.size) { nextTurnIdx, nextVariant, newRound ->
+                    setupStuntTurn(nextTurnIdx, nextVariant)
+                    val nextDriver = racers.getOrNull(nextTurnIdx)?.name ?: "Driver"
+                    val msg = if (newRound) {
+                        "STUNT ${sc.roundIndexZeroBased + 1}/${sc.totalRounds}: ${nextVariant.displayName.uppercase()} — $nextDriver UP!"
+                    } else {
+                        "$nextDriver'S TURN — ${nextVariant.shortName}!"
+                    }
+                    setBanner(msg, 1900L)
+                }
+                if (matchDone) {
+                    for (r in racers) {
+                        r.finished = true
+                        r.finishTimeMs = raceTimeMs
+                    }
+                    updateRankings()
+                    val champ = racers.minByOrNull { it.rank } ?: racers.first()
+                    phase = RacePhase.FINISHED
+                    setBanner("STUNT CHAMPION: ${champ.name}!", 3500L)
+                }
+            }
+        }
+
+        updateRankings()
+        return buildSnapshot(countdownSec = 0)
     }
 
     private fun handleHazards(racer: MutableRacer) {
@@ -1889,10 +2283,24 @@ class RacePhysicsEngine(
                     val nx = dx / dist
                     val ny = dy / dist
                     val overlap = (minDist - dist) * 0.5f
-                    a.x -= nx * overlap
-                    a.y -= ny * overlap
-                    b.x += nx * overlap
-                    b.y += ny * overlap
+                    val aParalyzed = a.electroParalyzedMs > 0L
+                    val bParalyzed = b.electroParalyzedMs > 0L
+                    when {
+                        aParalyzed && !bParalyzed -> {
+                            b.x += nx * overlap * 2f
+                            b.y += ny * overlap * 2f
+                        }
+                        bParalyzed && !aParalyzed -> {
+                            a.x -= nx * overlap * 2f
+                            a.y -= ny * overlap * 2f
+                        }
+                        else -> {
+                            a.x -= nx * overlap
+                            a.y -= ny * overlap
+                            b.x += nx * overlap
+                            b.y += ny * overlap
+                        }
+                    }
 
                     val relVx = b.vx - a.vx
                     val relVy = b.vy - a.vy
@@ -1903,15 +2311,25 @@ class RacePhysicsEngine(
                             b.collisionSeq += 1
                         }
                         val impulse = -1.2f * sepVel * 0.5f
-                        a.vx -= impulse * nx
-                        a.vy -= impulse * ny
-                        b.vx += impulse * nx
-                        b.vy += impulse * ny
+                        if (!aParalyzed) {
+                            a.vx -= impulse * nx
+                            a.vy -= impulse * ny
+                        } else {
+                            a.vx = 0f
+                            a.vy = 0f
+                        }
+                        if (!bParalyzed) {
+                            b.vx += impulse * nx
+                            b.vy += impulse * ny
+                        } else {
+                            b.vx = 0f
+                            b.vy = 0f
+                        }
                     }
 
                     // Arena mode: colliding with the flag carrier steals/transfers the flag!
                     if (isArenaMode && phase == RacePhase.RACING && flagTransferCooldownMs == 0L) {
-                        if (flagCarrierId == a.playerId && b.stunnedMs == 0L) {
+                        if (flagCarrierId == a.playerId && b.stunnedMs == 0L && !bParalyzed) {
                             if (a.shieldMs > 0L) {
                                 a.shieldMs = 0L
                                 flagTransferCooldownMs = 750L
@@ -1926,7 +2344,7 @@ class RacePhysicsEngine(
                                 b.racePoints += 25
                                 setBanner("${b.name} STOLE THE FLAG from ${a.name}!", 1900L)
                             }
-                        } else if (flagCarrierId == b.playerId && a.stunnedMs == 0L) {
+                        } else if (flagCarrierId == b.playerId && a.stunnedMs == 0L && !aParalyzed) {
                             if (b.shieldMs > 0L) {
                                 b.shieldMs = 0L
                                 flagTransferCooldownMs = 750L
@@ -1980,9 +2398,15 @@ class RacePhysicsEngine(
                         racer.lap += 1
                         racer.currentLapStartMs = raceTimeMs
                         racer.sectorMask = 0b0001
+                        val mineArmed = grantLapMineIfEligible(racer)
 
                         if (winCondition != WinCondition.TIME_TRIAL_DISTANCE && racer.lap == effectiveLaps) {
-                            setBanner("${racer.name}: FINAL LAP!", 1700L)
+                            setBanner(
+                                if (mineArmed) "${racer.name}: FINAL LAP — MINE READY!" else "${racer.name}: FINAL LAP!",
+                                1800L
+                            )
+                        } else if (mineArmed && !racer.isBot) {
+                            setBanner("${racer.name}: LAP ${racer.lap} — MINE READY!", 1600L)
                         }
                     }
                 } else {
@@ -2019,6 +2443,9 @@ class RacePhysicsEngine(
     }
 
     private fun computeProgressScore(racer: MutableRacer): Float {
+        if (isStuntMode) {
+            return racer.racePoints * 1000f - racers.indexOf(racer).toFloat()
+        }
         if (isArenaMode) {
             val carrierBonus = if (flagCarrierId == racer.playerId) 5f else 0f
             return racer.flagCarryMs.toFloat() * 10f + carrierBonus + racer.powerUpHits * 0.5f
@@ -2170,12 +2597,20 @@ class RacePhysicsEngine(
             0L
         }
 
+        val stuntSnap = stuntController?.let { sc ->
+            val activeRacer = racers.getOrNull(sc.turnIndex.coerceIn(0, (racers.size - 1).coerceAtLeast(0)))
+            sc.buildSnapshot(
+                activePlayerId = activeRacer?.playerId.orEmpty(),
+                activePlayerName = activeRacer?.name.orEmpty()
+            )
+        }
+
         return RaceSnapshot(
             raceTimeMs = raceTimeMs,
             countdownSec = countdownSec,
             phase = phase.name,
             trackId = track.id.name,
-            totalLaps = effectiveLaps,
+            totalLaps = if (stuntController != null) stuntController.totalRounds else effectiveLaps,
             racers = racers.map { r ->
                 RacerState(
                     playerId = r.playerId,
@@ -2214,7 +2649,9 @@ class RacePhysicsEngine(
                     minesAvailable = r.minesAvailable,
                     invertedSteerMs = r.invertedSteerMs,
                     collisionSeq = r.collisionSeq,
-                    portalWarpSeq = r.portalWarpSeq
+                    portalWarpSeq = r.portalWarpSeq,
+                    electroShockAuraMs = r.electroShockAuraMs,
+                    electroParalyzedMs = r.electroParalyzedMs
                 )
             },
             itemBoxes = itemBoxes.toList(),
@@ -2228,7 +2665,11 @@ class RacePhysicsEngine(
             windStrength = windStrength,
             rainPuddles = rainPuddles.toList(),
             postFinishGraceMs = graceRem,
-            gameMode = if (isArenaMode) GameMode.ARENA.name else GameMode.RACE.name,
+            gameMode = when {
+                isStuntMode -> GameMode.STUNTS.name
+                isArenaMode -> GameMode.ARENA.name
+                else -> GameMode.RACE.name
+            },
             arenaShape = track.arenaShape?.name,
             arenaTargetMs = arenaTargetMs,
             arenaFlag = if (isArenaMode) {
@@ -2244,7 +2685,11 @@ class RacePhysicsEngine(
             portalPair = portalPair,
             explosions = explosions.toList(),
             arenaSuddenDeathStage = if (isArenaMode) arenaSuddenDeathStage else 0,
-            arenaSuddenDeathRemainingMs = suddenDeathRem
+            arenaSuddenDeathRemainingMs = suddenDeathRem,
+            stuntState = stuntSnap,
+            isHybridTour = isHybridTour,
+            hybridStageNumber = hybridStageNumber,
+            nextHybridMode = nextHybridModeName
         )
     }
 
@@ -2254,6 +2699,9 @@ class RacePhysicsEngine(
         const val ARENA_SUDDEN_DEATH_WAVE_MS = 10_000L
         const val ARENA_SUDDEN_DEATH_DURATION_MS = 30_000L
         const val ARENA_SUDDEN_DEATH_END_MS = ARENA_SUDDEN_DEATH_START_MS + ARENA_SUDDEN_DEATH_DURATION_MS
+        const val ELECTRO_AURA_DURATION_MS = 4000L
+        const val ELECTRO_PARALYZE_DURATION_MS = 2800L
+        const val ELECTRO_SHOCK_RADIUS_PX = 155f
         private const val MAX_FIELD_PICKUPS = 2
 
         fun normalizeAngle(angle: Float): Float {

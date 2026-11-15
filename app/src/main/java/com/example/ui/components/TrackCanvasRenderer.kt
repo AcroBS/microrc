@@ -28,6 +28,7 @@ import com.example.model.PortalPairState
 import com.example.model.PropShape
 import com.example.model.RacerState
 import com.example.model.RcCarType
+import com.example.model.StuntStateSnapshot
 import com.example.model.TrackDefinition
 import com.example.model.TrackExplosion
 import com.example.model.TrackFieldPickup
@@ -61,7 +62,8 @@ fun DrawScope.drawTrackWorld(
     fieldPickups: List<TrackFieldPickup> = emptyList(),
     portalPair: PortalPairState? = null,
     explosions: List<TrackExplosion> = emptyList(),
-    arenaSuddenDeathStage: Int = 0
+    arenaSuddenDeathStage: Int = 0,
+    stuntState: StuntStateSnapshot? = null
 ) {
     // 1. Background floor
     drawRect(
@@ -73,7 +75,7 @@ fun DrawScope.drawTrackWorld(
     // 2. Subtle themed background texture
     drawEnvironmentDetails(track)
 
-    // 3. Render either Open Arena Floor or Closed Circuit Road
+    // 3. Render Stunt Stadium, Open Arena Floor, or Closed Circuit Road
     val pts = if (track.isArena) track.arenaBoundary.ifEmpty { track.centerline } else track.centerline
     if (pts.isEmpty()) return
 
@@ -82,10 +84,14 @@ fun DrawScope.drawTrackWorld(
         for (i in 1 until pts.size) {
             lineTo(pts[i].x, pts[i].y)
         }
-        close()
+        if (!track.isStunt) {
+            close()
+        }
     }
 
-    if (track.isArena) {
+    if (track.isStunt) {
+        drawStuntWorldLayer(track = track, stuntState = stuntState, animTimeSec = animTimeSec)
+    } else if (track.isArena) {
         if (hardBoundary) {
             drawPath(
                 path = roadPath,
@@ -352,8 +358,9 @@ fun DrawScope.drawTrackWorld(
         }
     }
 
-    // 5b. Jump Ramps (top-down 2.5D sloped deck + launch shadow)
-    for (ramp in track.ramps) {
+    // 5b. Jump Ramps (top-down 2.5D sloped deck + launch shadow; Stunt mode draws its own wide Mega Ramp)
+    if (!track.isStunt) {
+        for (ramp in track.ramps) {
         val deg = ramp.angleRad * 180f / PI.toFloat()
         withTransform({
             translate(ramp.x, ramp.y)
@@ -404,6 +411,7 @@ fun DrawScope.drawTrackWorld(
                     color = Color(0xFFFFEA00),
                     style = Stroke(width = 4.5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
                 )
+            }
             }
         }
     }
@@ -773,7 +781,9 @@ fun DrawScope.drawTrackWorld(
             jumpZ = r.jumpZ,
             scale = 1f,
             animTimeSec = animTimeSec,
-            isCarryingFlag = arenaFlag?.carrierId == r.playerId
+            isCarryingFlag = arenaFlag?.carrierId == r.playerId,
+            hasElectroAura = r.electroShockAuraMs > 0L,
+            isElectroParalyzed = r.electroParalyzedMs > 0L
         )
     }
 
@@ -895,11 +905,37 @@ private fun DrawScope.drawEnvironmentDetails(track: TrackDefinition) {
             }
             if (!track.isArena) {
                 drawRoundRect(
-                    color = Color(0xFF283593).copy(alpha = 0.35f),
-                    topLeft = Offset(580f, 480f),
-                    size = Size(440f, 360f),
-                    cornerRadius = CornerRadius(18f, 18f)
+                    color = Color(0xFF283593).copy(alpha = 0.38f),
+                    topLeft = Offset(560f, 470f),
+                    size = Size(480f, 400f),
+                    cornerRadius = CornerRadius(20f, 20f)
                 )
+                drawRoundRect(
+                    color = Color(0xFFFFCA28).copy(alpha = 0.28f),
+                    topLeft = Offset(584f, 494f),
+                    size = Size(432f, 352f),
+                    cornerRadius = CornerRadius(14f, 14f),
+                    style = Stroke(width = 4f)
+                )
+            }
+        }
+        TrackId.BACKYARD_DIRT -> {
+            // Alternating mowed backyard lawn stripes + natural pebble patches
+            val stripeColor = Color(0xFF396037).copy(alpha = 0.32f)
+            var x = 0f
+            var idx = 0
+            while (x < track.worldWidth) {
+                if (idx % 2 == 0) {
+                    drawRect(stripeColor, topLeft = Offset(x, 0f), size = Size(110f, track.worldHeight))
+                }
+                x += 110f
+                idx++
+            }
+            val dotColor = Color.Black.copy(alpha = 0.08f)
+            for (i in 0 until 28) {
+                val px = ((i * 397) % 2100) + 50f
+                val py = ((i * 613) % 1400) + 50f
+                drawCircle(dotColor, radius = (12 + (i % 4) * 5).toFloat(), center = Offset(px, py))
             }
         }
         TrackId.NEON_ROOFTOP -> {
@@ -914,6 +950,42 @@ private fun DrawScope.drawEnvironmentDetails(track: TrackDefinition) {
                 drawLine(gridColor, Offset(0f, y), Offset(track.worldWidth, y), 1.5f)
                 y += 120f
             }
+            if (!track.isArena) {
+                // Illuminated cyberpunk rooftop helipad ring inside the delta infield
+                val hx = 960f
+                val hy = 820f
+                drawCircle(
+                    color = Color(0xFFE040FB).copy(alpha = 0.14f),
+                    radius = 128f,
+                    center = Offset(hx, hy),
+                    style = Stroke(width = 5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(24f, 16f), 0f))
+                )
+                drawCircle(
+                    color = Color(0xFF00E5FF).copy(alpha = 0.12f),
+                    radius = 96f,
+                    center = Offset(hx, hy),
+                    style = Stroke(width = 3f)
+                )
+            }
+        }
+        TrackId.SANDBOX_DUNES -> {
+            // Sweeping desert sand-dune contour bands + central oasis sandbank glow
+            val duneBand = Color(0xFFC68B44).copy(alpha = 0.25f)
+            for (i in 0 until 8) {
+                val y = 130f + i * 180f
+                drawOval(
+                    color = duneBand,
+                    topLeft = Offset(-120f + (i % 2) * 180f, y),
+                    size = Size(track.worldWidth + 120f, 96f)
+                )
+            }
+            if (!track.isArena) {
+                drawCircle(
+                    color = Color(0xFF81C784).copy(alpha = 0.22f),
+                    radius = 96f,
+                    center = Offset(1100f, 750f)
+                )
+            }
         }
         TrackId.WAREHOUSE_DRIFT -> {
             val jointColor = Color.White.copy(alpha = 0.07f)
@@ -927,13 +999,21 @@ private fun DrawScope.drawEnvironmentDetails(track: TrackDefinition) {
                 drawLine(jointColor, Offset(0f, y), Offset(track.worldWidth, y), 2f)
                 y += 220f
             }
-        }
-        TrackId.BACKYARD_DIRT, TrackId.SANDBOX_DUNES -> {
-            val dotColor = Color.Black.copy(alpha = 0.07f)
-            for (i in 0 until 36) {
-                val px = ((i * 397) % 2100) + 50f
-                val py = ((i * 613) % 1400) + 50f
-                drawCircle(dotColor, radius = (14 + (i % 5) * 6).toFloat(), center = Offset(px, py))
+            if (!track.isArena) {
+                // Industrial loading-bay hazard zone outline in the North-East container yard
+                drawRoundRect(
+                    color = Color(0xFFFFAB00).copy(alpha = 0.08f),
+                    topLeft = Offset(1220f, 210f),
+                    size = Size(700f, 320f),
+                    cornerRadius = CornerRadius(16f, 16f)
+                )
+                drawRoundRect(
+                    color = Color(0xFFFFAB00).copy(alpha = 0.28f),
+                    topLeft = Offset(1220f, 210f),
+                    size = Size(700f, 320f),
+                    cornerRadius = CornerRadius(16f, 16f),
+                    style = Stroke(width = 3.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(22f, 16f), 0f))
+                )
             }
         }
     }
@@ -1025,7 +1105,8 @@ fun DrawScope.drawTrackMiniMap(
     localPlayerId: String? = null,
     arenaFlag: ArenaFlagState? = null,
     portalPair: PortalPairState? = null,
-    arenaSuddenDeathStage: Int = 0
+    arenaSuddenDeathStage: Int = 0,
+    stuntState: StuntStateSnapshot? = null
 ) {
     val pad = 8.dp.toPx()
     val availW = (size.width - pad * 2f).coerceAtLeast(1f)
@@ -1042,10 +1123,20 @@ fun DrawScope.drawTrackMiniMap(
         for (i in 1 until pts.size) {
             lineTo(offsetX + pts[i].x * scale, offsetY + pts[i].y * scale)
         }
-        close()
+        if (!track.isStunt) {
+            close()
+        }
     }
 
-    if (track.isArena) {
+    if (track.isStunt) {
+        drawStuntMiniMap(
+            track = track,
+            offsetX = offsetX,
+            offsetY = offsetY,
+            scale = scale,
+            stuntState = stuntState
+        )
+    } else if (track.isArena) {
         drawPath(
             path = path,
             color = Color(track.id.roadColorHex).copy(alpha = 0.92f)
@@ -1093,7 +1184,18 @@ fun DrawScope.drawTrackMiniMap(
             style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
 
-        // Start/Finish tick
+        // Boost pad dots on preview cards (when racers list is empty)
+        if (racers.isEmpty()) {
+            for (pad in track.boostPads) {
+                drawCircle(
+                    color = Color(0xFF00E5FF).copy(alpha = 0.85f),
+                    radius = 2.2.dp.toPx(),
+                    center = Offset(offsetX + pad.x * scale, offsetY + pad.y * scale)
+                )
+            }
+        }
+
+        // Start/Finish tick + directional arrow chevron
         val s = pts[0]
         val sNext = pts[1]
         val startAng = atan2(sNext.y - s.y, sNext.x - s.x)
@@ -1107,6 +1209,24 @@ fun DrawScope.drawTrackMiniMap(
             end = Offset(sx + perpX, sy + perpY),
             strokeWidth = 2.2.dp.toPx(),
             cap = StrokeCap.Round
+        )
+        val tipDist = 7.dp.toPx()
+        val wingDist = 3.2.dp.toPx()
+        val tipX = sx + cos(startAng) * tipDist
+        val tipY = sy + sin(startAng) * tipDist
+        val baseX = sx + cos(startAng) * (tipDist - wingDist)
+        val baseY = sy + sin(startAng) * (tipDist - wingDist)
+        val wx = -sin(startAng) * wingDist
+        val wy = cos(startAng) * wingDist
+        val dirArrow = Path().apply {
+            moveTo(baseX - wx, baseY - wy)
+            lineTo(tipX, tipY)
+            lineTo(baseX + wx, baseY + wy)
+        }
+        drawPath(
+            path = dirArrow,
+            color = Color(0xFFFFD54F),
+            style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
     }
 

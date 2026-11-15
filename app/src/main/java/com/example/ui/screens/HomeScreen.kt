@@ -33,10 +33,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.TouchApp
@@ -81,6 +83,7 @@ fun HomeScreen(
     onHostRace: () -> Unit,
     onJoinRace: () -> Unit,
     onSoloRace: () -> Unit,
+    onOpenHybridSetup: () -> Unit = {},
     onOpenGarage: () -> Unit,
     onOpenTrackEditor: () -> Unit,
     onOpenSettings: () -> Unit,
@@ -388,18 +391,40 @@ fun HomeScreen(
                     }
                 }
 
-                // Solo Practice vs Bots
-                FilledTonalButton(
-                    onClick = onSoloRace,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .testTag("solo_race_button")
+                // Solo Practice vs Bots + Hybrid Tour Event Setup
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Icon(Icons.Default.Speed, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Solo Practice vs AI Bots", style = MaterialTheme.typography.labelLarge)
+                    FilledTonalButton(
+                        onClick = onSoloRace,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(54.dp)
+                            .testTag("solo_race_button")
+                    ) {
+                        Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Solo vs Bots", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                    }
+
+                    FilledTonalButton(
+                        onClick = onOpenHybridSetup,
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(54.dp)
+                            .testTag("home_hybrid_tour_button")
+                    ) {
+                        Icon(Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Hybrid Tour", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                    }
                 }
 
                 // Track Studio + Match Settings Row

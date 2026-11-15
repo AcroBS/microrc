@@ -102,6 +102,7 @@ import com.example.model.RacePhase
 import com.example.model.RaceRulesSettings
 import com.example.model.RaceSnapshot
 import com.example.model.RacerState
+import com.example.model.StuntVariant
 import com.example.model.TrackDefinition
 import com.example.model.WinCondition
 import com.example.model.computeSpringSliderSteer
@@ -196,6 +197,14 @@ fun RaceScreen(
         onDispose { tiltController.stop() }
     }
 
+    val isStuntsMode = snapshot?.gameMode == GameMode.STUNTS.name ||
+        (snapshot == null && rules.gameModeEnum == GameMode.STUNTS)
+    val stuntState = snapshot?.stuntState
+    val isLocalActiveStuntDriver = !isStuntsMode ||
+        stuntState == null ||
+        stuntState.activePlayerId.isEmpty() ||
+        stuntState.activePlayerId == profile.playerId
+
     LaunchedEffect(
         profile.controlMode,
         profile.autoGasInTilt,
@@ -205,8 +214,13 @@ fun RaceScreen(
         sliderSteer,
         gasPressed,
         brakePressed,
-        tiltSteer
+        tiltSteer,
+        isLocalActiveStuntDriver
     ) {
+        if (!isLocalActiveStuntDriver) {
+            onUpdateControlInput(0f, 0f)
+            return@LaunchedEffect
+        }
         val steer = when (profile.controlMode) {
             ControlMode.TILT_SENSOR -> tiltSteer
             ControlMode.SPRING_SLIDER -> sliderSteer
@@ -298,10 +312,31 @@ fun RaceScreen(
                     }
                     smoothedRacers = rendered
 
-                    val target = rendered.find { it.playerId == profile.playerId } ?: rendered.firstOrNull()
+                    val activeStuntId = if (snap.gameMode == GameMode.STUNTS.name) {
+                        snap.stuntState?.activePlayerId?.takeIf { it.isNotEmpty() }
+                    } else {
+                        null
+                    }
+                    val target = if (activeStuntId != null) {
+                        rendered.find { it.playerId == activeStuntId } ?: rendered.firstOrNull()
+                    } else {
+                        rendered.find { it.playerId == profile.playerId } ?: rendered.firstOrNull()
+                    }
                     if (target != null) {
-                        val lookX = target.x + cos(target.angleRad) * 40f
-                        val lookY = target.y + sin(target.angleRad) * 40f
+                        val stuntSnap = snap.stuntState
+                        val trackSoccerBall = snap.gameMode == GameMode.STUNTS.name &&
+                            stuntSnap?.variantEnum == StuntVariant.SOCCER_BALL &&
+                            stuntSnap.ballX > 1855f
+                        val lookX = if (trackSoccerBall) {
+                            target.x * 0.45f + stuntSnap.ballX * 0.55f
+                        } else {
+                            target.x + cos(target.angleRad) * 40f
+                        }
+                        val lookY = if (trackSoccerBall) {
+                            target.y * 0.45f + stuntSnap.ballY * 0.55f
+                        } else {
+                            target.y + sin(target.angleRad) * 40f
+                        }
                         if (!camInitialized || hypot(lookX - camX, lookY - camY) > 420f) {
                             camX = lookX
                             camY = lookY
@@ -319,11 +354,11 @@ fun RaceScreen(
 
     val isArenaMode = snapshot?.gameMode == GameMode.ARENA.name ||
         (snapshot == null && rules.gameModeEnum == GameMode.ARENA)
-    val track = activeTrack ?: remember(snapshot?.trackId, snapshot?.arenaShape, isArenaMode) {
-        if (isArenaMode) {
-            TrackCatalog.getArenaTrack(snapshot?.arenaShape)
-        } else {
-            TrackCatalog.getTrack(snapshot?.trackId ?: "LIVING_ROOM_GP")
+    val track = activeTrack ?: remember(snapshot?.trackId, snapshot?.arenaShape, stuntState?.variant, isArenaMode, isStuntsMode) {
+        when {
+            isStuntsMode -> TrackCatalog.getStuntTrack(stuntState?.variant)
+            isArenaMode -> TrackCatalog.getArenaTrack(snapshot?.arenaShape)
+            else -> TrackCatalog.getTrack(snapshot?.trackId ?: "LIVING_ROOM_GP")
         }
     }
     val racersToDraw = smoothedRacers.ifEmpty { snapshot?.racers.orEmpty() }
@@ -393,7 +428,8 @@ fun RaceScreen(
                         fieldPickups = snapshot?.fieldPickups.orEmpty(),
                         portalPair = snapshot?.portalPair,
                         explosions = snapshot?.explosions.orEmpty(),
-                        arenaSuddenDeathStage = snapshot?.arenaSuddenDeathStage ?: 0
+                        arenaSuddenDeathStage = snapshot?.arenaSuddenDeathStage ?: 0,
+                        stuntState = stuntState
                     )
                 }
             } else {
@@ -418,7 +454,8 @@ fun RaceScreen(
                         fieldPickups = snapshot?.fieldPickups.orEmpty(),
                         portalPair = snapshot?.portalPair,
                         explosions = snapshot?.explosions.orEmpty(),
-                        arenaSuddenDeathStage = snapshot?.arenaSuddenDeathStage ?: 0
+                        arenaSuddenDeathStage = snapshot?.arenaSuddenDeathStage ?: 0,
+                        stuntState = stuntState
                     )
                 }
             }
@@ -461,7 +498,37 @@ fun RaceScreen(
                                 color = GoldTrophy
                             )
                         }
-                        if (isArenaMode) {
+                        if (isStuntsMode) {
+                            val turnRemSec = (((stuntState?.turnTimeRemainingMs ?: 15_000L) + 999L) / 1000L).coerceAtLeast(0L)
+                            Column {
+                                Text(
+                                    text = "STUNT ${stuntState?.roundIndex ?: 1}/${stuntState?.totalRounds ?: 4}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondary
+                                )
+                                Text(
+                                    text = stuntState?.variantEnum?.shortName ?: "STUNT",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = ElectricCyan
+                                )
+                            }
+                            Column {
+                                Text("PTS", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                Text(
+                                    text = "${localRacer?.racePoints ?: 0}",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = AcidLime
+                                )
+                            }
+                            Column {
+                                Text("TURN", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                Text(
+                                    text = "${turnRemSec}s",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = if (turnRemSec <= 4L) AlertRed else Color.White
+                                )
+                            }
+                        } else if (isArenaMode) {
                             val targetMs = snapshot?.arenaTargetMs ?: (rules.arenaTargetMinutes * 60_000L)
                             val myHoldMs = localRacer?.flagCarryMs ?: 0L
                             val carrierId = arenaFlagToDraw?.carrierId
@@ -563,6 +630,23 @@ fun RaceScreen(
                                 }
                             }
                         }
+                    }
+                }
+
+                // Hybrid Tour Stage Pill
+                if (snapshot?.isHybridTour == true) {
+                    Surface(
+                        color = CarbonBg.copy(alpha = 0.88f),
+                        shape = RoundedCornerShape(50),
+                        border = BorderStroke(1.dp, GoldTrophy.copy(alpha = 0.75f)),
+                        modifier = Modifier.testTag("hybrid_stage_badge")
+                    ) {
+                        Text(
+                            text = "HYBRID STAGE #${snapshot.hybridStageNumber}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = GoldTrophy,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
                     }
                 }
 
@@ -680,7 +764,8 @@ fun RaceScreen(
                                     localPlayerId = profile.playerId,
                                     arenaFlag = arenaFlagToDraw,
                                     portalPair = snapshot?.portalPair,
-                                    arenaSuddenDeathStage = snapshot?.arenaSuddenDeathStage ?: 0
+                                    arenaSuddenDeathStage = snapshot?.arenaSuddenDeathStage ?: 0,
+                                    stuntState = stuntState
                                 )
                             }
                             Text(
@@ -722,6 +807,7 @@ fun RaceScreen(
 
         // Top-Anchored Notification & Status Stack — strictly at the top of the screen so the center car is never covered
         val invertedRemMs = localRacer?.invertedSteerMs ?: 0L
+        val electroParalyzedRemMs = localRacer?.electroParalyzedMs ?: 0L
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -738,6 +824,63 @@ fun RaceScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            if (isStuntsMode && snapshot?.phase != RacePhase.FINISHED.name && stuntState != null) {
+                Surface(
+                    color = if (isLocalActiveStuntDriver) {
+                        Color(0xFF1A2810).copy(alpha = 0.92f)
+                    } else {
+                        Color(0xFF0E1B2E).copy(alpha = 0.92f)
+                    },
+                    shape = RoundedCornerShape(50),
+                    border = BorderStroke(
+                        1.5.dp,
+                        if (isLocalActiveStuntDriver) AcidLime else ElectricCyan
+                    ),
+                    modifier = Modifier.testTag("stunt_turn_banner")
+                ) {
+                    Text(
+                        text = if (isLocalActiveStuntDriver) {
+                            "YOUR TURN! 1x NITRO READY • ${stuntState.variantEnum.displayName.uppercase()}"
+                        } else {
+                            "SPECTATING: ${stuntState.activePlayerName.uppercase()} • ${stuntState.variantEnum.shortName}"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (isLocalActiveStuntDriver) AcidLime else ElectricCyan,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
+                    )
+                }
+            }
+
+            if (electroParalyzedRemMs > 0L && snapshot?.phase == RacePhase.RACING.name) {
+                val shockPulse = 0.5f + 0.5f * sin(animTimeSec * 18f)
+                val shockSecText = String.format("%.1fs", electroParalyzedRemMs / 1000f)
+                Surface(
+                    color = Color(0xFF180A33).copy(alpha = 0.94f),
+                    shape = RoundedCornerShape(50),
+                    border = BorderStroke(2.dp, Color(0xFF7C4DFF).copy(alpha = 0.65f + 0.35f * shockPulse)),
+                    modifier = Modifier.testTag("electro_paralyzed_banner")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "ELECTRO SHOCKED!",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color(0xFFB388FF)
+                        )
+                        Text(
+                            text = shockSecText,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+
             if (invertedRemMs > 0L && snapshot?.phase == RacePhase.RACING.name) {
                 val invPulse = 0.5f + 0.5f * sin(animTimeSec * 12f)
                 val invSecText = String.format("%.1fs", invertedRemMs / 1000f)
@@ -766,7 +909,7 @@ fun RaceScreen(
                 }
             }
 
-            if (localRacer?.finished == true && snapshot?.phase == RacePhase.RACING.name) {
+            if (localRacer?.finished == true && snapshot?.phase == RacePhase.RACING.name && !isStuntsMode) {
                 val graceSec = ((snapshot.postFinishGraceMs + 999L) / 1000L).coerceAtLeast(1L)
                 Surface(
                     color = CarbonBg.copy(alpha = 0.88f),
@@ -807,7 +950,7 @@ fun RaceScreen(
                 horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                if (rules.autoAccelerate) {
+                if (rules.autoAccelerate && isLocalActiveStuntDriver) {
                     Surface(
                         color = AcidLime.copy(alpha = 0.22f),
                         shape = RoundedCornerShape(50),
@@ -829,6 +972,8 @@ fun RaceScreen(
                 if ((localRacer?.boostMs ?: 0L) > 0L) StatusChip("TURBO", SignalOrange)
                 if ((localRacer?.shieldMs ?: 0L) > 0L) StatusChip("SHIELD", AcidLime)
                 if ((localRacer?.overdriveMs ?: 0L) > 0L) StatusChip("OVERDRIVE", Color(0xFFE040FB))
+                if ((localRacer?.electroShockAuraMs ?: 0L) > 0L) StatusChip("ELECTRO AURA", Color(0xFFB388FF))
+                if ((localRacer?.electroParalyzedMs ?: 0L) > 0L) StatusChip("MOTIONLESS!", Color(0xFF7C4DFF))
                 if ((localRacer?.stunnedMs ?: 0L) > 0L) StatusChip("ZAPPED!", AlertRed)
             }
         }
@@ -854,9 +999,21 @@ fun RaceScreen(
             }
             val sliderWidth = when {
                 maxWidth >= 560.dp -> 260.dp
-                maxWidth >= 380.dp -> 224.dp
-                else -> 196.dp
+                maxWidth >= 440.dp -> 216.dp
+                maxWidth >= 330.dp -> 164.dp
+                else -> 146.dp
             }
+            val mineBtnWidth = when {
+                maxWidth >= 440.dp -> 96.dp
+                maxWidth >= 330.dp -> 78.dp
+                else -> 68.dp
+            }
+            val powerBtnWidth = when {
+                maxWidth >= 440.dp -> 116.dp
+                maxWidth >= 330.dp -> 86.dp
+                else -> 74.dp
+            }
+            val actionRowSpacing = if (maxWidth >= 440.dp) 8.dp else 5.dp
             val controlHeight = when {
                 maxWidth >= 520.dp -> 100.dp
                 maxWidth >= 360.dp -> 94.dp
@@ -868,6 +1025,65 @@ fun RaceScreen(
                 else -> 44.dp
             }
 
+            if (isStuntsMode && !isLocalActiveStuntDriver) {
+                // Spectator Live Scoreboard Bar while watching another player's stunt run
+                Surface(
+                    color = CarbonBg.copy(alpha = 0.88f),
+                    shape = RoundedCornerShape(20.dp),
+                    border = BorderStroke(1.5.dp, ElectricCyan.copy(alpha = 0.7f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("stunt_spectator_bar")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "SPECTATOR MODE • WATCHING ${stuntState?.activePlayerName?.uppercase() ?: "DRIVER"}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = ElectricCyan
+                            )
+                            if (!stuntState?.lastAttemptSummary.isNullOrBlank()) {
+                                Text(
+                                    text = stuntState?.lastAttemptSummary ?: "",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = GoldTrophy,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            snapshot?.racers.orEmpty().forEach { r ->
+                                val isActiveTurn = r.playerId == stuntState?.activePlayerId
+                                Surface(
+                                    color = if (isActiveTurn) ElectricCyan.copy(alpha = 0.22f) else PaddockSurface,
+                                    shape = RoundedCornerShape(50),
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (isActiveTurn) ElectricCyan else PaddockOutline
+                                    )
+                                ) {
+                                    Text(
+                                        text = "${if (isActiveTurn) "▶ " else ""}${r.name.take(10)}: ${r.racePoints} pts",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (isActiveTurn) Color.White else TextSecondary,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -965,58 +1181,67 @@ fun RaceScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(actionRowSpacing),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        val mineFlash = 0.5f + 0.5f * sin(animTimeSec * 14f)
-                        val mineActiveBg = if (mineFlash > 0.45f) {
-                            AlertRed.copy(alpha = 0.94f)
-                        } else {
-                            Color(0xFF7F0019).copy(alpha = 0.92f)
-                        }
-                        val mineBorder = if (hasMine) {
-                            if (mineFlash > 0.45f) Color(0xFFFFCDD2) else AlertRed
-                        } else {
-                            PaddockOutline
-                        }
-                        Surface(
-                            color = if (hasMine) mineActiveBg else CarbonBg.copy(alpha = 0.65f),
-                            shape = RoundedCornerShape(18.dp),
-                            border = BorderStroke(2.dp, mineBorder),
-                            modifier = Modifier
-                                .size(width = 96.dp, height = 56.dp)
-                                .clip(RoundedCornerShape(18.dp))
-                                .clickable(enabled = hasMine) {
-                                    hapticController?.onMineDropped()
-                                    onDropMine()
-                                }
-                                .testTag("drop_mine_button")
-                        ) {
-                            Row(
+                        if (!isArenaMode && !isStuntsMode) {
+                            val currentLap = localRacer?.lap ?: 1
+                            val mineFlash = 0.5f + 0.5f * sin(animTimeSec * 14f)
+                            val mineActiveBg = if (mineFlash > 0.45f) {
+                                AlertRed.copy(alpha = 0.94f)
+                            } else {
+                                Color(0xFF7F0019).copy(alpha = 0.92f)
+                            }
+                            val mineBorder = if (hasMine) {
+                                if (mineFlash > 0.45f) Color(0xFFFFCDD2) else AlertRed
+                            } else {
+                                PaddockOutline
+                            }
+                            val mineLabel = when {
+                                hasMine -> "MINE"
+                                currentLap <= 1 -> "LAP 2"
+                                else -> "USED"
+                            }
+                            Surface(
+                                color = if (hasMine) mineActiveBg else CarbonBg.copy(alpha = 0.65f),
+                                shape = RoundedCornerShape(18.dp),
+                                border = BorderStroke(2.dp, mineBorder),
                                 modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
+                                    .size(width = mineBtnWidth, height = 56.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .clickable(enabled = hasMine) {
+                                        hapticController?.onMineDropped()
+                                        onDropMine()
+                                    }
+                                    .testTag("drop_mine_button")
                             ) {
-                                Box(
+                                Row(
                                     modifier = Modifier
-                                        .size(12.dp)
-                                        .clip(CircleShape)
-                                        .background(
-                                            if (hasMine) {
-                                                if (mineFlash > 0.45f) Color.White else Color(0xFFFF5252)
-                                            } else {
-                                                TextSecondary.copy(alpha = 0.5f)
-                                            }
-                                        )
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (hasMine) "MINE" else "USED",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = if (hasMine) Color.White else TextSecondary
-                                )
+                                        .fillMaxSize()
+                                        .padding(horizontal = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                if (hasMine) {
+                                                    if (mineFlash > 0.45f) Color.White else Color(0xFFFF5252)
+                                                } else {
+                                                    TextSecondary.copy(alpha = 0.5f)
+                                                }
+                                            )
+                                    )
+                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Text(
+                                        text = mineLabel,
+                                        maxLines = 1,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = if (hasMine) Color.White else TextSecondary
+                                    )
+                                }
                             }
                         }
 
@@ -1026,7 +1251,7 @@ fun RaceScreen(
                             shape = RoundedCornerShape(18.dp),
                             border = BorderStroke(2.dp, powerUpColor),
                             modifier = Modifier
-                                .size(width = 116.dp, height = 56.dp)
+                                .size(width = powerBtnWidth, height = 56.dp)
                                 .clip(RoundedCornerShape(18.dp))
                                 .clickable(enabled = heldPowerUp != null) {
                                     hapticController?.onPowerUpUsed()
@@ -1096,6 +1321,7 @@ fun RaceScreen(
                         }
                     }
                 }
+            }
             }
         }
     }

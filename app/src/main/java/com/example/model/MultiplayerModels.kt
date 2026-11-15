@@ -19,6 +19,14 @@ enum class GameMode(
     ARENA(
         displayName = "Arena",
         description = "Open-arena Hold the Flag! Pick up the flag, dodge puddles & collisions, and bank carry time to win"
+    ),
+    STUNTS(
+        displayName = "Stunts",
+        description = "Turn-based stunt gauntlet! Wind around obstacles, hit nitro & launch into 4 random stunt challenges"
+    ),
+    HYBRID(
+        displayName = "Hybrid Tour",
+        description = "Multi-mode party tour cycling through Circuit, Arena & Stunts events"
     )
 }
 
@@ -28,6 +36,52 @@ data class ArenaFlagState(
     val y: Float = 750f,
     val carrierId: String? = null
 )
+
+@JsonClass(generateAdapter = true)
+data class StuntPinState(
+    val id: Int,
+    val x: Float,
+    val y: Float,
+    val knocked: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
+data class StuntGolfHole(
+    val number: Int,
+    val x: Float,
+    val y: Float,
+    val radius: Float,
+    val points: Int,
+    val captured: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
+data class StuntStateSnapshot(
+    val variant: String = StuntVariant.LONG_JUMP.name,
+    val roundIndex: Int = 1,
+    val totalRounds: Int = 4,
+    val turnIndex: Int = 0,
+    val activePlayerId: String = "",
+    val activePlayerName: String = "",
+    val turnPhase: String = "DRIVING",
+    val turnTimeRemainingMs: Long = 16000L,
+    val lastAttemptScore: Int = 0,
+    val lastAttemptSummary: String = "",
+    val bestDistanceMeters: Float = 0f,
+    val landingX: Float = 0f,
+    val landingY: Float = 0f,
+    val hasLanded: Boolean = false,
+    val ballX: Float = 1850f,
+    val ballY: Float = 700f,
+    val ballVx: Float = 0f,
+    val ballVy: Float = 0f,
+    val ballScoredPoints: Int = 0,
+    val pins: List<StuntPinState> = emptyList(),
+    val golfHoles: List<StuntGolfHole> = emptyList()
+) {
+    val variantEnum: StuntVariant
+        get() = runCatching { StuntVariant.valueOf(variant) }.getOrDefault(StuntVariant.LONG_JUMP)
+}
 
 enum class WinCondition(
     val displayName: String,
@@ -153,7 +207,12 @@ data class RaceRulesSettings(
     val totalLaps: Int = 3,
     val timeLimitSec: Int = 90,
     val arenaTargetMinutes: Int = 2,
-    val carSpeed: String = CarSpeedPreset.FAST.name
+    val carSpeed: String = CarSpeedPreset.FAST.name,
+    val hybridIncludeCircuit: Boolean = true,
+    val hybridIncludeArena: Boolean = true,
+    val hybridIncludeStunts: Boolean = true,
+    val hybridRandomOrder: Boolean = false,
+    val hybridStuntRounds: Int = 1
 ) {
     val gameModeEnum: GameMode
         get() = runCatching { GameMode.valueOf(gameMode) }.getOrDefault(GameMode.RACE)
@@ -163,6 +222,15 @@ data class RaceRulesSettings(
 
     val carSpeedEnum: CarSpeedPreset
         get() = runCatching { CarSpeedPreset.valueOf(carSpeed) }.getOrDefault(CarSpeedPreset.FAST)
+
+    fun enabledHybridModes(): List<GameMode> {
+        val list = buildList {
+            if (hybridIncludeCircuit) add(GameMode.RACE)
+            if (hybridIncludeArena) add(GameMode.ARENA)
+            if (hybridIncludeStunts) add(GameMode.STUNTS)
+        }
+        return list.ifEmpty { listOf(GameMode.RACE, GameMode.ARENA, GameMode.STUNTS) }
+    }
 }
 
 @JsonClass(generateAdapter = true)
@@ -203,7 +271,9 @@ data class RacerState(
     val minesAvailable: Int = 0,
     val invertedSteerMs: Long = 0L,
     val collisionSeq: Int = 0,
-    val portalWarpSeq: Int = 0
+    val portalWarpSeq: Int = 0,
+    val electroShockAuraMs: Long = 0L,
+    val electroParalyzedMs: Long = 0L
 )
 
 @JsonClass(generateAdapter = true)
@@ -233,7 +303,11 @@ data class RaceSnapshot(
     val portalPair: PortalPairState? = null,
     val explosions: List<TrackExplosion> = emptyList(),
     val arenaSuddenDeathStage: Int = 0,
-    val arenaSuddenDeathRemainingMs: Long = 0L
+    val arenaSuddenDeathRemainingMs: Long = 0L,
+    val stuntState: StuntStateSnapshot? = null,
+    val isHybridTour: Boolean = false,
+    val hybridStageNumber: Int = 1,
+    val nextHybridMode: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -267,7 +341,8 @@ data class LobbyStatePayload(
     val chatHistory: List<ChatMessage>,
     val inRace: Boolean,
     val rules: RaceRulesSettings = RaceRulesSettings(),
-    val activeCustomTrack: CustomTrackData? = null
+    val activeCustomTrack: CustomTrackData? = null,
+    val stuntVariant: String = StuntVariant.LONG_JUMP.name
 )
 
 @JsonClass(generateAdapter = true)
@@ -288,7 +363,9 @@ data class NetworkMessage(
     val ramps: List<TrackRamp>? = null,
     val rematchState: RematchCountdownState? = null,
     val voteOptionId: String? = null,
-    val errorReason: String? = null
+    val errorReason: String? = null,
+    val stuntVariant: String? = null,
+    val stuntSequence: List<String>? = null
 )
 
 object PacketType {

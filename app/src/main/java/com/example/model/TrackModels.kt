@@ -15,7 +15,7 @@ enum class TrackId(
 ) {
     LIVING_ROOM_GP(
         displayName = "Living Room GP",
-        subtitle = "Hardwood straights & cozy rug chicanes",
+        subtitle = "Balanced tabletop GP with rug S-bend & sweeping corners",
         difficulty = "Easy",
         surfaceLabel = "Hardwood / Rug",
         baseBgColorHex = 0xFF5D4037,
@@ -24,50 +24,50 @@ enum class TrackId(
         kerbPrimaryHex = 0xFFFF7043,
         kerbSecondaryHex = 0xFFFFF8E1,
         offRoadDragMultiplier = 0.72f,
-        surfaceGripMultiplier = 1.0f
+        surfaceGripMultiplier = 1.00f
     ),
     BACKYARD_DIRT(
-        displayName = "Backyard Dirt Oval",
-        subtitle = "Loose loamy clay with mud slicks",
+        displayName = "Backyard Mud Rally",
+        subtitle = "Wide CCW twin-peak rallycross with mud slicks & big jumps",
         difficulty = "Medium",
-        surfaceLabel = "Packed Dirt",
+        surfaceLabel = "Loamy Dirt & Mud",
         baseBgColorHex = 0xFF2D4C2B,
         roadColorHex = 0xFF8D5B3C,
         borderColorHex = 0xFF5C3A24,
         kerbPrimaryHex = 0xFFE53935,
         kerbSecondaryHex = 0xFFFFFFFF,
-        offRoadDragMultiplier = 0.65f,
-        surfaceGripMultiplier = 0.86f
+        offRoadDragMultiplier = 0.68f,
+        surfaceGripMultiplier = 0.84f
     ),
     NEON_ROOFTOP(
         displayName = "Neon Rooftop",
-        subtitle = "High-grip night tarmac & turbo pads",
-        difficulty = "Medium",
-        surfaceLabel = "Night Asphalt",
+        subtitle = "Supersonic delta tri-oval with 5 turbo pads & sky jumps",
+        difficulty = "Fast",
+        surfaceLabel = "High-Grip Tarmac",
         baseBgColorHex = 0xFF0A0F1C,
         roadColorHex = 0xFF1F273B,
         borderColorHex = 0xFF00E5FF,
         kerbPrimaryHex = 0xFF00E5FF,
         kerbSecondaryHex = 0xFFE040FB,
-        offRoadDragMultiplier = 0.60f,
-        surfaceGripMultiplier = 1.08f
+        offRoadDragMultiplier = 0.58f,
+        surfaceGripMultiplier = 1.12f
     ),
     SANDBOX_DUNES(
         displayName = "Sandbox Dunes",
-        subtitle = "Sweeping desert S-curves & oasis hazards",
+        subtitle = "CCW desert hourglass with 6 switchbacks & oasis slicks",
         difficulty = "Hard",
-        surfaceLabel = "Desert Sand",
+        surfaceLabel = "Loose Canyon Sand",
         baseBgColorHex = 0xFFD9A760,
         roadColorHex = 0xFFC27E3E,
         borderColorHex = 0xFF8A4F1D,
         kerbPrimaryHex = 0xFFFFD54F,
         kerbSecondaryHex = 0xFFBF360C,
-        offRoadDragMultiplier = 0.58f,
+        offRoadDragMultiplier = 0.56f,
         surfaceGripMultiplier = 0.80f
     ),
     WAREHOUSE_DRIFT(
         displayName = "Warehouse Drift Yard",
-        subtitle = "Polished concrete hairpins & crate obstacles",
+        subtitle = "Narrow L-boot concrete gymkhana with 90° hairpins & oil",
         difficulty = "Pro",
         surfaceLabel = "Slick Concrete",
         baseBgColorHex = 0xFF1D222B,
@@ -76,7 +76,7 @@ enum class TrackId(
         kerbPrimaryHex = 0xFFFFAB00,
         kerbSecondaryHex = 0xFF1A1E26,
         offRoadDragMultiplier = 0.62f,
-        surfaceGripMultiplier = 0.78f
+        surfaceGripMultiplier = 0.75f
     )
 }
 
@@ -164,6 +164,38 @@ enum class ArenaShape(
     )
 }
 
+enum class StuntVariant(
+    val displayName: String,
+    val shortName: String,
+    val subtitle: String,
+    val themeTrackId: TrackId
+) {
+    LONG_JUMP(
+        displayName = "Mega Long Jump",
+        shortName = "LONG JUMP",
+        subtitle = "Weave the slalom, hit speed pads & nitro, and jump as far as possible!",
+        themeTrackId = TrackId.NEON_ROOFTOP
+    ),
+    SOCCER_BALL(
+        displayName = "Rocket Goal Strike",
+        shortName = "SOCCER GOAL",
+        subtitle = "Launch off the ramp and smash the ball into the center bullseye goal!",
+        themeTrackId = TrackId.LIVING_ROOM_GP
+    ),
+    BOWLING(
+        displayName = "9-Pin RC Bowling",
+        shortName = "9-PIN BOWL",
+        subtitle = "Fly off the ramp into 9 giant bowling pins for a chain-reaction strike!",
+        themeTrackId = TrackId.WAREHOUSE_DRIFT
+    ),
+    GOLF_HOLES(
+        displayName = "Target Golf Drop",
+        shortName = "RC GOLF",
+        subtitle = "Land in numbered holes — smaller cups award massive bonus points!",
+        themeTrackId = TrackId.BACKYARD_DIRT
+    )
+}
+
 data class CustomTrackData(
     val id: String,
     val name: String,
@@ -190,7 +222,10 @@ data class TrackDefinition(
     val customName: String? = null,
     val isArena: Boolean = false,
     val arenaShape: ArenaShape? = null,
-    val arenaBoundary: List<TrackPoint> = emptyList()
+    val arenaBoundary: List<TrackPoint> = emptyList(),
+    val isStunt: Boolean = false,
+    val stuntVariant: StuntVariant? = null
 ) {
-    val displayTitle: String get() = customName ?: arenaShape?.displayName ?: id.displayName
+    val displayTitle: String
+        get() = customName ?: stuntVariant?.displayName ?: arenaShape?.displayName ?: id.displayName
 }

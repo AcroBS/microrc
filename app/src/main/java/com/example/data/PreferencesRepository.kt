@@ -34,12 +34,13 @@ class PreferencesRepository(context: Context) {
     private val dataStore: DataStore<Preferences> = getDataStore(context)
 
     companion object {
-        private val storesByPath = ConcurrentHashMap<String, DataStore<Preferences>>()
+        private val storesByAppAndPath = ConcurrentHashMap<String, DataStore<Preferences>>()
 
         private fun getDataStore(context: Context): DataStore<Preferences> {
             val appCtx = context.applicationContext ?: context
             val targetFile = File(appCtx.filesDir, "datastore/microrc_prefs.preferences_pb")
-            return storesByPath.computeIfAbsent(targetFile.absolutePath) {
+            val cacheKey = "${System.identityHashCode(appCtx)}:${targetFile.absolutePath}"
+            return storesByAppAndPath.computeIfAbsent(cacheKey) {
                 PreferenceDataStoreFactory.create(
                     produceFile = { targetFile }
                 )
@@ -73,6 +74,11 @@ class PreferencesRepository(context: Context) {
         val RULE_TIME_LIMIT_SEC = intPreferencesKey("rule_time_limit_sec")
         val RULE_ARENA_TARGET_MIN = intPreferencesKey("rule_arena_target_min")
         val RULE_CAR_SPEED = stringPreferencesKey("rule_car_speed")
+        val RULE_HYBRID_CIRCUIT = booleanPreferencesKey("rule_hybrid_circuit")
+        val RULE_HYBRID_ARENA = booleanPreferencesKey("rule_hybrid_arena")
+        val RULE_HYBRID_STUNTS = booleanPreferencesKey("rule_hybrid_stunts")
+        val RULE_HYBRID_RANDOM_ORDER = booleanPreferencesKey("rule_hybrid_random_order")
+        val RULE_HYBRID_STUNT_ROUNDS = intPreferencesKey("rule_hybrid_stunt_rounds")
         val AUDIO_MUSIC_ENABLED = booleanPreferencesKey("audio_music_enabled")
         val AUDIO_SFX_ENABLED = booleanPreferencesKey("audio_sfx_enabled")
         val AUDIO_HAPTICS_ENABLED = booleanPreferencesKey("audio_haptics_enabled")
@@ -128,7 +134,12 @@ class PreferencesRepository(context: Context) {
             totalLaps = (prefs[Keys.RULE_TOTAL_LAPS] ?: 3).coerceIn(1, 9),
             timeLimitSec = (prefs[Keys.RULE_TIME_LIMIT_SEC] ?: 90).coerceIn(30, 600),
             arenaTargetMinutes = (prefs[Keys.RULE_ARENA_TARGET_MIN] ?: 2).coerceIn(1, 10),
-            carSpeed = speedPreset.name
+            carSpeed = speedPreset.name,
+            hybridIncludeCircuit = prefs[Keys.RULE_HYBRID_CIRCUIT] ?: true,
+            hybridIncludeArena = prefs[Keys.RULE_HYBRID_ARENA] ?: true,
+            hybridIncludeStunts = prefs[Keys.RULE_HYBRID_STUNTS] ?: true,
+            hybridRandomOrder = prefs[Keys.RULE_HYBRID_RANDOM_ORDER] ?: false,
+            hybridStuntRounds = (prefs[Keys.RULE_HYBRID_STUNT_ROUNDS] ?: 1).coerceIn(1, 4)
         )
     }
 
@@ -203,6 +214,11 @@ class PreferencesRepository(context: Context) {
             it[Keys.RULE_TIME_LIMIT_SEC] = rules.timeLimitSec.coerceIn(30, 600)
             it[Keys.RULE_ARENA_TARGET_MIN] = rules.arenaTargetMinutes.coerceIn(1, 10)
             it[Keys.RULE_CAR_SPEED] = rules.carSpeedEnum.name
+            it[Keys.RULE_HYBRID_CIRCUIT] = rules.hybridIncludeCircuit
+            it[Keys.RULE_HYBRID_ARENA] = rules.hybridIncludeArena
+            it[Keys.RULE_HYBRID_STUNTS] = rules.hybridIncludeStunts
+            it[Keys.RULE_HYBRID_RANDOM_ORDER] = rules.hybridRandomOrder
+            it[Keys.RULE_HYBRID_STUNT_ROUNDS] = rules.hybridStuntRounds.coerceIn(1, 4)
         }
     }
 
