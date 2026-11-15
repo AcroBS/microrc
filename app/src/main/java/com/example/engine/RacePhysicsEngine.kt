@@ -2,11 +2,15 @@ package com.example.engine
 
 import com.example.data.TrackCatalog
 import com.example.model.ArenaFlagState
+import com.example.model.CarSpeedPreset
 import com.example.model.ControlInput
 import com.example.model.ExternalEventType
+import com.example.model.FieldPickupType
 import com.example.model.GameMode
+import com.example.model.HazardType
 import com.example.model.ItemBoxState
 import com.example.model.LobbyPlayer
+import com.example.model.PortalPairState
 import com.example.model.PowerUpType
 import com.example.model.PropShape
 import com.example.model.RacePhase
@@ -15,6 +19,8 @@ import com.example.model.RaceSnapshot
 import com.example.model.RacerState
 import com.example.model.RcCarType
 import com.example.model.TrackDefinition
+import com.example.model.TrackExplosion
+import com.example.model.TrackFieldPickup
 import com.example.model.TrackHazard
 import com.example.model.TrackPuddle
 import com.example.model.WinCondition
@@ -74,13 +80,22 @@ class RacePhysicsEngine(
         var flagPickupImmunityMs: Long = 0L,
         var spinImmunityMs: Long = 0L,
         var botLaneOffset: Float = 0f,
-        var botPowerUpDelayMs: Long = 0L
+        var botPowerUpDelayMs: Long = 0L,
+        var minesAvailable: Int = 0,
+        var lap2MineGranted: Boolean = false,
+        var botMineDelayMs: Long = 0L,
+        var invertedSteerMs: Long = 0L,
+        var portalCooldownMs: Long = 0L,
+        var wallBumpCooldownMs: Long = 0L,
+        var collisionSeq: Int = 0,
+        var portalWarpSeq: Int = 0
     )
 
     private val isArenaMode: Boolean = track.isArena || rules.gameModeEnum == GameMode.ARENA
     private val winCondition: WinCondition = rules.winConditionEnum
+    private val speedPreset: CarSpeedPreset = rules.carSpeedEnum
     private val effectiveLaps: Int = totalLaps.coerceIn(1, 9)
-    private val timeLimitMs: Long = rules.timeLimitSec.coerceIn(30, 300) * 1000L
+    private val timeLimitMs: Long = rules.timeLimitSec.coerceIn(30, 600) * 1000L
     private val arenaTargetMs: Long = rules.arenaTargetMinutes.coerceIn(1, 10) * 60_000L
 
     private val racers: MutableList<MutableRacer> = players.mapIndexed { idx, p ->
@@ -109,6 +124,22 @@ class RacePhysicsEngine(
 
     private val hazards: MutableList<TrackHazard> = mutableListOf()
     private var nextHazardId = 1
+
+    private val explosions: MutableList<TrackExplosion> = mutableListOf()
+    private var nextExplosionId = 1
+
+    // Random direct-trigger track power-ups (Position Swap double-arrow & 5s Steering Invert)
+    private val fieldPickups: MutableList<TrackFieldPickup> = mutableListOf()
+    private var nextFieldPickupId = 1
+    private var nextFieldPickupSpawnMs: Long = random.nextLong(3600L, 6200L)
+    private var lastFieldPickupType: FieldPickupType? = null
+
+    // Random paired Red & Blue portals (holes in the ground, forward-only teleport)
+    private var portalPair: PortalPairState? = null
+    private var nextPortalId = 1
+    private var nextPortalSpawnMs: Long = random.nextLong(6800L, 10800L)
+    private var activePortalEntryIdx: Int = -1
+    private var activePortalExitIdx: Int = -1
 
     private var elapsedMs: Long = 0L
     private var raceTimeMs: Long = 0L
@@ -139,6 +170,7 @@ class RacePhysicsEngine(
 
     private val latestInputs = mutableMapOf<String, ControlInput>()
     private val pendingPowerUpTrigger = mutableSetOf<String>()
+    private val pendingMineDropTrigger = mutableSetOf<String>()
 
     init {
         if (isArenaMode) {
@@ -160,10 +192,13 @@ class RacePhysicsEngine(
         if (input.usePowerUp) {
             pendingPowerUpTrigger.add(playerId)
         }
+        if (input.dropMine) {
+            pendingMineDropTrigger.add(playerId)
+        }
     }
 
     /**
-     * Exposed for deterministic Arena unit tests.
+     * Exposed for deterministic Arena & Circuit unit tests.
      */
     fun setFlagStateForTest(x: Float, y: Float, carrierId: String? = null) {
         flagX = x
@@ -178,6 +213,54 @@ class RacePhysicsEngine(
         if (triggerImmediately) {
             activatePowerUp(racer)
         }
+    }
+
+    fun grantMineForTest(playerId: String, count: Int = 1) {
+        val racer = racers.find { it.playerId == playerId } ?: return
+        racer.minesAvailable = count.coerceAtLeast(0)
+        if (count > 0) racer.lap2MineGranted = true
+    }
+
+    fun spawnFieldPickupForTest(
+        x: Float,
+        y: Float,
+        type: FieldPickupType,
+        durationMs: Long = 16000L
+    ) {
+        fieldPickups.add(
+            TrackFieldPickup(
+                id = nextFieldPickupId++,
+                x = x,
+                y = y,
+                type = type.name,
+                remainingMs = durationMs
+            )
+        )
+    }
+
+    fun spawnPortalsForTest(
+        entryX: Float,
+        entryY: Float,
+        exitX: Float,
+        exitY: Float,
+        exitAngleRad: Float,
+        entryColorIsRed: Boolean = true,
+        entryTrackIdx: Int = -1,
+        exitTrackIdx: Int = -1,
+        durationMs: Long = 14000L
+    ) {
+        activePortalEntryIdx = entryTrackIdx
+        activePortalExitIdx = exitTrackIdx
+        portalPair = PortalPairState(
+            id = nextPortalId++,
+            entryX = entryX,
+            entryY = entryY,
+            entryColorIsRed = entryColorIsRed,
+            exitX = exitX,
+            exitY = exitY,
+            exitAngleRad = exitAngleRad,
+            remainingMs = durationMs
+        )
     }
 
     /**
@@ -330,6 +413,186 @@ class RacePhysicsEngine(
         }
     }
 
+    private fun sampleTrackFeaturePoint(extraAvoid: List<Pair<Float, Float>>): Pair<Float, Float>? {
+        val avoid = buildList {
+            addAll(extraAvoid)
+            track.itemSpawns.forEach { add(it.x to it.y) }
+            track.boostPads.forEach { add(it.x to it.y) }
+            track.ramps.forEach { add(it.x to it.y) }
+            track.props.forEach { add(it.x to it.y) }
+            fieldPickups.forEach { add(it.x to it.y) }
+            portalPair?.let {
+                add(it.entryX to it.entryY)
+                add(it.exitX to it.exitY)
+            }
+        }
+
+        if (track.isArena) {
+            return TrackCatalog.sampleArenaInteriorPoint(
+                track = track,
+                rng = random,
+                minWallClearance = 155f,
+                avoidPoints = avoid,
+                minAvoidDist = 115f
+            )
+        }
+
+        val pts = track.centerline
+        if (pts.size < 24) return null
+        repeat(24) {
+            val idx = random.nextInt(8, pts.size - 6)
+            val pt = pts[idx]
+            val next = pts[(idx + 1) % pts.size]
+            val tangAng = atan2(next.y - pt.y, next.x - pt.x)
+            val perpX = -sin(tangAng)
+            val perpY = cos(tangAng)
+            val offset = (random.nextFloat() * 2f - 1f) * (pt.halfWidth * 0.42f)
+            val cx = pt.x + perpX * offset
+            val cy = pt.y + perpY * offset
+            val clear = avoid.all { (ax, ay) -> TrackCatalog.distance(cx, cy, ax, ay) >= 92f }
+            if (clear) return cx to cy
+        }
+        val fallbackIdx = random.nextInt(8, pts.size - 6)
+        return pts[fallbackIdx].x to pts[fallbackIdx].y
+    }
+
+    private fun updateFieldPickups(dtMs: Long) {
+        if (phase != RacePhase.RACING) return
+
+        val it = fieldPickups.iterator()
+        while (it.hasNext()) {
+            val fp = it.next()
+            val rem = fp.remainingMs - dtMs
+            if (rem <= 0L) {
+                it.remove()
+            } else {
+                val idx = fieldPickups.indexOf(fp)
+                if (idx >= 0) fieldPickups[idx] = fp.copy(remainingMs = rem)
+            }
+        }
+
+        if (fieldPickups.size < MAX_FIELD_PICKUPS) {
+            nextFieldPickupSpawnMs -= dtMs
+            if (nextFieldPickupSpawnMs <= 0L) {
+                nextFieldPickupSpawnMs = random.nextLong(5800L, 9400L)
+                val pos = sampleTrackFeaturePoint(racers.map { it.x to it.y })
+                if (pos != null) {
+                    val nextType = when (lastFieldPickupType) {
+                        null -> if (random.nextBoolean()) FieldPickupType.POSITION_SWAP else FieldPickupType.STEER_INVERT
+                        FieldPickupType.POSITION_SWAP -> if (random.nextFloat() < 0.65f) FieldPickupType.STEER_INVERT else FieldPickupType.POSITION_SWAP
+                        FieldPickupType.STEER_INVERT -> if (random.nextFloat() < 0.65f) FieldPickupType.POSITION_SWAP else FieldPickupType.STEER_INVERT
+                    }
+                    lastFieldPickupType = nextType
+                    fieldPickups.add(
+                        TrackFieldPickup(
+                            id = nextFieldPickupId++,
+                            x = pos.first,
+                            y = pos.second,
+                            type = nextType.name,
+                            remainingMs = random.nextLong(15000L, 19500L)
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    private fun updatePortals(dtMs: Long) {
+        if (phase != RacePhase.RACING) return
+
+        val current = portalPair
+        if (current != null) {
+            val rem = current.remainingMs - dtMs
+            if (rem <= 0L) {
+                portalPair = null
+                activePortalEntryIdx = -1
+                activePortalExitIdx = -1
+                nextPortalSpawnMs = random.nextLong(8500L, 13500L)
+            } else {
+                portalPair = current.copy(remainingMs = rem)
+            }
+            return
+        }
+
+        nextPortalSpawnMs -= dtMs
+        if (nextPortalSpawnMs <= 0L) {
+            spawnRandomPortalPair()
+        }
+    }
+
+    private fun spawnRandomPortalPair() {
+        val entryIsRed = random.nextBoolean()
+        if (track.isArena) {
+            val baseAvoid = racers.map { it.x to it.y } + track.props.map { it.x to it.y }
+            val (ax, ay) = TrackCatalog.sampleArenaInteriorPoint(
+                track = track,
+                rng = random,
+                minWallClearance = 175f,
+                avoidPoints = baseAvoid,
+                minAvoidDist = 140f
+            )
+            val (bx, by) = TrackCatalog.sampleArenaInteriorPoint(
+                track = track,
+                rng = random,
+                minWallClearance = 175f,
+                avoidPoints = baseAvoid + (ax to ay),
+                minAvoidDist = 340f
+            )
+            val centerAng = atan2(track.worldHeight * 0.5f - by, track.worldWidth * 0.5f - bx)
+            activePortalEntryIdx = -1
+            activePortalExitIdx = -1
+            portalPair = PortalPairState(
+                id = nextPortalId++,
+                entryX = ax,
+                entryY = ay,
+                entryColorIsRed = entryIsRed,
+                exitX = bx,
+                exitY = by,
+                exitAngleRad = centerAng,
+                remainingMs = random.nextLong(11500L, 14500L)
+            )
+            setBanner("RED & BLUE PORTALS OPENED!", 1800L)
+            return
+        }
+
+        val pts = track.centerline
+        if (pts.size < 48) return
+        val maxSpan = (pts.size / 3).coerceIn(16, 34)
+        val minSpan = 14.coerceAtMost(maxSpan)
+        val span = if (maxSpan > minSpan) random.nextInt(minSpan, maxSpan + 1) else minSpan
+        val maxEntry = (pts.size - span - 6).coerceAtLeast(10)
+        val entryIdx = random.nextInt(8, maxEntry)
+        val exitIdx = (entryIdx + span).coerceAtMost(pts.size - 4)
+
+        val ePt = pts[entryIdx]
+        val eNext = pts[(entryIdx + 1) % pts.size]
+        val eAng = atan2(eNext.y - ePt.y, eNext.x - ePt.x)
+        val eLat = (random.nextFloat() * 2f - 1f) * (ePt.halfWidth * 0.30f)
+        val entryX = ePt.x + (-sin(eAng)) * eLat
+        val entryY = ePt.y + cos(eAng) * eLat
+
+        val xPt = pts[exitIdx]
+        val xNext = pts[(exitIdx + 1) % pts.size]
+        val exitAng = atan2(xNext.y - xPt.y, xNext.x - xPt.x)
+        val xLat = (random.nextFloat() * 2f - 1f) * (xPt.halfWidth * 0.25f)
+        val exitX = xPt.x + (-sin(exitAng)) * xLat
+        val exitY = xPt.y + cos(exitAng) * xLat
+
+        activePortalEntryIdx = entryIdx
+        activePortalExitIdx = exitIdx
+        portalPair = PortalPairState(
+            id = nextPortalId++,
+            entryX = entryX,
+            entryY = entryY,
+            entryColorIsRed = entryIsRed,
+            exitX = exitX,
+            exitY = exitY,
+            exitAngleRad = exitAng,
+            remainingMs = random.nextLong(11500L, 14500L)
+        )
+        setBanner("PORTALS OPENED — WARP FORWARD!", 1800L)
+    }
+
     fun step(dtSeconds: Float): RaceSnapshot {
         val dt = dtSeconds.coerceIn(0.001f, 0.05f)
         val dtMs = (dt * 1000f).toLong().coerceAtLeast(1L)
@@ -358,6 +621,21 @@ class RacePhysicsEngine(
         if (phase == RacePhase.RACING) {
             raceTimeMs += dtMs
             updateExternalEvents(dtMs, dt)
+            updateFieldPickups(dtMs)
+            updatePortals(dtMs)
+        }
+
+        // Update active mine explosions
+        val expIt = explosions.iterator()
+        while (expIt.hasNext()) {
+            val exp = expIt.next()
+            val newAge = exp.ageMs + dtMs
+            if (newAge >= exp.durationMs) {
+                expIt.remove()
+            } else {
+                val idx = explosions.indexOf(exp)
+                if (idx >= 0) explosions[idx] = exp.copy(ageMs = newAge)
+            }
         }
 
         // Update item boxes respawn
@@ -414,8 +692,18 @@ class RacePhysicsEngine(
                 if (shouldUsePowerUp) {
                     activatePowerUp(racer)
                 }
+
+                val shouldDropMine = if (racer.isBot) {
+                    !isArenaMode && racer.minesAvailable > 0 && racer.botMineDelayMs <= 0L
+                } else {
+                    pendingMineDropTrigger.remove(racer.playerId)
+                }
+                if (shouldDropMine) {
+                    dropMine(racer)
+                }
             } else {
                 pendingPowerUpTrigger.remove(racer.playerId)
+                pendingMineDropTrigger.remove(racer.playerId)
             }
 
             integrateCarPhysics(racer, input, dt)
@@ -424,6 +712,8 @@ class RacePhysicsEngine(
                 handleBoostPads(racer)
                 handleRamps(racer)
                 handleItemPickups(racer)
+                handleFieldPickups(racer)
+                handlePortals(racer)
                 handleHazards(racer)
                 if (!isArenaMode) {
                     updateLapProgress(racer)
@@ -509,6 +799,9 @@ class RacePhysicsEngine(
             racer.spinVisualOffset = 0f
         }
         if (racer.overdriveMs > 0L) racer.overdriveMs = (racer.overdriveMs - dtMs).coerceAtLeast(0L)
+        if (racer.invertedSteerMs > 0L) racer.invertedSteerMs = (racer.invertedSteerMs - dtMs).coerceAtLeast(0L)
+        if (racer.portalCooldownMs > 0L) racer.portalCooldownMs = (racer.portalCooldownMs - dtMs).coerceAtLeast(0L)
+        if (racer.wallBumpCooldownMs > 0L) racer.wallBumpCooldownMs = (racer.wallBumpCooldownMs - dtMs).coerceAtLeast(0L)
         if (racer.jumpCooldownMs > 0L) racer.jumpCooldownMs = (racer.jumpCooldownMs - dtMs).coerceAtLeast(0L)
         if (racer.flagPickupImmunityMs > 0L) {
             racer.flagPickupImmunityMs = (racer.flagPickupImmunityMs - dtMs).coerceAtLeast(0L)
@@ -526,6 +819,9 @@ class RacePhysicsEngine(
         }
         if (racer.botPowerUpDelayMs > 0L) {
             racer.botPowerUpDelayMs = (racer.botPowerUpDelayMs - dtMs).coerceAtLeast(0L)
+        }
+        if (racer.botMineDelayMs > 0L) {
+            racer.botMineDelayMs = (racer.botMineDelayMs - dtMs).coerceAtLeast(0L)
         }
     }
 
@@ -585,7 +881,6 @@ class RacePhysicsEngine(
     }
 
     private fun flagCaptureRadiusFor(racer: MutableRacer): Float {
-        // Loose flag ring is rendered at 46f; active Shield bubble is rendered at ~30.5f
         val bodyOrShieldRadius = if (racer.shieldMs > 0L) {
             max(racer.carType.radiusPx, 31f)
         } else {
@@ -670,6 +965,7 @@ class RacePhysicsEngine(
             racer.spinImmunityMs = 2400L
             racer.vx *= 0.45f
             racer.vy *= 0.45f
+            racer.collisionSeq += 1
             if (flagCarrierId == racer.playerId) {
                 dropFlagFrom(racer, "hydroplaned in a puddle")
             }
@@ -698,9 +994,10 @@ class RacePhysicsEngine(
             else -> 1.0f
         } * offRoadFactor * weatherSpeedMult
 
-        val maxSpeed = racer.carType.maxSpeedPx * speedMult
+        val maxSpeed = racer.carType.maxSpeedPx * speedPreset.speedMultiplier * speedMult
         val accelWeatherMult = if (activeEvent == ExternalEventType.SNOW) 0.84f else 1.0f
         val accel = racer.carType.accelRate *
+            speedPreset.accelMultiplier *
             accelWeatherMult *
             (if (hasBoost) 1.75f else if (hasOverdrive) 1.3f else 1.0f)
 
@@ -713,14 +1010,23 @@ class RacePhysicsEngine(
         var lateralVel = racer.vx * rightX + racer.vy * rightY
 
         val throttle = if (isStunned) 0.15f else input.throttle.coerceIn(-1f, 1f)
-        val rawSteer = if (isStunned) 0f else input.steer.coerceIn(-1f, 1f)
+        val inputSteer = if (isStunned) 0f else input.steer.coerceIn(-1f, 1f)
+        val effectiveSteer = if (!isStunned && racer.invertedSteerMs > 0L) {
+            if (racer.isBot) {
+                (-inputSteer * 0.35f + sin(elapsedMs / 135f + closestIdx) * 0.65f).coerceIn(-1f, 1f)
+            } else {
+                -inputSteer
+            }
+        } else {
+            inputSteer
+        }
         val puddleSteerJitter = if (inRainPuddle && !hasOverdrive) {
             sin((elapsedMs / 110f) + closestIdx.toFloat()) * 0.55f
         } else {
             0f
         }
-        val steer = (rawSteer + puddleSteerJitter).coerceIn(-1.15f, 1.15f)
-        racer.steerVisual = rawSteer
+        val steer = (effectiveSteer + puddleSteerJitter).coerceIn(-1.15f, 1.15f)
+        racer.steerVisual = effectiveSteer
 
         if (!isAirborne) {
             if (throttle > 0.05f) {
@@ -736,7 +1042,7 @@ class RacePhysicsEngine(
             forwardVel = forwardVel.coerceIn(-maxSpeed * 0.58f, maxSpeed)
         }
 
-        val speedNorm = (abs(forwardVel) / 180f).coerceIn(0.32f, 1.0f)
+        val speedNorm = (abs(forwardVel) / (180f * speedPreset.speedMultiplier)).coerceIn(0.32f, 1.0f)
         val reverseFlip = if (forwardVel < -25f) -1f else 1f
         val gripTurnBoost = if (hasOverdrive) 1.18f else 1.0f
         val airSteerFactor = if (isAirborne) 0.25f else 1.0f
@@ -798,6 +1104,10 @@ class RacePhysicsEngine(
                     val outNy = -inNy
                     val vnOut = racer.vx * outNx + racer.vy * outNy
                     if (vnOut > 0f) {
+                        if (vnOut > 65f && racer.wallBumpCooldownMs == 0L) {
+                            racer.wallBumpCooldownMs = 260L
+                            racer.collisionSeq += 1
+                        }
                         val restitution = if (rules.hardTrackBoundary) 1.58f else 1.3f
                         val retention = if (rules.hardTrackBoundary) 0.82f else 0.78f
                         racer.vx = (racer.vx - restitution * vnOut * outNx) * retention
@@ -845,6 +1155,10 @@ class RacePhysicsEngine(
 
             val vn = racer.vx * nx + racer.vy * ny
             if (vn > 0f) {
+                if (vn > 65f && racer.wallBumpCooldownMs == 0L) {
+                    racer.wallBumpCooldownMs = 260L
+                    racer.collisionSeq += 1
+                }
                 val restitution = if (rules.hardTrackBoundary) 1.55f else 1.3f
                 val retention = if (rules.hardTrackBoundary) 0.80f else 0.84f
                 racer.vx = (racer.vx - restitution * vn * nx) * retention
@@ -885,6 +1199,10 @@ class RacePhysicsEngine(
                     racer.y = prop.y + ny * (minDist + 2f)
                     val vn = racer.vx * nx + racer.vy * ny
                     if (vn < 0f) {
+                        if (vn < -48f && racer.wallBumpCooldownMs == 0L) {
+                            racer.wallBumpCooldownMs = 240L
+                            racer.collisionSeq += 1
+                        }
                         racer.vx = (racer.vx - 1.45f * vn * nx) * 0.82f
                         racer.vy = (racer.vy - 1.45f * vn * ny) * 0.82f
                     }
@@ -896,6 +1214,7 @@ class RacePhysicsEngine(
                         racer.spinImmunityMs = 2400L
                         racer.vx *= 0.42f
                         racer.vy *= 0.42f
+                        racer.collisionSeq += 1
                         if (flagCarrierId == racer.playerId) {
                             dropFlagFrom(racer, "spun on an oil patch")
                         }
@@ -914,7 +1233,7 @@ class RacePhysicsEngine(
             if (TrackCatalog.distance(racer.x, racer.y, pad.x, pad.y) <= pad.radius + 10f) {
                 if (racer.boostMs < 900L) {
                     racer.boostMs = 1250L
-                    val boostSpeed = racer.carType.maxSpeedPx * 1.38f
+                    val boostSpeed = racer.carType.maxSpeedPx * speedPreset.speedMultiplier * 1.38f
                     racer.vx = cos(racer.angleRad) * boostSpeed
                     racer.vy = sin(racer.angleRad) * boostSpeed
                 }
@@ -925,7 +1244,7 @@ class RacePhysicsEngine(
     private fun handleRamps(racer: MutableRacer) {
         if (racer.jumpZ > 0.01f || racer.jumpCooldownMs > 0L) return
         val speed = hypot(racer.vx, racer.vy)
-        if (speed < 130f) return
+        if (speed < 130f * speedPreset.speedMultiplier) return
         for (ramp in track.ramps) {
             if (TrackCatalog.distance(racer.x, racer.y, ramp.x, ramp.y) <= ramp.radius + 10f) {
                 racer.vz = 3.15f * ramp.impulse
@@ -964,13 +1283,194 @@ class RacePhysicsEngine(
         }
     }
 
+    private fun dropMine(racer: MutableRacer) {
+        if (isArenaMode || racer.minesAvailable <= 0) return
+        racer.minesAvailable -= 1
+        val dropX = racer.x - cos(racer.angleRad) * 54f
+        val dropY = racer.y - sin(racer.angleRad) * 54f
+        hazards.add(
+            TrackHazard(
+                id = nextHazardId++,
+                ownerId = racer.playerId,
+                x = dropX,
+                y = dropY,
+                radius = 30f,
+                remainingMs = 45000L,
+                type = HazardType.MINE.name
+            )
+        )
+        setBanner("${racer.name} dropped a Red Mine!", 1400L)
+    }
+
+    private fun handleFieldPickups(racer: MutableRacer) {
+        if (racer.jumpZ > 0.30f || fieldPickups.isEmpty()) return
+        val hitRadius = 40f + racer.carType.radiusPx * 0.45f
+        val it = fieldPickups.iterator()
+        while (it.hasNext()) {
+            val fp = it.next()
+            if (TrackCatalog.distance(racer.x, racer.y, fp.x, fp.y) <= hitRadius) {
+                it.remove()
+                racer.portalWarpSeq += 1
+                when (fp.pickupTypeEnum) {
+                    FieldPickupType.POSITION_SWAP -> {
+                        updateRankings()
+                        val leader = racers
+                            .filter { !it.finished }
+                            .minByOrNull { it.rank }
+                            ?: racers.minByOrNull { it.rank }
+
+                        if (leader != null && leader.playerId != racer.playerId) {
+                            val rx = racer.x
+                            val ry = racer.y
+                            val rAng = racer.angleRad
+                            val rvx = racer.vx
+                            val rvy = racer.vy
+                            val rLap = racer.lap
+                            val rCp = racer.checkpointIndex
+                            val rLastIdx = racer.lastTrackIdx
+                            val rMask = racer.sectorMask
+
+                            racer.x = leader.x
+                            racer.y = leader.y
+                            racer.prevX = racer.x
+                            racer.prevY = racer.y
+                            racer.angleRad = leader.angleRad
+                            racer.vx = leader.vx
+                            racer.vy = leader.vy
+                            racer.jumpZ = 0f
+                            racer.vz = 0f
+                            racer.portalCooldownMs = 900L
+                            racer.spinImmunityMs = 900L
+
+                            leader.x = rx
+                            leader.y = ry
+                            leader.prevX = rx
+                            leader.prevY = ry
+                            leader.angleRad = rAng
+                            leader.vx = rvx
+                            leader.vy = rvy
+                            leader.jumpZ = 0f
+                            leader.vz = 0f
+                            leader.portalCooldownMs = 900L
+                            leader.spinImmunityMs = 900L
+                            leader.portalWarpSeq += 1
+
+                            if (!isArenaMode) {
+                                racer.lap = leader.lap
+                                racer.checkpointIndex = leader.checkpointIndex
+                                racer.lastTrackIdx = leader.lastTrackIdx
+                                racer.sectorMask = leader.sectorMask
+
+                                leader.lap = rLap
+                                leader.checkpointIndex = rCp
+                                leader.lastTrackIdx = rLastIdx
+                                leader.sectorMask = rMask
+                            }
+
+                            racer.powerUpHits += 1
+                            racer.racePoints += 40
+                            updateRankings()
+                            setBanner("${racer.name} SWAPPED POSITIONS with ${leader.name}!", 2200L)
+                        } else {
+                            // Already the leading driver — small boost surge
+                            racer.boostMs = max(racer.boostMs, 900L)
+                            setBanner("${racer.name} hit Position Swap (already 1st)!", 1500L)
+                        }
+                    }
+                    FieldPickupType.STEER_INVERT -> {
+                        racer.invertedSteerMs = 5000L
+                        setBanner("${racer.name}: STEERING INVERTED (5s)!", 2000L)
+                    }
+                }
+                break
+            }
+        }
+    }
+
+    private fun markSectorsCrossedForward(racer: MutableRacer, fromIdx: Int, toIdx: Int) {
+        val n = track.centerline.size
+        if (n < 8 || toIdx <= fromIdx) return
+        val q1 = n / 4
+        val q2 = n / 2
+        val q3 = (3 * n) / 4
+        if (fromIdx < q1) racer.sectorMask = racer.sectorMask or 0b0001
+        if (toIdx >= q1 && (racer.sectorMask and 0b0001) != 0) {
+            racer.sectorMask = racer.sectorMask or 0b0010
+        }
+        if (toIdx >= q2 && (racer.sectorMask and 0b0010) != 0) {
+            racer.sectorMask = racer.sectorMask or 0b0100
+        }
+        if (toIdx >= q3 && (racer.sectorMask and 0b0100) != 0) {
+            racer.sectorMask = racer.sectorMask or 0b1000
+        }
+    }
+
+    private fun handlePortals(racer: MutableRacer) {
+        val portals = portalPair ?: return
+        if (racer.jumpZ > 0.30f || racer.portalCooldownMs > 0L) return
+
+        val forwardVel = racer.vx * cos(racer.angleRad) + racer.vy * sin(racer.angleRad)
+        // Portals only trigger when driving forward into them (never reversing backward)
+        if (forwardVel < -8f) return
+
+        val portalHitRadius = 38f + racer.carType.radiusPx * 0.45f
+        val distEntry = TrackCatalog.distance(racer.x, racer.y, portals.entryX, portals.entryY)
+
+        if (track.isArena) {
+            val distExit = TrackCatalog.distance(racer.x, racer.y, portals.exitX, portals.exitY)
+            if (distEntry <= portalHitRadius || distExit <= portalHitRadius) {
+                val enterFirst = distEntry <= distExit
+                val destX = if (enterFirst) portals.exitX else portals.entryX
+                val destY = if (enterFirst) portals.exitY else portals.entryY
+                val outAng = racer.angleRad
+                val outSpeed = max(hypot(racer.vx, racer.vy), 210f * speedPreset.speedMultiplier)
+                racer.x = destX + cos(outAng) * 44f
+                racer.y = destY + sin(outAng) * 44f
+                racer.prevX = racer.x
+                racer.prevY = racer.y
+                racer.vx = cos(outAng) * outSpeed
+                racer.vy = sin(outAng) * outSpeed
+                racer.portalCooldownMs = 1600L
+                racer.portalWarpSeq += 1
+                setBanner("${racer.name} warped through portal!", 1400L)
+            }
+            return
+        }
+
+        // Circuit mode: strictly forward-only teleport from upstream entry hole -> downstream exit hole!
+        if (distEntry <= portalHitRadius) {
+            val outAng = portals.exitAngleRad
+            val outSpeed = max(hypot(racer.vx, racer.vy), 215f * speedPreset.speedMultiplier)
+            racer.x = portals.exitX + cos(outAng) * 36f
+            racer.y = portals.exitY + sin(outAng) * 36f
+            racer.prevX = racer.x
+            racer.prevY = racer.y
+            racer.angleRad = outAng
+            racer.vx = cos(outAng) * outSpeed
+            racer.vy = sin(outAng) * outSpeed
+            racer.portalCooldownMs = 1600L
+            racer.portalWarpSeq += 1
+
+            val targetIdx = if (activePortalExitIdx >= 0) {
+                activePortalExitIdx
+            } else {
+                TrackCatalog.nearestTrackPoint(track, racer.x, racer.y).first
+            }
+            val startIdx = if (activePortalEntryIdx >= 0) activePortalEntryIdx else racer.checkpointIndex
+            markSectorsCrossedForward(racer, startIdx, targetIdx)
+            racer.lastTrackIdx = targetIdx
+            racer.checkpointIndex = targetIdx
+            setBanner("${racer.name} WARPED FORWARD!", 1500L)
+        }
+    }
+
     private fun activatePowerUp(racer: MutableRacer) {
         val item = racer.heldPowerUp ?: return
         racer.heldPowerUp = null
         when (item) {
             PowerUpType.TURBO_NITRO -> {
                 racer.boostMs = 2500L
-                val burst = racer.carType.maxSpeedPx * 1.44f
+                val burst = racer.carType.maxSpeedPx * speedPreset.speedMultiplier * 1.44f
                 racer.vx = cos(racer.angleRad) * burst
                 racer.vy = sin(racer.angleRad) * burst
                 setBanner("${racer.name} triggered LiPo Turbo!", 1600L)
@@ -984,6 +1484,7 @@ class RacePhysicsEngine(
                         TrackCatalog.distance(racer.x, racer.y, other.x, other.y) + rankPenalty + carrierBonus
                     }
                 if (target != null) {
+                    target.collisionSeq += 1
                     if (target.shieldMs > 0L) {
                         target.shieldMs = 0L
                         setBanner("${target.name}'s Shield blocked ${racer.name}'s EMP!", 1800L)
@@ -1016,7 +1517,8 @@ class RacePhysicsEngine(
                         x = dropX,
                         y = dropY,
                         radius = 30f,
-                        remainingMs = 11000L
+                        remainingMs = 11000L,
+                        type = HazardType.GLUE_SLICK.name
                     )
                 )
             }
@@ -1032,25 +1534,62 @@ class RacePhysicsEngine(
         val it = hazards.iterator()
         while (it.hasNext()) {
             val h = it.next()
-            if (h.ownerId == racer.playerId && h.remainingMs > 9800L) continue
+            val isMine = h.hazardTypeEnum == HazardType.MINE
+            val selfGraceCutoff = if (isMine) 43800L else 9800L
+            if (h.ownerId == racer.playerId && h.remainingMs > selfGraceCutoff) continue
+
             if (TrackCatalog.distance(racer.x, racer.y, h.x, h.y) <= h.radius + racer.carType.radiusPx * 0.7f) {
                 it.remove()
-                if (racer.shieldMs > 0L) {
-                    racer.shieldMs = 0L
-                    setBanner("${racer.name}'s Shield absorbed Glue Slick!", 1500L)
-                } else {
-                    racer.stunnedMs = 1400L
-                    racer.vx *= 0.3f
-                    racer.vy *= 0.3f
-                    val owner = racers.find { o -> o.playerId == h.ownerId }
-                    if (owner != null && owner.playerId != racer.playerId) {
-                        owner.powerUpHits += 1
-                        owner.racePoints += 35
-                    }
-                    if (flagCarrierId == racer.playerId) {
-                        dropFlagFrom(racer, "spun out on Glue Slick")
+                racer.collisionSeq += 1
+
+                if (isMine) {
+                    explosions.add(
+                        TrackExplosion(
+                            id = nextExplosionId++,
+                            x = h.x,
+                            y = h.y,
+                            ageMs = 0L,
+                            durationMs = 680L
+                        )
+                    )
+                    if (racer.shieldMs > 0L) {
+                        racer.shieldMs = 0L
+                        setBanner("${racer.name}'s Shield absorbed Mine blast!", 1600L)
                     } else {
-                        setBanner("${racer.name} spun out on Glue Slick!", 1600L)
+                        // Same slip/spin behavior as a puddle or oil slip + small explosion
+                        racer.stunnedMs = 1150L
+                        racer.spinImmunityMs = 2400L
+                        racer.vx *= 0.42f
+                        racer.vy *= 0.42f
+                        val owner = racers.find { o -> o.playerId == h.ownerId }
+                        if (owner != null && owner.playerId != racer.playerId) {
+                            owner.powerUpHits += 1
+                            owner.racePoints += 40
+                        }
+                        if (flagCarrierId == racer.playerId) {
+                            dropFlagFrom(racer, "hit a Mine")
+                        } else {
+                            setBanner("BOOM! ${racer.name} slipped on a Red Mine!", 1750L)
+                        }
+                    }
+                } else {
+                    if (racer.shieldMs > 0L) {
+                        racer.shieldMs = 0L
+                        setBanner("${racer.name}'s Shield absorbed Glue Slick!", 1500L)
+                    } else {
+                        racer.stunnedMs = 1400L
+                        racer.vx *= 0.3f
+                        racer.vy *= 0.3f
+                        val owner = racers.find { o -> o.playerId == h.ownerId }
+                        if (owner != null && owner.playerId != racer.playerId) {
+                            owner.powerUpHits += 1
+                            owner.racePoints += 35
+                        }
+                        if (flagCarrierId == racer.playerId) {
+                            dropFlagFrom(racer, "spun out on Glue Slick")
+                        } else {
+                            setBanner("${racer.name} spun out on Glue Slick!", 1600L)
+                        }
                     }
                 }
                 break
@@ -1081,6 +1620,10 @@ class RacePhysicsEngine(
                     val relVy = b.vy - a.vy
                     val sepVel = relVx * nx + relVy * ny
                     if (sepVel < 0f) {
+                        if (sepVel < -38f) {
+                            a.collisionSeq += 1
+                            b.collisionSeq += 1
+                        }
                         val impulse = -1.2f * sepVel * 0.5f
                         a.vx -= impulse * nx
                         a.vy -= impulse * ny
@@ -1159,8 +1702,23 @@ class RacePhysicsEngine(
                         racer.lap += 1
                         racer.currentLapStartMs = raceTimeMs
                         racer.sectorMask = 0b0001
+
+                        // Starting with the 2nd lap, each driver gets 1 flashing red mine!
+                        if (racer.lap >= 2 && !racer.lap2MineGranted) {
+                            racer.lap2MineGranted = true
+                            racer.minesAvailable = 1
+                            if (racer.isBot) {
+                                racer.botMineDelayMs = random.nextLong(2200L, 6800L)
+                            }
+                        }
+
                         if (winCondition != WinCondition.TIME_TRIAL_DISTANCE && racer.lap == effectiveLaps) {
-                            setBanner("${racer.name}: FINAL LAP!", 1500L)
+                            setBanner(
+                                if (racer.lap == 2) "${racer.name}: FINAL LAP • MINE READY!" else "${racer.name}: FINAL LAP!",
+                                1700L
+                            )
+                        } else if (racer.lap == 2 && !racer.isBot) {
+                            setBanner("${racer.name}: LAP 2 — RED MINE ARMED!", 1700L)
                         }
                     }
                 } else {
@@ -1265,7 +1823,6 @@ class RacePhysicsEngine(
         var targetY: Float
 
         if (carrierId == racer.playerId) {
-            // Bot holds the flag: orbit cleanly inside the arena while steering away from closest chaser
             val radFromCenter = atan2(racer.y - cy, racer.x - cx)
             val orbitAng = radFromCenter + 0.65f
             targetX = cx + cos(orbitAng) * 320f
@@ -1282,7 +1839,6 @@ class RacePhysicsEngine(
                 }
             }
         } else if (carrierId != null) {
-            // Intercept opponent carrying the flag
             val carrier = racers.find { it.playerId == carrierId }
             if (carrier != null) {
                 targetX = carrier.x + carrier.vx * 0.16f
@@ -1292,7 +1848,6 @@ class RacePhysicsEngine(
                 targetY = flagY
             }
         } else {
-            // Loose flag: race straight to it (unless temporarily immune after dropping)
             if (racer.flagPickupImmunityMs > 0L) {
                 targetX = cx
                 targetY = cy
@@ -1302,7 +1857,6 @@ class RacePhysicsEngine(
             }
         }
 
-        // Steer slightly around oil/mud slicks when carrying the flag
         if (carrierId == racer.playerId) {
             for (prop in track.props) {
                 if (prop.shape == PropShape.MUD_POOL) {
@@ -1376,7 +1930,11 @@ class RacePhysicsEngine(
                     spinVisualOffset = r.spinVisualOffset,
                     powerUpHits = r.powerUpHits,
                     racePoints = r.racePoints,
-                    flagCarryMs = r.flagCarryMs
+                    flagCarryMs = r.flagCarryMs,
+                    minesAvailable = r.minesAvailable,
+                    invertedSteerMs = r.invertedSteerMs,
+                    collisionSeq = r.collisionSeq,
+                    portalWarpSeq = r.portalWarpSeq
                 )
             },
             itemBoxes = itemBoxes.toList(),
@@ -1401,12 +1959,16 @@ class RacePhysicsEngine(
                 )
             } else {
                 null
-            }
+            },
+            fieldPickups = fieldPickups.toList(),
+            portalPair = portalPair,
+            explosions = explosions.toList()
         )
     }
 
     companion object {
         const val FINISH_GRACE_MS = 20_000L
+        private const val MAX_FIELD_PICKUPS = 2
 
         fun normalizeAngle(angle: Float): Float {
             var a = angle

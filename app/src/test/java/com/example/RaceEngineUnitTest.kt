@@ -4,10 +4,13 @@ import com.example.audio.RaceAudioEngine
 import com.example.data.TrackCatalog
 import com.example.engine.RacePhysicsEngine
 import com.example.model.ArenaShape
+import com.example.model.CarSpeedPreset
 import com.example.model.ChatMessage
 import com.example.model.ControlInput
 import com.example.model.ExternalEventType
+import com.example.model.FieldPickupType
 import com.example.model.GameMode
+import com.example.model.HazardType
 import com.example.model.LobbyPlayer
 import com.example.model.LobbyStatePayload
 import com.example.model.NetworkMessage
@@ -567,5 +570,337 @@ class RaceEngineUnitTest {
             pickedIndices.toSet().size >= 3
         )
         audioEngine.stop()
+    }
+
+    @Test
+    fun carSpeedPresets_scaleVelocityWithFastAsDefault() {
+        val defaults = RaceRulesSettings()
+        assertEquals(CarSpeedPreset.FAST, defaults.carSpeedEnum)
+
+        val arena = TrackCatalog.getArenaTrack(ArenaShape.SQUARE).copy(
+            ramps = emptyList(),
+            boostPads = emptyList(),
+            props = emptyList(),
+            itemSpawns = emptyList()
+        )
+        val players = listOf(
+            LobbyPlayer("p1", "SpeedDriver", isHost = true, isBot = false, carType = RcCarType.APEX_FORMULA.name)
+        )
+
+        fun measureTopSpeed(preset: CarSpeedPreset): Float {
+            val engine = RacePhysicsEngine(
+                track = arena,
+                totalLaps = 3,
+                players = players,
+                rules = RaceRulesSettings(
+                    gameMode = GameMode.ARENA.name,
+                    carSpeed = preset.name,
+                    randomConditionsEnabled = false
+                ),
+                random = Random(101L)
+            )
+            repeat(68) { engine.step(0.05f) }
+            var snap = engine.step(0.02f)
+            repeat(85) {
+                engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+                snap = engine.step(0.02f)
+            }
+            return snap.racers.first().speed
+        }
+
+        val lowSpeed = measureTopSpeed(CarSpeedPreset.LOW)
+        val medSpeed = measureTopSpeed(CarSpeedPreset.MEDIUM)
+        val fastSpeed = measureTopSpeed(CarSpeedPreset.FAST)
+
+        assertTrue("Low speed ($lowSpeed) should be slower than Medium ($medSpeed)", lowSpeed < medSpeed - 25f)
+        assertTrue("Medium speed ($medSpeed) should be slower than Fast ($fastSpeed)", medSpeed < fastSpeed - 25f)
+    }
+
+    @Test
+    fun lap2Mine_grantsOnLap2DropsSeparatelyAndExplodesWithSlipSpin() {
+        val track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP).copy(
+            ramps = emptyList(),
+            itemSpawns = emptyList()
+        )
+        val players = listOf(
+            LobbyPlayer("p1", "Leader", isHost = true, isBot = false, carType = RcCarType.VOLT_BUGGY.name),
+            LobbyPlayer("p2", "Chaser", isHost = false, isBot = false, carType = RcCarType.APEX_FORMULA.name)
+        )
+        val engine = RacePhysicsEngine(
+            track = track,
+            totalLaps = 3,
+            players = players,
+            rules = RaceRulesSettings(autoAccelerate = true, randomConditionsEnabled = false),
+            random = Random(55L)
+        )
+
+        repeat(68) { engine.step(0.05f) }
+        var snap = engine.step(0.016f)
+        assertEquals("No mine on Lap 1", 0, snap.racers.first { it.playerId == "p1" }.minesAvailable)
+
+        // Drive p1 around Lap 1 until crossing into Lap 2
+        var steps = 0
+        while (snap.racers.first { it.playerId == "p1" }.lap < 2 && steps < 2000) {
+            val r = snap.racers.first { it.playerId == "p1" }
+            val (idx, _) = TrackCatalog.nearestTrackPoint(track, r.x, r.y)
+            val target = track.centerline[(idx + 7) % track.centerline.size]
+            val desired = kotlin.math.atan2(target.y - r.y, target.x - r.x)
+            val diff = RacePhysicsEngine.normalizeAngle(desired - r.angleRad)
+            engine.submitInput("p1", ControlInput(throttle = 1f, steer = (diff / 0.6f).coerceIn(-1f, 1f)))
+            engine.submitInput("p2", ControlInput(throttle = 0f, steer = 0f))
+            snap = engine.step(0.016f)
+            steps++
+        }
+
+        val p1Lap2 = snap.racers.first { it.playerId == "p1" }
+        assertEquals(2, p1Lap2.lap)
+        assertEquals("Driver must receive 1 mine starting on Lap 2", 1, p1Lap2.minesAvailable)
+
+        // Drop mine using separate dropMine input
+        engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f, dropMine = true))
+        snap = engine.step(0.016f)
+        assertEquals(0, snap.racers.first { it.playerId == "p1" }.minesAvailable)
+        val droppedMine = snap.hazards.firstOrNull { it.hazardTypeEnum == HazardType.MINE }
+        assertNotNull("Dropped flashing red mine should exist in hazards", droppedMine)
+
+        // Now test rival hitting a mine: spawns explosion, spins out like oil/puddle, and increments collisionSeq
+        val arena = TrackCatalog.getArenaTrack(ArenaShape.CIRCLE).copy(
+            ramps = emptyList(),
+            props = emptyList(),
+            itemSpawns = emptyList()
+        )
+        val hitEngine = RacePhysicsEngine(
+            track = track.copy(props = emptyList()),
+            totalLaps = 3,
+            players = players,
+            rules = RaceRulesSettings(autoAccelerate = false, randomConditionsEnabled = false),
+            random = Random(77L)
+        )
+        repeat(68) { hitEngine.step(0.05f) }
+        var hSnap = hitEngine.step(0.02f)
+        hitEngine.grantMineForTest("p1", count = 1)
+        // Drop mine behind p1, then position p2 to drive right onto it
+        hitEngine.submitInput("p1", ControlInput(throttle = 0f, steer = 0f, dropMine = true))
+        hSnap = hitEngine.step(0.02f)
+        val mine = hSnap.hazards.first { it.hazardTypeEnum == HazardType.MINE }
+        assertNotNull(arena)
+
+        // Advance > 1.25s so self-grace expires, then back p1 onto the mine to trigger explosion deterministically
+        repeat(30) { hSnap = hitEngine.step(0.05f) }
+        val beforeColSeq = hSnap.racers.first { it.playerId == "p1" }.collisionSeq
+        var exploded = false
+        var stunned = false
+        repeat(45) {
+            val r1 = hSnap.racers.first { it.playerId == "p1" }
+            val toMineAng = kotlin.math.atan2(mine.y - r1.y, mine.x - r1.x)
+            val revDiff = RacePhysicsEngine.normalizeAngle((toMineAng + Math.PI.toFloat()) - r1.angleRad)
+            hitEngine.submitInput("p1", ControlInput(throttle = -1f, steer = (-revDiff).coerceIn(-1f, 1f)))
+            hSnap = hitEngine.step(0.03f)
+            if (hSnap.explosions.isNotEmpty()) exploded = true
+            if (hSnap.racers.first { it.playerId == "p1" }.stunnedMs > 0L) stunned = true
+        }
+        assertTrue("Mine hit must spawn a small explosion", exploded)
+        assertTrue("Mine hit must apply puddle/oil spin-out", stunned)
+        assertTrue(
+            "Mine hit must increment collisionSeq for haptic feedback",
+            hSnap.racers.first { it.playerId == "p1" }.collisionSeq > beforeColSeq
+        )
+    }
+
+    @Test
+    fun directTrackPickups_positionSwapAndSteeringInvertTriggerOnDriveOver() {
+        val track = TrackCatalog.getTrack(TrackId.NEON_ROOFTOP).copy(
+            ramps = emptyList(),
+            props = emptyList(),
+            itemSpawns = emptyList()
+        )
+        val players = listOf(
+            LobbyPlayer("p1", "LeaderCar", isHost = true, isBot = false, carType = RcCarType.APEX_FORMULA.name),
+            LobbyPlayer("p2", "TrailingCar", isHost = false, isBot = false, carType = RcCarType.VOLT_BUGGY.name)
+        )
+        val engine = RacePhysicsEngine(
+            track = track,
+            totalLaps = 3,
+            players = players,
+            rules = RaceRulesSettings(autoAccelerate = false, randomConditionsEnabled = false),
+            random = Random(123L)
+        )
+        repeat(68) { engine.step(0.05f) }
+
+        // Drive p1 ahead so p1 is clearly leading (rank 1) while p2 stays at start (rank 2)
+        var snap = engine.step(0.02f)
+        repeat(55) {
+            val r1 = snap.racers.first { it.playerId == "p1" }
+            val (idx, _) = TrackCatalog.nearestTrackPoint(track, r1.x, r1.y)
+            val target = track.centerline[(idx + 7) % track.centerline.size]
+            val desired = kotlin.math.atan2(target.y - r1.y, target.x - r1.x)
+            val diff = RacePhysicsEngine.normalizeAngle(desired - r1.angleRad)
+            engine.submitInput("p1", ControlInput(throttle = 1f, steer = (diff / 0.6f).coerceIn(-1f, 1f)))
+            engine.submitInput("p2", ControlInput(throttle = 0f, steer = 0f))
+            snap = engine.step(0.02f)
+        }
+        val leaderBefore = snap.racers.first { it.playerId == "p1" }
+        val trailingBefore = snap.racers.first { it.playerId == "p2" }
+        assertEquals(1, leaderBefore.rank)
+        assertEquals(2, trailingBefore.rank)
+
+        // Spawn Position Swap (double arrow) directly under/ahead of trailing p2
+        engine.spawnFieldPickupForTest(trailingBefore.x, trailingBefore.y, FieldPickupType.POSITION_SWAP)
+        snap = engine.step(0.02f)
+
+        val p2AfterSwap = snap.racers.first { it.playerId == "p2" }
+        val p1AfterSwap = snap.racers.first { it.playerId == "p1" }
+        assertEquals("Trailing driver who drove over double arrow should now be rank 1", 1, p2AfterSwap.rank)
+        assertEquals("Former leader should now be rank 2", 2, p1AfterSwap.rank)
+        assertTrue(
+            "p2 should now be at former leader's track position",
+            TrackCatalog.distance(p2AfterSwap.x, p2AfterSwap.y, leaderBefore.x, leaderBefore.y) < 35f
+        )
+
+        // Spawn Steering Invert directly on p2 -> sets 5s invertedSteerMs and flips steering direction
+        val angleBeforeInvert = p2AfterSwap.angleRad
+        engine.spawnFieldPickupForTest(p2AfterSwap.x, p2AfterSwap.y, FieldPickupType.STEER_INVERT)
+        snap = engine.step(0.02f)
+        val p2Inverted = snap.racers.first { it.playerId == "p2" }
+        assertTrue("Steering inversion should last ~5s (${p2Inverted.invertedSteerMs})", p2Inverted.invertedSteerMs in 4800L..5000L)
+
+        repeat(10) {
+            engine.submitInput("p2", ControlInput(throttle = 1f, steer = 1f))
+            snap = engine.step(0.02f)
+        }
+        val angleAfterSteerRightWhileInverted = snap.racers.first { it.playerId == "p2" }.angleRad
+        val delta = RacePhysicsEngine.normalizeAngle(angleAfterSteerRightWhileInverted - angleBeforeInvert)
+        assertTrue("Positive steer input while INVERTED must turn negative ($delta < -0.05f)", delta < -0.05f)
+    }
+
+    @Test
+    fun pairedPortals_teleportDriverForwardOnlyAndNeverBackward() {
+        val track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP).copy(
+            ramps = emptyList(),
+            props = emptyList(),
+            itemSpawns = emptyList()
+        )
+        val players = listOf(
+            LobbyPlayer("p1", "PortalDriver", isHost = true, isBot = false, carType = RcCarType.VOLT_BUGGY.name)
+        )
+        val engine = RacePhysicsEngine(
+            track = track,
+            totalLaps = 3,
+            players = players,
+            rules = RaceRulesSettings(autoAccelerate = false, randomConditionsEnabled = false),
+            random = Random(321L)
+        )
+        repeat(68) { engine.step(0.05f) }
+        var snap = engine.step(0.02f)
+        val r0 = snap.racers.first()
+
+        val exitIdx = 42
+        val exitPt = track.centerline[exitIdx]
+        val exitNext = track.centerline[exitIdx + 1]
+        val exitAng = kotlin.math.atan2(exitNext.y - exitPt.y, exitNext.x - exitPt.x)
+
+        // Place upstream entry portal right ahead of p1, and downstream exit portal far forward at index 42
+        val entryX = r0.x + cos(r0.angleRad) * 24f
+        val entryY = r0.y + sin(r0.angleRad) * 24f
+        engine.spawnPortalsForTest(
+            entryX = entryX,
+            entryY = entryY,
+            exitX = exitPt.x,
+            exitY = exitPt.y,
+            exitAngleRad = exitAng,
+            entryColorIsRed = true,
+            entryTrackIdx = 2,
+            exitTrackIdx = exitIdx
+        )
+
+        repeat(8) {
+            engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+            snap = engine.step(0.02f)
+        }
+        val warped = snap.racers.first()
+        assertTrue("Portal warp should increment portalWarpSeq", warped.portalWarpSeq >= 1)
+        assertTrue(
+            "Driver should immediately teleport to downstream exit portal",
+            TrackCatalog.distance(warped.x, warped.y, exitPt.x, exitPt.y) < 95f
+        )
+
+        // Wait for portal cooldown to expire, then place downstream exit portal right ahead of car:
+        // driving over the downstream exit portal must NOT warp the driver backward to entry!
+        repeat(40) { snap = engine.step(0.05f) }
+        val rAfterCooldown = snap.racers.first()
+        val warpsBeforeExitDrive = rAfterCooldown.portalWarpSeq
+        engine.spawnPortalsForTest(
+            entryX = track.centerline[8].x,
+            entryY = track.centerline[8].y,
+            exitX = rAfterCooldown.x + cos(rAfterCooldown.angleRad) * 20f,
+            exitY = rAfterCooldown.y + sin(rAfterCooldown.angleRad) * 20f,
+            exitAngleRad = rAfterCooldown.angleRad,
+            entryColorIsRed = false,
+            entryTrackIdx = 8,
+            exitTrackIdx = 50
+        )
+        repeat(8) {
+            engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+            snap = engine.step(0.02f)
+        }
+        val afterDrivingOverExit = snap.racers.first()
+        assertEquals(
+            "Driving over downstream exit portal must NOT teleport backward",
+            warpsBeforeExitDrive,
+            afterDrivingOverExit.portalWarpSeq
+        )
+    }
+
+    @Test
+    fun telemetryCodec_roundTripsMineDropPortalsFieldPickupsAndInvertedTimer() {
+        val encodedInput = RaceTelemetryCodec.encodeInput(
+            playerId = "rc_p1",
+            seq = 77L,
+            input = ControlInput(throttle = 1f, steer = -0.5f, usePowerUp = false, dropMine = true)
+        )
+        val decodedInput = RaceTelemetryCodec.decodeInput(String(encodedInput, Charsets.UTF_8))
+        assertNotNull(decodedInput)
+        assertTrue("dropMine flag must round-trip in UDP input packet", decodedInput?.input?.dropMine == true)
+
+        val track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP)
+        val roster = listOf(
+            LobbyPlayer("p1", "Host", isHost = true, carType = RcCarType.VOLT_BUGGY.name),
+            LobbyPlayer("p2", "Client", isHost = false, carType = RcCarType.APEX_FORMULA.name)
+        )
+        val engine = RacePhysicsEngine(
+            track = track,
+            totalLaps = 3,
+            players = roster,
+            rules = RaceRulesSettings(randomConditionsEnabled = false),
+            random = Random(19L)
+        )
+        repeat(68) { engine.step(0.05f) }
+        engine.grantMineForTest("p1", count = 1)
+        engine.spawnFieldPickupForTest(500f, 420f, FieldPickupType.POSITION_SWAP)
+        engine.spawnFieldPickupForTest(820f, 640f, FieldPickupType.STEER_INVERT)
+        engine.spawnPortalsForTest(
+            entryX = 400f,
+            entryY = 300f,
+            exitX = 1200f,
+            exitY = 900f,
+            exitAngleRad = 0.75f,
+            entryColorIsRed = true,
+            entryTrackIdx = 10,
+            exitTrackIdx = 40
+        )
+        val snap = engine.step(0.02f)
+
+        val bytes = RaceTelemetryCodec.encodeSnapshot(seq = 105L, snap = snap)
+        val decoded = RaceTelemetryCodec.decodeSnapshot(
+            text = String(bytes, Charsets.UTF_8),
+            roster = roster,
+            previousSnapshot = null,
+            activeTrack = track
+        )
+        assertNotNull(decoded)
+        assertEquals(1, decoded?.snapshot?.racers?.first { it.playerId == "p1" }?.minesAvailable)
+        assertEquals(2, decoded?.snapshot?.fieldPickups?.size)
+        assertNotNull(decoded?.snapshot?.portalPair)
+        assertEquals(true, decoded?.snapshot?.portalPair?.entryColorIsRed)
     }
 }

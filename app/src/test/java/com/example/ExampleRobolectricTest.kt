@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
@@ -46,6 +47,8 @@ class ExampleRobolectricTest {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("setting_music_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setting_sfx_switch").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setting_haptics_switch").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("settings_speed_FAST").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setting_auto_accel_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setting_hard_boundary_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setting_random_jumps_switch").performScrollTo().assertIsDisplayed()
@@ -70,6 +73,15 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("mode_option_RACE").performScrollTo().performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("win_condition_TIME_TRIAL_DISTANCE").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setup_length_mode_time").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("setup_time_90").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setup_length_mode_laps").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("setup_laps_3").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setup_speed_LOW").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setup_speed_MEDIUM").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setup_speed_FAST").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setup_random_conditions_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setup_show_player_names_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("host_setup_open_lobby_button").assertIsDisplayed()
@@ -81,7 +93,26 @@ class ExampleRobolectricTest {
                 true
             }.getOrDefault(false)
         }
-        composeTestRule.onNodeWithTag("lobby_leave_button").performClick()
+        composeTestRule.onNodeWithTag("lobby_speed_FAST").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("lobby_mode_laps").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("lobby_mode_time").performScrollTo().assertIsDisplayed()
+
+        composeTestRule.mainClock.autoAdvance = false
+        try {
+            composeTestRule.onNodeWithTag("start_race_button").performClick()
+            repeat(12) {
+                composeTestRule.mainClock.advanceTimeBy(50L)
+                Thread.sleep(15L)
+            }
+            composeTestRule.onNodeWithTag("drop_mine_button").assertIsDisplayed()
+            composeTestRule.onNodeWithTag("use_powerup_button").assertIsDisplayed()
+            composeTestRule.onNodeWithTag("race_pause_button").performClick()
+            composeTestRule.mainClock.advanceTimeBy(100L)
+            composeTestRule.onNodeWithText("Exit Race").performClick()
+            composeTestRule.mainClock.advanceTimeBy(150L)
+        } finally {
+            composeTestRule.mainClock.autoAdvance = true
+        }
         composeTestRule.waitForIdle()
     }
 

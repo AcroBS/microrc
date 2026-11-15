@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Thunderstorm
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
@@ -50,6 +51,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.model.AudioSettings
+import com.example.model.CarSpeedPreset
 import com.example.model.GameMode
 import com.example.model.RaceRulesSettings
 import com.example.model.WinCondition
@@ -163,9 +165,9 @@ fun SettingsScreen(
                     }
                 }
 
-                // Local Audio Section
+                // Local Audio & Haptics Section
                 Text(
-                    text = "AUDIO (THIS DEVICE)",
+                    text = "AUDIO & HAPTICS (THIS DEVICE)",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -193,6 +195,19 @@ fun SettingsScreen(
                     switchTestTag = "setting_sfx_switch",
                     onCheckedChange = {
                         onUpdateAudio(audioSettings.copy(carSfxEnabled = it))
+                    }
+                )
+
+                RuleToggleCard(
+                    icon = Icons.Default.Vibration,
+                    accent = MaterialTheme.colorScheme.tertiary,
+                    title = "Haptic Vibration Feedback",
+                    description = "Tactile vibration pulses on car collisions, mine blasts, power-up activations & portal warps.",
+                    checked = audioSettings.hapticsEnabled,
+                    enabled = true,
+                    switchTestTag = "setting_haptics_switch",
+                    onCheckedChange = {
+                        onUpdateAudio(audioSettings.copy(hapticsEnabled = it))
                     }
                 )
 
@@ -276,7 +291,7 @@ fun SettingsScreen(
                                             Text(
                                                 text = when (cond) {
                                                     WinCondition.FIRST_TO_FINISH -> "Laps"
-                                                    WinCondition.TIME_TRIAL_DISTANCE -> "Timer"
+                                                    WinCondition.TIME_TRIAL_DISTANCE -> "Max Time"
                                                     WinCondition.CHAMPIONSHIP_POINTS -> "Points"
                                                 },
                                                 style = MaterialTheme.typography.labelSmall
@@ -288,7 +303,7 @@ fun SettingsScreen(
                             }
                             if (rules.winConditionEnum == WinCondition.TIME_TRIAL_DISTANCE) {
                                 Text(
-                                    text = "Time Limit: ${rules.timeLimitSec}s",
+                                    text = "Max Driving Time: ${rules.timeLimitSec}s",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -296,16 +311,65 @@ fun SettingsScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    listOf(60, 90, 120, 180).forEach { secs ->
+                                    listOf(60, 90, 120, 180, 300).forEach { secs ->
+                                        val label = if (secs >= 180 && secs % 60 == 0) "${secs / 60}m" else "${secs}s"
                                         FilterChip(
                                             selected = rules.timeLimitSec == secs,
                                             enabled = canEditRules,
                                             onClick = { onUpdateRules(rules.copy(timeLimitSec = secs)) },
-                                            label = { Text("${secs}s", style = MaterialTheme.typography.labelSmall) },
+                                            label = { Text(label, style = MaterialTheme.typography.labelSmall) },
                                             modifier = Modifier.weight(1f)
                                         )
                                     }
                                 }
+                            } else {
+                                Text(
+                                    text = "Number of Laps: ${rules.totalLaps}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    listOf(1, 2, 3, 5, 7).forEach { laps ->
+                                        FilterChip(
+                                            selected = rules.totalLaps == laps,
+                                            enabled = canEditRules,
+                                            onClick = { onUpdateRules(rules.copy(totalLaps = laps)) },
+                                            label = { Text("${laps}L", style = MaterialTheme.typography.labelSmall) },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "General Car Speed",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = rules.carSpeedEnum.subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CarSpeedPreset.entries.forEach { preset ->
+                                FilterChip(
+                                    selected = rules.carSpeedEnum == preset,
+                                    enabled = canEditRules,
+                                    onClick = { onUpdateRules(rules.copy(carSpeed = preset.name)) },
+                                    label = { Text(preset.displayName, style = MaterialTheme.typography.labelMedium) },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("settings_speed_${preset.name}")
+                                )
                             }
                         }
                     }

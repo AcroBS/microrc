@@ -21,6 +21,7 @@ import com.example.model.TrackId
 import com.example.network.RaceNavEvent
 import com.example.network.SessionRole
 import com.example.network.WifiP2pRaceManager
+import com.example.sensors.RcHapticController
 import com.example.sensors.TiltSteeringController
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -36,6 +37,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val raceManager = WifiP2pRaceManager(application, viewModelScope)
     val tiltController = TiltSteeringController(application)
     val audioEngine = RaceAudioEngine(viewModelScope)
+    val hapticController = RcHapticController(application)
 
     val profile: StateFlow<PlayerProfile> = prefsRepo.profileFlow.stateIn(
         scope = viewModelScope,
@@ -78,7 +80,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             prefsRepo.ensurePlayerId()
         }
         viewModelScope.launch {
-            audioSettings.collect { audioEngine.updateAudioSettings(it) }
+            audioSettings.collect {
+                audioEngine.updateAudioSettings(it)
+                hapticController.enabled = it.hapticsEnabled
+            }
         }
     }
 
@@ -126,6 +131,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             prefsRepo.updateAudioSettings(newAudio)
             audioEngine.updateAudioSettings(newAudio)
+            hapticController.enabled = newAudio.hapticsEnabled
         }
     }
 
@@ -191,7 +197,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         raceManager.selectArenaShape(picked)
     }
 
-    fun setTotalLaps(laps: Int) = raceManager.setTotalLaps(laps)
+    fun setTotalLaps(laps: Int) {
+        raceManager.setTotalLaps(laps)
+        viewModelScope.launch {
+            prefsRepo.updateRaceRules(rules.value.copy(totalLaps = laps))
+        }
+    }
     fun addBot() = raceManager.addBot()
     fun removeBot() = raceManager.removeBot()
     fun toggleReady() = raceManager.toggleReady()

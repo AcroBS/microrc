@@ -11,6 +11,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.example.model.AudioSettings
+import com.example.model.CarSpeedPreset
 import com.example.model.ControlMode
 import com.example.model.CustomTrackData
 import com.example.model.GameMode
@@ -70,8 +71,10 @@ class PreferencesRepository(context: Context) {
         val RULE_TOTAL_LAPS = intPreferencesKey("rule_total_laps")
         val RULE_TIME_LIMIT_SEC = intPreferencesKey("rule_time_limit_sec")
         val RULE_ARENA_TARGET_MIN = intPreferencesKey("rule_arena_target_min")
+        val RULE_CAR_SPEED = stringPreferencesKey("rule_car_speed")
         val AUDIO_MUSIC_ENABLED = booleanPreferencesKey("audio_music_enabled")
         val AUDIO_SFX_ENABLED = booleanPreferencesKey("audio_sfx_enabled")
+        val AUDIO_HAPTICS_ENABLED = booleanPreferencesKey("audio_haptics_enabled")
         val CUSTOM_TRACKS_JSON = stringPreferencesKey("custom_tracks_json")
     }
 
@@ -108,6 +111,9 @@ class PreferencesRepository(context: Context) {
         val winCond = runCatching {
             WinCondition.valueOf(prefs[Keys.RULE_WIN_CONDITION] ?: WinCondition.FIRST_TO_FINISH.name)
         }.getOrDefault(WinCondition.FIRST_TO_FINISH)
+        val speedPreset = runCatching {
+            CarSpeedPreset.valueOf(prefs[Keys.RULE_CAR_SPEED] ?: CarSpeedPreset.FAST.name)
+        }.getOrDefault(CarSpeedPreset.FAST)
         RaceRulesSettings(
             gameMode = mode.name,
             autoAccelerate = prefs[Keys.RULE_AUTO_ACCEL] ?: true,
@@ -117,15 +123,17 @@ class PreferencesRepository(context: Context) {
             showPlayerNames = prefs[Keys.RULE_SHOW_PLAYER_NAMES] ?: true,
             winCondition = winCond.name,
             totalLaps = (prefs[Keys.RULE_TOTAL_LAPS] ?: 3).coerceIn(1, 9),
-            timeLimitSec = (prefs[Keys.RULE_TIME_LIMIT_SEC] ?: 90).coerceIn(30, 300),
-            arenaTargetMinutes = (prefs[Keys.RULE_ARENA_TARGET_MIN] ?: 2).coerceIn(1, 10)
+            timeLimitSec = (prefs[Keys.RULE_TIME_LIMIT_SEC] ?: 90).coerceIn(30, 600),
+            arenaTargetMinutes = (prefs[Keys.RULE_ARENA_TARGET_MIN] ?: 2).coerceIn(1, 10),
+            carSpeed = speedPreset.name
         )
     }
 
     val audioSettingsFlow: Flow<AudioSettings> = dataStore.data.map { prefs ->
         AudioSettings(
             musicEnabled = prefs[Keys.AUDIO_MUSIC_ENABLED] ?: true,
-            carSfxEnabled = prefs[Keys.AUDIO_SFX_ENABLED] ?: true
+            carSfxEnabled = prefs[Keys.AUDIO_SFX_ENABLED] ?: true,
+            hapticsEnabled = prefs[Keys.AUDIO_HAPTICS_ENABLED] ?: true
         )
     }
 
@@ -187,8 +195,9 @@ class PreferencesRepository(context: Context) {
             it[Keys.RULE_SHOW_PLAYER_NAMES] = rules.showPlayerNames
             it[Keys.RULE_WIN_CONDITION] = rules.winCondition
             it[Keys.RULE_TOTAL_LAPS] = rules.totalLaps.coerceIn(1, 9)
-            it[Keys.RULE_TIME_LIMIT_SEC] = rules.timeLimitSec.coerceIn(30, 300)
+            it[Keys.RULE_TIME_LIMIT_SEC] = rules.timeLimitSec.coerceIn(30, 600)
             it[Keys.RULE_ARENA_TARGET_MIN] = rules.arenaTargetMinutes.coerceIn(1, 10)
+            it[Keys.RULE_CAR_SPEED] = rules.carSpeedEnum.name
         }
     }
 
@@ -196,6 +205,7 @@ class PreferencesRepository(context: Context) {
         dataStore.edit {
             it[Keys.AUDIO_MUSIC_ENABLED] = audio.musicEnabled
             it[Keys.AUDIO_SFX_ENABLED] = audio.carSfxEnabled
+            it[Keys.AUDIO_HAPTICS_ENABLED] = audio.hapticsEnabled
         }
     }
 

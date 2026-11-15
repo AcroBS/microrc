@@ -40,6 +40,18 @@ enum class PowerUpType(
     )
 }
 
+enum class HazardType {
+    GLUE_SLICK,
+    MINE
+}
+
+enum class FieldPickupType(
+    val displayName: String
+) {
+    POSITION_SWAP("Position Swap"),
+    STEER_INVERT("Steering Invert")
+}
+
 @JsonClass(generateAdapter = true)
 data class ItemBoxState(
     val id: Int,
@@ -56,5 +68,42 @@ data class TrackHazard(
     val x: Float,
     val y: Float,
     val radius: Float = 32f,
-    val remainingMs: Long = 10000L
+    val remainingMs: Long = 10000L,
+    val type: String = HazardType.GLUE_SLICK.name
+) {
+    val hazardTypeEnum: HazardType
+        get() = runCatching { HazardType.valueOf(type) }.getOrDefault(HazardType.GLUE_SLICK)
+}
+
+@JsonClass(generateAdapter = true)
+data class TrackFieldPickup(
+    val id: Int,
+    val x: Float,
+    val y: Float,
+    val type: String = FieldPickupType.POSITION_SWAP.name,
+    val remainingMs: Long = 16000L
+) {
+    val pickupTypeEnum: FieldPickupType
+        get() = runCatching { FieldPickupType.valueOf(type) }.getOrDefault(FieldPickupType.POSITION_SWAP)
+}
+
+@JsonClass(generateAdapter = true)
+data class PortalPairState(
+    val id: Int,
+    val entryX: Float,
+    val entryY: Float,
+    val entryColorIsRed: Boolean = false,
+    val exitX: Float,
+    val exitY: Float,
+    val exitAngleRad: Float = 0f,
+    val remainingMs: Long = 12000L
+)
+
+@JsonClass(generateAdapter = true)
+data class TrackExplosion(
+    val id: Int,
+    val x: Float,
+    val y: Float,
+    val ageMs: Long = 0L,
+    val durationMs: Long = 650L
 )

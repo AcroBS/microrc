@@ -19,11 +19,16 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import com.example.model.ArenaFlagState
 import com.example.model.ExternalEventType
+import com.example.model.FieldPickupType
+import com.example.model.HazardType
 import com.example.model.ItemBoxState
+import com.example.model.PortalPairState
 import com.example.model.PropShape
 import com.example.model.RacerState
 import com.example.model.RcCarType
 import com.example.model.TrackDefinition
+import com.example.model.TrackExplosion
+import com.example.model.TrackFieldPickup
 import com.example.model.TrackHazard
 import com.example.model.TrackId
 import com.example.model.TrackPuddle
@@ -50,7 +55,10 @@ fun DrawScope.drawTrackWorld(
     showPlayerNames: Boolean = false,
     localPlayerId: String? = null,
     isOverview: Boolean = false,
-    arenaFlag: ArenaFlagState? = null
+    arenaFlag: ArenaFlagState? = null,
+    fieldPickups: List<TrackFieldPickup> = emptyList(),
+    portalPair: PortalPairState? = null,
+    explosions: List<TrackExplosion> = emptyList()
 ) {
     // 1. Background floor
     drawRect(
@@ -395,11 +403,157 @@ fun DrawScope.drawTrackWorld(
         }
     }
 
-    // 7. Dropped Glue Slick hazards
+    // 6b. Paired Red & Blue Portals (holes in the ground — forward-only teleport)
+    if (portalPair != null) {
+        val redMain = Color(0xFFFF1744)
+        val redGlow = Color(0xFFFF8A80)
+        val blueMain = Color(0xFF2979FF)
+        val blueGlow = Color(0xFF80D8FF)
+
+        val entryPrimary = if (portalPair.entryColorIsRed) redMain else blueMain
+        val entryAccent = if (portalPair.entryColorIsRed) redGlow else blueGlow
+        val exitPrimary = if (portalPair.entryColorIsRed) blueMain else redMain
+        val exitAccent = if (portalPair.entryColorIsRed) blueGlow else redGlow
+
+        drawPortalHole(
+            x = portalPair.entryX,
+            y = portalPair.entryY,
+            rimColor = entryPrimary,
+            glowColor = entryAccent,
+            animTimeSec = animTimeSec,
+            isExitWithArrow = false,
+            exitAngleRad = 0f
+        )
+        drawPortalHole(
+            x = portalPair.exitX,
+            y = portalPair.exitY,
+            rimColor = exitPrimary,
+            glowColor = exitAccent,
+            animTimeSec = animTimeSec + 0.8f,
+            isExitWithArrow = !track.isArena,
+            exitAngleRad = portalPair.exitAngleRad
+        )
+    }
+
+    // 7. Dropped Glue Slicks & Flashing Red Mines
     for (h in hazards) {
-        drawCircle(Color(0xFFFFD54F).copy(alpha = 0.8f), h.radius, Offset(h.x, h.y))
-        drawCircle(Color(0xFFFF8F00), h.radius * 0.65f, Offset(h.x + 4f, h.y - 3f))
-        drawCircle(Color(0xFFFFECB3), h.radius * 0.25f, Offset(h.x - 7f, h.y + 5f))
+        if (h.hazardTypeEnum == HazardType.MINE) {
+            val fastBlink = 0.5f + 0.5f * sin(animTimeSec * 16f + h.id * 1.3f)
+            val sharpFlash = fastBlink > 0.42f
+            // Pulsing red danger halo on asphalt
+            drawCircle(
+                color = Color(0xFFFF1744).copy(alpha = 0.16f + 0.28f * fastBlink),
+                radius = h.radius * (1.15f + 0.18f * fastBlink),
+                center = Offset(h.x, h.y)
+            )
+            drawCircle(
+                color = Color(0xFFFF1744).copy(alpha = 0.72f),
+                radius = h.radius,
+                center = Offset(h.x, h.y),
+                style = Stroke(width = 2.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), animTimeSec * 24f))
+            )
+            // Heavy metallic mine casing
+            drawCircle(Color.Black.copy(alpha = 0.5f), h.radius * 0.72f, Offset(h.x + 3f, h.y + 4f))
+            drawCircle(Color(0xFF1B222E), h.radius * 0.70f, Offset(h.x, h.y))
+            drawCircle(Color(0xFF455A64), h.radius * 0.70f, Offset(h.x, h.y), style = Stroke(width = 3f))
+            for (lug in 0 until 6) {
+                val ang = lug * (PI.toFloat() / 3f)
+                drawCircle(
+                    color = Color(0xFF90A4AE),
+                    radius = 2.6f,
+                    center = Offset(h.x + cos(ang) * (h.radius * 0.52f), h.y + sin(ang) * (h.radius * 0.52f))
+                )
+            }
+            // Flashing bright red core LED
+            drawCircle(
+                color = if (sharpFlash) Color(0xFFFF1744) else Color(0xFF5D0011),
+                radius = h.radius * 0.34f,
+                center = Offset(h.x, h.y)
+            )
+            if (sharpFlash) {
+                drawCircle(
+                    color = Color(0xFFFFCDD2),
+                    radius = h.radius * 0.15f,
+                    center = Offset(h.x - 2f, h.y - 2f)
+                )
+            }
+        } else {
+            drawCircle(Color(0xFFFFD54F).copy(alpha = 0.8f), h.radius, Offset(h.x, h.y))
+            drawCircle(Color(0xFFFF8F00), h.radius * 0.65f, Offset(h.x + 4f, h.y - 3f))
+            drawCircle(Color(0xFFFFECB3), h.radius * 0.25f, Offset(h.x - 7f, h.y + 5f))
+        }
+    }
+
+    // 7b. Random Direct-Trigger Track Power-Ups (Double-Arrow Position Swap & Steering Invert)
+    for (fp in fieldPickups) {
+        val pulse = 1f + 0.09f * sin(animTimeSec * 6.5f + fp.id)
+        withTransform({
+            translate(fp.x, fp.y)
+            scale(pulse, pulse, Offset.Zero)
+        }) {
+            when (fp.pickupTypeEnum) {
+                FieldPickupType.POSITION_SWAP -> {
+                    // Glowing Gold/Cyan pad with unmistakable Double Arrow (⇄)
+                    drawCircle(Color(0xFFFFD54F).copy(alpha = 0.24f), radius = 34f, center = Offset.Zero)
+                    drawCircle(Color(0xFF141B29).copy(alpha = 0.92f), radius = 25f, center = Offset.Zero)
+                    drawCircle(Color(0xFFFFD54F), radius = 25f, center = Offset.Zero, style = Stroke(width = 3.2f))
+
+                    // Top arrow pointing RIGHT (→)
+                    val topArrow = Path().apply {
+                        moveTo(-13f, -6f)
+                        lineTo(12f, -6f)
+                        moveTo(5f, -13f)
+                        lineTo(13f, -6f)
+                        lineTo(5f, 1f)
+                    }
+                    drawPath(
+                        path = topArrow,
+                        color = Color(0xFFFFD54F),
+                        style = Stroke(width = 4f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                    )
+
+                    // Bottom arrow pointing LEFT (←)
+                    val botArrow = Path().apply {
+                        moveTo(13f, 7f)
+                        lineTo(-12f, 7f)
+                        moveTo(-5f, 0f)
+                        lineTo(-13f, 7f)
+                        lineTo(-5f, 14f)
+                    }
+                    drawPath(
+                        path = botArrow,
+                        color = Color(0xFF00E5FF),
+                        style = Stroke(width = 4f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                    )
+                }
+                FieldPickupType.STEER_INVERT -> {
+                    // Glowing Magenta/Violet pad with crossed inverted steering arrows
+                    drawCircle(Color(0xFFE040FB).copy(alpha = 0.26f), radius = 34f, center = Offset.Zero)
+                    drawCircle(Color(0xFF1A1026).copy(alpha = 0.92f), radius = 25f, center = Offset.Zero)
+                    drawCircle(Color(0xFFE040FB), radius = 25f, center = Offset.Zero, style = Stroke(width = 3.2f))
+
+                    val crossArrows = Path().apply {
+                        // Diagonal curve from bottom-left to top-left/right crossed
+                        moveTo(-11f, 9f)
+                        lineTo(11f, -9f)
+                        moveTo(4f, -10f)
+                        lineTo(12f, -9f)
+                        lineTo(10f, -1f)
+
+                        moveTo(11f, 9f)
+                        lineTo(-11f, -9f)
+                        moveTo(-4f, -10f)
+                        lineTo(-12f, -9f)
+                        lineTo(-10f, -1f)
+                    }
+                    drawPath(
+                        path = crossArrows,
+                        color = Color(0xFFFF80AB),
+                        style = Stroke(width = 3.6f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                    )
+                }
+            }
+        }
     }
 
     // 8. Mystery Power-Up Item Boxes
@@ -500,6 +654,52 @@ fun DrawScope.drawTrackWorld(
             animTimeSec = animTimeSec,
             isCarryingFlag = arenaFlag?.carrierId == r.playerId
         )
+    }
+
+    // 9b. Small Mine Blast Explosions
+    for (exp in explosions) {
+        val progress = (exp.ageMs.toFloat() / exp.durationMs.coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
+        val fade = (1f - progress).coerceIn(0f, 1f)
+        val cx = exp.x
+        val cy = exp.y
+
+        // Outer shockwave ring
+        drawCircle(
+            color = Color(0xFFFF5252).copy(alpha = fade * 0.82f),
+            radius = 18f + 64f * progress,
+            center = Offset(cx, cy),
+            style = Stroke(width = (6.5f * fade).coerceAtLeast(1.5f))
+        )
+        // Smoke ring puff
+        drawCircle(
+            color = Color(0xFF263238).copy(alpha = fade * 0.45f),
+            radius = 14f + 46f * progress,
+            center = Offset(cx, cy)
+        )
+        // Bright orange-red fireball core
+        drawCircle(
+            color = Color(0xFFFF6D00).copy(alpha = fade * 0.9f),
+            radius = (1f - progress * 0.68f) * 34f,
+            center = Offset(cx, cy)
+        )
+        drawCircle(
+            color = Color(0xFFFFF59D).copy(alpha = fade),
+            radius = (1f - progress * 0.82f) * 18f,
+            center = Offset(cx, cy)
+        )
+        // Radial sparks
+        for (s in 0 until 8) {
+            val ang = s * (PI.toFloat() / 4f) + exp.id * 0.4f
+            val rIn = 12f + 34f * progress
+            val rOut = rIn + 15f * fade
+            drawLine(
+                color = Color(0xFFFFD54F).copy(alpha = fade),
+                start = Offset(cx + cos(ang) * rIn, cy + sin(ang) * rIn),
+                end = Offset(cx + cos(ang) * rOut, cy + sin(ang) * rOut),
+                strokeWidth = 3f,
+                cap = StrokeCap.Round
+            )
+        }
     }
 
     // 10. Player name tags + Arena Flag Carrier live timer pill
@@ -618,11 +818,92 @@ private fun DrawScope.drawEnvironmentDetails(track: TrackDefinition) {
     }
 }
 
+private fun DrawScope.drawPortalHole(
+    x: Float,
+    y: Float,
+    rimColor: Color,
+    glowColor: Color,
+    animTimeSec: Float,
+    isExitWithArrow: Boolean,
+    exitAngleRad: Float
+) {
+    val pulse = 0.5f + 0.5f * sin(animTimeSec * 5.5f)
+    // Ground rim glow + cracked concrete lip
+    drawCircle(
+        color = rimColor.copy(alpha = 0.26f + 0.14f * pulse),
+        radius = 48f + 4f * pulse,
+        center = Offset(x, y)
+    )
+    drawOval(
+        color = Color(0xFF141821),
+        topLeft = Offset(x - 40f, y - 36f),
+        size = Size(80f, 72f)
+    )
+    // Deep abyssal hole in the ground
+    drawOval(
+        color = Color(0xFF030408),
+        topLeft = Offset(x - 33f, y - 29f),
+        size = Size(66f, 58f)
+    )
+    // Swirling inner vortex rings descending into the hole
+    val spinDeg = (animTimeSec * 125f) % 360f
+    withTransform({
+        translate(x, y)
+        scale(1f, 0.88f, Offset.Zero)
+        rotate(spinDeg, Offset.Zero)
+    }) {
+        drawCircle(
+            color = rimColor,
+            radius = 35f,
+            center = Offset.Zero,
+            style = Stroke(
+                width = 4.5f,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(24f, 12f), 0f)
+            )
+        )
+        drawCircle(
+            color = glowColor.copy(alpha = 0.85f),
+            radius = 23f,
+            center = Offset.Zero,
+            style = Stroke(
+                width = 3f,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 12f)
+            )
+        )
+        drawCircle(
+            color = rimColor.copy(alpha = 0.55f),
+            radius = 12f,
+            center = Offset.Zero,
+            style = Stroke(width = 2.2f)
+        )
+    }
+
+    if (isExitWithArrow) {
+        val deg = exitAngleRad * 180f / PI.toFloat()
+        withTransform({
+            translate(x, y)
+            rotate(deg, Offset.Zero)
+        }) {
+            val chev = Path().apply {
+                moveTo(38f, -11f)
+                lineTo(50f, 0f)
+                lineTo(38f, 11f)
+            }
+            drawPath(
+                path = chev,
+                color = glowColor,
+                style = Stroke(width = 4f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
+        }
+    }
+}
+
 fun DrawScope.drawTrackMiniMap(
     track: TrackDefinition,
     racers: List<RacerState> = emptyList(),
     localPlayerId: String? = null,
-    arenaFlag: ArenaFlagState? = null
+    arenaFlag: ArenaFlagState? = null,
+    portalPair: PortalPairState? = null
 ) {
     val pad = 8.dp.toPx()
     val availW = (size.width - pad * 2f).coerceAtLeast(1f)
@@ -699,6 +980,24 @@ fun DrawScope.drawTrackMiniMap(
             color = Color(0xFFFFD54F),
             radius = 3.6.dp.toPx(),
             center = Offset(fx, fy)
+        )
+    }
+
+    // Active Red & Blue portals on mini-map
+    if (portalPair != null) {
+        val entryColor = if (portalPair.entryColorIsRed) Color(0xFFFF1744) else Color(0xFF2979FF)
+        val exitColor = if (portalPair.entryColorIsRed) Color(0xFF2979FF) else Color(0xFFFF1744)
+        drawCircle(
+            color = entryColor,
+            radius = 3.5.dp.toPx(),
+            center = Offset(offsetX + portalPair.entryX * scale, offsetY + portalPair.entryY * scale),
+            style = Stroke(width = 1.6.dp.toPx())
+        )
+        drawCircle(
+            color = exitColor,
+            radius = 3.5.dp.toPx(),
+            center = Offset(offsetX + portalPair.exitX * scale, offsetY + portalPair.exitY * scale),
+            style = Stroke(width = 1.6.dp.toPx())
         )
     }
 

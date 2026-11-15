@@ -230,6 +230,7 @@ fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
                 rules = effectiveRules,
                 audioSettings = audioSettings,
                 audioEngine = viewModel.audioEngine,
+                hapticController = viewModel.hapticController,
                 overviewCamera = overviewCamera,
                 tiltController = viewModel.tiltController,
                 onToggleOverviewCamera = viewModel::toggleOverviewCamera,
@@ -237,6 +238,7 @@ fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
                     viewModel.raceManager.updateLocalControlInput(throttle, steer)
                 },
                 onTriggerPowerUp = { viewModel.raceManager.triggerLocalPowerUp() },
+                onDropMine = { viewModel.raceManager.triggerLocalMineDrop() },
                 onSwitchControlMode = viewModel::updateControlSettings,
                 onUpdateAudioSettings = viewModel::updateAudioSettings,
                 onLeaveRace = {

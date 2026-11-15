@@ -62,10 +62,37 @@ data class TrackPuddle(
     val radius: Float = 42f
 )
 
+enum class CarSpeedPreset(
+    val displayName: String,
+    val subtitle: String,
+    val speedMultiplier: Float,
+    val accelMultiplier: Float
+) {
+    LOW(
+        displayName = "Low",
+        subtitle = "Relaxed pace — easier cornering",
+        speedMultiplier = 0.65f,
+        accelMultiplier = 0.72f
+    ),
+    MEDIUM(
+        displayName = "Medium",
+        subtitle = "Balanced club-spec RC speed",
+        speedMultiplier = 0.82f,
+        accelMultiplier = 0.86f
+    ),
+    FAST(
+        displayName = "Fast",
+        subtitle = "Full pro brushless speed",
+        speedMultiplier = 1.0f,
+        accelMultiplier = 1.0f
+    )
+}
+
 @JsonClass(generateAdapter = true)
 data class AudioSettings(
     val musicEnabled: Boolean = true,
-    val carSfxEnabled: Boolean = true
+    val carSfxEnabled: Boolean = true,
+    val hapticsEnabled: Boolean = true
 )
 
 @JsonClass(generateAdapter = true)
@@ -110,7 +137,8 @@ data class ChatMessage(
 data class ControlInput(
     val throttle: Float = 0f,
     val steer: Float = 0f,
-    val usePowerUp: Boolean = false
+    val usePowerUp: Boolean = false,
+    val dropMine: Boolean = false
 )
 
 @JsonClass(generateAdapter = true)
@@ -124,13 +152,17 @@ data class RaceRulesSettings(
     val winCondition: String = WinCondition.FIRST_TO_FINISH.name,
     val totalLaps: Int = 3,
     val timeLimitSec: Int = 90,
-    val arenaTargetMinutes: Int = 2
+    val arenaTargetMinutes: Int = 2,
+    val carSpeed: String = CarSpeedPreset.FAST.name
 ) {
     val gameModeEnum: GameMode
         get() = runCatching { GameMode.valueOf(gameMode) }.getOrDefault(GameMode.RACE)
 
     val winConditionEnum: WinCondition
         get() = runCatching { WinCondition.valueOf(winCondition) }.getOrDefault(WinCondition.FIRST_TO_FINISH)
+
+    val carSpeedEnum: CarSpeedPreset
+        get() = runCatching { CarSpeedPreset.valueOf(carSpeed) }.getOrDefault(CarSpeedPreset.FAST)
 }
 
 @JsonClass(generateAdapter = true)
@@ -167,7 +199,11 @@ data class RacerState(
     val spinVisualOffset: Float = 0f,
     val powerUpHits: Int = 0,
     val racePoints: Int = 0,
-    val flagCarryMs: Long = 0L
+    val flagCarryMs: Long = 0L,
+    val minesAvailable: Int = 0,
+    val invertedSteerMs: Long = 0L,
+    val collisionSeq: Int = 0,
+    val portalWarpSeq: Int = 0
 )
 
 @JsonClass(generateAdapter = true)
@@ -192,7 +228,10 @@ data class RaceSnapshot(
     val gameMode: String = GameMode.RACE.name,
     val arenaShape: String? = null,
     val arenaTargetMs: Long = 120_000L,
-    val arenaFlag: ArenaFlagState? = null
+    val arenaFlag: ArenaFlagState? = null,
+    val fieldPickups: List<TrackFieldPickup> = emptyList(),
+    val portalPair: PortalPairState? = null,
+    val explosions: List<TrackExplosion> = emptyList()
 )
 
 @JsonClass(generateAdapter = true)

@@ -5,14 +5,19 @@ import com.example.model.ArenaFlagState
 import com.example.model.ArenaShape
 import com.example.model.ControlInput
 import com.example.model.ExternalEventType
+import com.example.model.FieldPickupType
 import com.example.model.GameMode
+import com.example.model.HazardType
 import com.example.model.ItemBoxState
 import com.example.model.LobbyPlayer
+import com.example.model.PortalPairState
 import com.example.model.PowerUpType
 import com.example.model.RacePhase
 import com.example.model.RaceSnapshot
 import com.example.model.RacerState
 import com.example.model.TrackDefinition
+import com.example.model.TrackExplosion
+import com.example.model.TrackFieldPickup
 import com.example.model.TrackHazard
 import com.example.model.TrackId
 import com.example.model.TrackPuddle
@@ -44,7 +49,8 @@ object RaceTelemetryCodec {
         val t = String.format(Locale.US, "%.2f", input.throttle)
         val s = String.format(Locale.US, "%.3f", input.steer)
         val p = if (input.usePowerUp) "1" else "0"
-        return "I|$playerId|$seq|$t|$s|$p".toByteArray(Charsets.UTF_8)
+        val m = if (input.dropMine) "1" else "0"
+        return "I|$playerId|$seq|$t|$s|$p|$m".toByteArray(Charsets.UTF_8)
     }
 
     fun decodeInput(text: String): DecodedInput? {
@@ -56,11 +62,12 @@ object RaceTelemetryCodec {
         val throttle = parts[3].toFloatOrNull() ?: 0f
         val steer = parts[4].toFloatOrNull() ?: 0f
         val usePower = parts[5] == "1"
-        return DecodedInput(playerId, seq, ControlInput(throttle, steer, usePower))
+        val dropMine = parts.getOrNull(6) == "1"
+        return DecodedInput(playerId, seq, ControlInput(throttle, steer, usePower, dropMine))
     }
 
     fun encodeSnapshot(seq: Long, snap: RaceSnapshot): ByteArray {
-        val sb = StringBuilder(520)
+        val sb = StringBuilder(680)
         val phaseOrd = runCatching { RacePhase.valueOf(snap.phase).ordinal }.getOrDefault(0)
         val trackOrd = runCatching { TrackId.valueOf(snap.trackId).ordinal }.getOrDefault(0)
         val banner = (snap.eventBanner ?: "").replace("|", "").replace("\n", "")
@@ -111,7 +118,11 @@ object RaceTelemetryCodec {
                 .append(r.lapTimesMs.joinToString("-")).append(',')
                 .append(String.format(Locale.US, "%.2f", r.jumpZ)).append(',')
                 .append(r.racePoints).append(',')
-                .append(r.flagCarryMs)
+                .append(r.flagCarryMs).append(',')
+                .append(r.minesAvailable).append(',')
+                .append(r.invertedSteerMs).append(',')
+                .append(r.collisionSeq).append(',')
+                .append(r.portalWarpSeq)
         }
         sb.append('|')
 
@@ -128,7 +139,8 @@ object RaceTelemetryCodec {
                 .append(h.ownerId).append(',')
                 .append(String.format(Locale.US, "%.1f", h.x)).append(',')
                 .append(String.format(Locale.US, "%.1f", h.y)).append(',')
-                .append(h.remainingMs)
+                .append(h.remainingMs).append(',')
+                .append(h.hazardTypeEnum.ordinal)
         }
         sb.append('|')
 
@@ -154,6 +166,42 @@ object RaceTelemetryCodec {
             sb.append(String.format(Locale.US, "%.0f", p.x)).append(',')
                 .append(String.format(Locale.US, "%.0f", p.y)).append(',')
                 .append(String.format(Locale.US, "%.0f", p.radius))
+        }
+        sb.append('|')
+
+        // Direct-trigger field pickups (index 13)
+        snap.fieldPickups.forEachIndexed { idx, fp ->
+            if (idx > 0) sb.append(';')
+            sb.append(fp.id).append(',')
+                .append(String.format(Locale.US, "%.1f", fp.x)).append(',')
+                .append(String.format(Locale.US, "%.1f", fp.y)).append(',')
+                .append(fp.pickupTypeEnum.ordinal).append(',')
+                .append(fp.remainingMs)
+        }
+        sb.append('|')
+
+        // Active Portal Pair (index 14)
+        val pp = snap.portalPair
+        if (pp != null) {
+            sb.append(pp.id).append(',')
+                .append(String.format(Locale.US, "%.1f", pp.entryX)).append(',')
+                .append(String.format(Locale.US, "%.1f", pp.entryY)).append(',')
+                .append(if (pp.entryColorIsRed) 1 else 0).append(',')
+                .append(String.format(Locale.US, "%.1f", pp.exitX)).append(',')
+                .append(String.format(Locale.US, "%.1f", pp.exitY)).append(',')
+                .append(String.format(Locale.US, "%.3f", pp.exitAngleRad)).append(',')
+                .append(pp.remainingMs)
+        }
+        sb.append('|')
+
+        // Active Mine Explosions (index 15)
+        snap.explosions.forEachIndexed { idx, ex ->
+            if (idx > 0) sb.append(';')
+            sb.append(ex.id).append(',')
+                .append(String.format(Locale.US, "%.1f", ex.x)).append(',')
+                .append(String.format(Locale.US, "%.1f", ex.y)).append(',')
+                .append(ex.ageMs).append(',')
+                .append(ex.durationMs)
         }
 
         return sb.toString().toByteArray(Charsets.UTF_8)
@@ -231,6 +279,10 @@ object RaceTelemetryCodec {
                 val jumpZ = f.getOrNull(21)?.toFloatOrNull() ?: 0f
                 val racePoints = f.getOrNull(22)?.toIntOrNull() ?: 0
                 val flagCarryMs = f.getOrNull(23)?.toLongOrNull() ?: 0L
+                val minesAvailable = f.getOrNull(24)?.toIntOrNull() ?: 0
+                val invertedSteerMs = f.getOrNull(25)?.toLongOrNull() ?: 0L
+                val collisionSeq = f.getOrNull(26)?.toIntOrNull() ?: 0
+                val portalWarpSeq = f.getOrNull(27)?.toIntOrNull() ?: 0
 
                 val vx = f[4].toFloatOrNull() ?: 0f
                 val vy = f[5].toFloatOrNull() ?: 0f
@@ -264,7 +316,11 @@ object RaceTelemetryCodec {
                     currentLapStartMs = f[19].toLongOrNull() ?: 0L,
                     lapTimesMs = lapTimes,
                     racePoints = racePoints,
-                    flagCarryMs = flagCarryMs
+                    flagCarryMs = flagCarryMs,
+                    minesAvailable = minesAvailable,
+                    invertedSteerMs = invertedSteerMs,
+                    collisionSeq = collisionSeq,
+                    portalWarpSeq = portalWarpSeq
                 )
             }
         }
@@ -291,12 +347,16 @@ object RaceTelemetryCodec {
             parts[10].split(';').mapNotNull { entry ->
                 val f = entry.split(',')
                 if (f.size < 5) return@mapNotNull null
+                val typeOrd = f.getOrNull(5)?.toIntOrNull() ?: 0
+                val hazType = HazardType.entries.getOrElse(typeOrd) { HazardType.GLUE_SLICK }.name
                 TrackHazard(
                     id = f[0].toIntOrNull() ?: return@mapNotNull null,
                     ownerId = f[1],
                     x = f[2].toFloatOrNull() ?: 0f,
                     y = f[3].toFloatOrNull() ?: 0f,
-                    remainingMs = f[4].toLongOrNull() ?: 0L
+                    radius = if (hazType == HazardType.MINE.name) 30f else 32f,
+                    remainingMs = f[4].toLongOrNull() ?: 0L,
+                    type = hazType
                 )
             }
         }
@@ -312,6 +372,75 @@ object RaceTelemetryCodec {
                     x = f[0].toFloatOrNull() ?: return@mapNotNull null,
                     y = f[1].toFloatOrNull() ?: return@mapNotNull null,
                     radius = f[2].toFloatOrNull() ?: 40f
+                )
+            }
+        }
+
+        val pickupsRaw = parts.getOrNull(13).orEmpty()
+        val fieldPickups = if (pickupsRaw.isEmpty()) {
+            emptyList()
+        } else {
+            pickupsRaw.split(';').mapNotNull { entry ->
+                val f = entry.split(',')
+                if (f.size < 5) return@mapNotNull null
+                val typeOrd = f[3].toIntOrNull() ?: 0
+                val fpType = FieldPickupType.entries.getOrElse(typeOrd) { FieldPickupType.POSITION_SWAP }.name
+                TrackFieldPickup(
+                    id = f[0].toIntOrNull() ?: return@mapNotNull null,
+                    x = f[1].toFloatOrNull() ?: return@mapNotNull null,
+                    y = f[2].toFloatOrNull() ?: return@mapNotNull null,
+                    type = fpType,
+                    remainingMs = f[4].toLongOrNull() ?: 8000L
+                )
+            }
+        }
+
+        val portalRaw = parts.getOrNull(14).orEmpty()
+        val portalPair = if (portalRaw.isEmpty()) {
+            null
+        } else {
+            val f = portalRaw.split(',')
+            if (f.size >= 8) {
+                val pid = f[0].toIntOrNull()
+                val ex1 = f[1].toFloatOrNull()
+                val ey1 = f[2].toFloatOrNull()
+                val isRed = f[3] == "1"
+                val ex2 = f[4].toFloatOrNull()
+                val ey2 = f[5].toFloatOrNull()
+                val outAng = f[6].toFloatOrNull() ?: 0f
+                val rem = f[7].toLongOrNull() ?: 8000L
+                if (pid != null && ex1 != null && ey1 != null && ex2 != null && ey2 != null) {
+                    PortalPairState(
+                        id = pid,
+                        entryX = ex1,
+                        entryY = ey1,
+                        entryColorIsRed = isRed,
+                        exitX = ex2,
+                        exitY = ey2,
+                        exitAngleRad = outAng,
+                        remainingMs = rem
+                    )
+                } else {
+                    null
+                }
+            } else {
+                null
+            }
+        }
+
+        val explosionsRaw = parts.getOrNull(15).orEmpty()
+        val explosions = if (explosionsRaw.isEmpty()) {
+            emptyList()
+        } else {
+            explosionsRaw.split(';').mapNotNull { entry ->
+                val f = entry.split(',')
+                if (f.size < 5) return@mapNotNull null
+                TrackExplosion(
+                    id = f[0].toIntOrNull() ?: return@mapNotNull null,
+                    x = f[1].toFloatOrNull() ?: return@mapNotNull null,
+                    y = f[2].toFloatOrNull() ?: return@mapNotNull null,
+                    ageMs = f[3].toLongOrNull() ?: 0L,
+                    durationMs = f[4].toLongOrNull() ?: 650L
                 )
             }
         }
@@ -343,7 +472,10 @@ object RaceTelemetryCodec {
                     ArenaFlagState(x = flagX, y = flagY, carrierId = flagCarrierRaw)
                 } else {
                     null
-                }
+                },
+                fieldPickups = fieldPickups,
+                portalPair = portalPair,
+                explosions = explosions
             )
         )
     }

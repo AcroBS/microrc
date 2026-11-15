@@ -133,6 +133,7 @@ class WifiP2pRaceManager(
     private var localPlayerId: String = ""
     private var localInput = ControlInput()
     private var pendingLocalPowerUp = false
+    private var pendingLocalMineDrop = false
     private var lastSentThrottle = 0f
     private var lastSentSteer = 0f
     private var lastInputSendNs = 0L
@@ -514,7 +515,7 @@ class WifiP2pRaceManager(
     private fun startClientUdpReader(udpSock: DatagramSocket) {
         clientUdpReadJob?.cancel()
         clientUdpReadJob = scope.launch(Dispatchers.IO) {
-            val buf = ByteArray(2048)
+            val buf = ByteArray(4096)
             while (isActive && !udpSock.isClosed) {
                 try {
                     val pkt = DatagramPacket(buf, buf.size)
@@ -572,7 +573,7 @@ class WifiP2pRaceManager(
         }
     }
 
-    private fun sendClientUdpInput(usePowerUp: Boolean) {
+    private fun sendClientUdpInput(usePowerUp: Boolean, dropMine: Boolean = false) {
         val sock = clientUdpSocket ?: return
         val addr = clientHostAddr ?: return
         val port = clientHostUdpPort
@@ -582,7 +583,7 @@ class WifiP2pRaceManager(
         val data = RaceTelemetryCodec.encodeInput(
             playerId = localPlayerId,
             seq = seq,
-            input = inp.copy(usePowerUp = usePowerUp)
+            input = inp.copy(usePowerUp = usePowerUp, dropMine = dropMine)
         )
         runCatching {
             sock.send(DatagramPacket(data, data.size, addr, port))
@@ -814,9 +815,12 @@ class WifiP2pRaceManager(
         val summary = buildList {
             if (rules.gameModeEnum == GameMode.ARENA) {
                 add("Arena (${rules.arenaTargetMinutes} min flag)")
+            } else if (rules.winConditionEnum == com.example.model.WinCondition.TIME_TRIAL_DISTANCE) {
+                add("Max Time: ${rules.timeLimitSec}s")
             } else {
-                add(rules.winConditionEnum.displayName)
+                add("${rules.totalLaps} Laps (${rules.winConditionEnum.displayName})")
             }
+            add("Speed: ${rules.carSpeedEnum.displayName}")
             if (rules.autoAccelerate) add("Auto-Gas")
             if (rules.hardTrackBoundary) add("Bounce Walls")
             if (rules.randomJumpsEnabled) add("Jumps")
@@ -954,8 +958,12 @@ class WifiP2pRaceManager(
                 lastNs = nowNs
 
                 val inputToApply = synchronized(this@WifiP2pRaceManager) {
-                    val inp = localInput.copy(usePowerUp = pendingLocalPowerUp)
+                    val inp = localInput.copy(
+                        usePowerUp = pendingLocalPowerUp,
+                        dropMine = pendingLocalMineDrop
+                    )
                     pendingLocalPowerUp = false
+                    pendingLocalMineDrop = false
                     inp
                 }
                 engine.submitInput(localPlayerId, inputToApply)
@@ -1069,6 +1077,24 @@ class WifiP2pRaceManager(
                         type = PacketType.CONTROL_INPUT,
                         senderId = localPlayerId,
                         controlInput = inp.copy(usePowerUp = true)
+                    )
+                )
+            )
+        }
+    }
+
+    fun triggerLocalMineDrop() {
+        synchronized(this) {
+            pendingLocalMineDrop = true
+        }
+        if (_role.value == SessionRole.Client) {
+            val inp = synchronized(this) { localInput }
+            clientSendChannel?.trySend(
+                msgAdapter.toJson(
+                    NetworkMessage(
+                        type = PacketType.CONTROL_INPUT,
+                        senderId = localPlayerId,
+                        controlInput = inp.copy(dropMine = true)
                     )
                 )
             )

@@ -84,6 +84,7 @@ import com.example.model.RaceSnapshot
 import com.example.model.RacerState
 import com.example.model.TrackDefinition
 import com.example.model.WinCondition
+import com.example.sensors.RcHapticController
 import com.example.sensors.TiltSteeringController
 import com.example.ui.components.drawTrackMiniMap
 import com.example.ui.components.drawTrackWorld
@@ -109,11 +110,13 @@ fun RaceScreen(
     rules: RaceRulesSettings = RaceRulesSettings(),
     audioSettings: AudioSettings = AudioSettings(),
     audioEngine: RaceAudioEngine? = null,
+    hapticController: RcHapticController? = null,
     overviewCamera: Boolean,
     tiltController: TiltSteeringController,
     onToggleOverviewCamera: () -> Unit,
     onUpdateControlInput: (Float, Float) -> Unit,
     onTriggerPowerUp: () -> Unit,
+    onDropMine: () -> Unit = {},
     onSwitchControlMode: (ControlMode, Float, Boolean) -> Unit,
     onUpdateAudioSettings: (AudioSettings) -> Unit = {},
     onLeaveRace: () -> Unit
@@ -192,6 +195,27 @@ fun RaceScreen(
         ?: snapshot?.racers?.firstOrNull()
     val latestSnapshot by androidx.compose.runtime.rememberUpdatedState(snapshot)
 
+    // Tactile haptics for collisions, mine blasts, EMP hits, field pickups & portal warps
+    var lastCollisionSeq by remember(localRacer?.playerId) { mutableStateOf<Int?>(null) }
+    LaunchedEffect(localRacer?.collisionSeq) {
+        val seq = localRacer?.collisionSeq ?: return@LaunchedEffect
+        val prev = lastCollisionSeq
+        if (prev != null && seq > prev) {
+            hapticController?.onCollision(heavy = (localRacer.stunnedMs > 0L))
+        }
+        lastCollisionSeq = seq
+    }
+
+    var lastPortalWarpSeq by remember(localRacer?.playerId) { mutableStateOf<Int?>(null) }
+    LaunchedEffect(localRacer?.portalWarpSeq) {
+        val seq = localRacer?.portalWarpSeq ?: return@LaunchedEffect
+        val prev = lastPortalWarpSeq
+        if (prev != null && seq > prev) {
+            hapticController?.onPortalWarp()
+        }
+        lastPortalWarpSeq = seq
+    }
+
     LaunchedEffect(snapshot) {
         if (snapshot != null) {
             lastSnapshotArrivalNanos = System.nanoTime()
@@ -238,7 +262,7 @@ fun RaceScreen(
                     if (target != null) {
                         val lookX = target.x + cos(target.angleRad) * 40f
                         val lookY = target.y + sin(target.angleRad) * 40f
-                        if (!camInitialized) {
+                        if (!camInitialized || hypot(lookX - camX, lookY - camY) > 420f) {
                             camX = lookX
                             camY = lookY
                             camInitialized = true
@@ -324,7 +348,10 @@ fun RaceScreen(
                         showPlayerNames = rules.showPlayerNames,
                         localPlayerId = profile.playerId,
                         isOverview = true,
-                        arenaFlag = arenaFlagToDraw
+                        arenaFlag = arenaFlagToDraw,
+                        fieldPickups = snapshot?.fieldPickups.orEmpty(),
+                        portalPair = snapshot?.portalPair,
+                        explosions = snapshot?.explosions.orEmpty()
                     )
                 }
             } else {
@@ -345,7 +372,10 @@ fun RaceScreen(
                         showPlayerNames = rules.showPlayerNames,
                         localPlayerId = profile.playerId,
                         isOverview = false,
-                        arenaFlag = arenaFlagToDraw
+                        arenaFlag = arenaFlagToDraw,
+                        fieldPickups = snapshot?.fieldPickups.orEmpty(),
+                        portalPair = snapshot?.portalPair,
+                        explosions = snapshot?.explosions.orEmpty()
                     )
                 }
             }
@@ -551,7 +581,8 @@ fun RaceScreen(
                                     track = track,
                                     racers = racersToDraw,
                                     localPlayerId = profile.playerId,
-                                    arenaFlag = arenaFlagToDraw
+                                    arenaFlag = arenaFlagToDraw,
+                                    portalPair = snapshot?.portalPair
                                 )
                             }
                             Text(
@@ -626,10 +657,51 @@ fun RaceScreen(
             }
         }
 
-        // Bottom Controls Overlay + Power-Up Button
+        // Prominent "INVERTED" Steering Alert Overlay (5 seconds)
+        val invertedRemMs = localRacer?.invertedSteerMs ?: 0L
+        if (invertedRemMs > 0L && snapshot?.phase == RacePhase.RACING.name) {
+            val invPulse = 0.5f + 0.5f * sin(animTimeSec * 12f)
+            val invSecText = String.format("%.1fs", invertedRemMs / 1000f)
+            val topOffset = if (!snapshot.eventBanner.isNullOrBlank() || localRacer?.finished == true) {
+                126.dp
+            } else {
+                86.dp
+            }
+            Surface(
+                color = Color(0xFF280633).copy(alpha = 0.90f),
+                shape = RoundedCornerShape(50),
+                border = BorderStroke(2.dp, Color(0xFFE040FB).copy(alpha = 0.65f + 0.35f * invPulse)),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(top = topOffset)
+                    .testTag("inverted_banner")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "INVERTED",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Color(0xFFFF80AB)
+                    )
+                    Text(
+                        text = invSecText,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+
+        // Bottom Controls Overlay + Flashing Red Mine Button + Power-Up Button
         val heldPowerUp = localRacer?.heldPowerUp?.let {
             runCatching { PowerUpType.valueOf(it) }.getOrNull()
         }
+        val minesAvailable = localRacer?.minesAvailable ?: 0
+        val hasMine = !isArenaMode && minesAvailable > 0
 
         BoxWithConstraints(
             modifier = Modifier
@@ -664,6 +736,7 @@ fun RaceScreen(
                     verticalAlignment = Alignment.Bottom
                 ) {
                     Row(
+                        modifier = Modifier.weight(1f, fill = false),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -685,6 +758,7 @@ fun RaceScreen(
                         if (isArenaMode && arenaFlagToDraw?.carrierId == localRacer?.playerId) {
                             StatusChip("CARRYING FLAG!", GoldTrophy)
                         }
+                        if (invertedRemMs > 0L) StatusChip("INVERTED", Color(0xFFE040FB))
                         if ((localRacer?.jumpZ ?: 0f) > 0.1f) StatusChip("AIRBORNE!", GoldTrophy)
                         if ((localRacer?.boostMs ?: 0L) > 0L) StatusChip("TURBO", SignalOrange)
                         if ((localRacer?.shieldMs ?: 0L) > 0L) StatusChip("SHIELD", AcidLime)
@@ -692,36 +766,102 @@ fun RaceScreen(
                         if ((localRacer?.stunnedMs ?: 0L) > 0L) StatusChip("ZAPPED!", AlertRed)
                     }
 
-                    val powerUpColor = heldPowerUp?.let { Color(it.colorHex) } ?: PaddockOutline
-                    Surface(
-                        color = if (heldPowerUp != null) powerUpColor.copy(alpha = 0.92f) else CarbonBg.copy(alpha = 0.65f),
-                        shape = RoundedCornerShape(18.dp),
-                        border = BorderStroke(2.dp, powerUpColor),
-                        modifier = Modifier
-                            .size(width = 120.dp, height = 56.dp)
-                            .clip(RoundedCornerShape(18.dp))
-                            .clickable(enabled = heldPowerUp != null) { onTriggerPowerUp() }
-                            .testTag("use_powerup_button")
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
+                        if (!isArenaMode) {
+                            val mineFlash = 0.5f + 0.5f * sin(animTimeSec * 14f)
+                            val mineActiveBg = if (mineFlash > 0.45f) {
+                                AlertRed.copy(alpha = 0.94f)
+                            } else {
+                                Color(0xFF7F0019).copy(alpha = 0.92f)
+                            }
+                            val mineBorder = if (hasMine) {
+                                if (mineFlash > 0.45f) Color(0xFFFFCDD2) else AlertRed
+                            } else {
+                                PaddockOutline
+                            }
+                            Surface(
+                                color = if (hasMine) mineActiveBg else CarbonBg.copy(alpha = 0.65f),
+                                shape = RoundedCornerShape(18.dp),
+                                border = BorderStroke(2.dp, mineBorder),
+                                modifier = Modifier
+                                    .size(width = 96.dp, height = 56.dp)
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .clickable(enabled = hasMine) {
+                                        hapticController?.onMineDropped()
+                                        onDropMine()
+                                    }
+                                    .testTag("drop_mine_button")
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(12.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                if (hasMine) {
+                                                    if (mineFlash > 0.45f) Color.White else Color(0xFFFF5252)
+                                                } else {
+                                                    TextSecondary.copy(alpha = 0.5f)
+                                                }
+                                            )
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = when {
+                                            hasMine -> "MINE"
+                                            (localRacer?.lap ?: 1) < 2 -> "LAP 2"
+                                            else -> "MINE"
+                                        },
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = if (hasMine) Color.White else TextSecondary
+                                    )
+                                }
+                            }
+                        }
+
+                        val powerUpColor = heldPowerUp?.let { Color(it.colorHex) } ?: PaddockOutline
+                        Surface(
+                            color = if (heldPowerUp != null) powerUpColor.copy(alpha = 0.92f) else CarbonBg.copy(alpha = 0.65f),
+                            shape = RoundedCornerShape(18.dp),
+                            border = BorderStroke(2.dp, powerUpColor),
                             modifier = Modifier
-                                .fillMaxSize()
-                                .padding(horizontal = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                                .size(width = 116.dp, height = 56.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .clickable(enabled = heldPowerUp != null) {
+                                    hapticController?.onPowerUpUsed()
+                                    onTriggerPowerUp()
+                                }
+                                .testTag("use_powerup_button")
                         ) {
-                            Icon(
-                                Icons.Default.Bolt,
-                                contentDescription = "Power-up",
-                                tint = if (heldPowerUp != null) CarbonBg else TextSecondary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = heldPowerUp?.shortName ?: "EMPTY",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = if (heldPowerUp != null) CarbonBg else TextSecondary
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.Bolt,
+                                    contentDescription = "Power-up",
+                                    tint = if (heldPowerUp != null) CarbonBg else TextSecondary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = heldPowerUp?.shortName ?: "EMPTY",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = if (heldPowerUp != null) CarbonBg else TextSecondary
+                                )
+                            }
                         }
                     }
                 }
@@ -914,6 +1054,19 @@ fun RaceScreen(
                             checked = audioSettings.carSfxEnabled,
                             onCheckedChange = {
                                 onUpdateAudioSettings(audioSettings.copy(carSfxEnabled = it))
+                            }
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Haptic Vibration", style = MaterialTheme.typography.bodyMedium)
+                        Switch(
+                            checked = audioSettings.hapticsEnabled,
+                            onCheckedChange = {
+                                onUpdateAudioSettings(audioSettings.copy(hapticsEnabled = it))
                             }
                         )
                     }

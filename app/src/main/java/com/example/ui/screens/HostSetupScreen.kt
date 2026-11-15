@@ -55,6 +55,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import com.example.model.CarSpeedPreset
 import com.example.model.GameMode
 import com.example.model.RaceRulesSettings
 import com.example.model.WinCondition
@@ -352,7 +353,7 @@ fun HostSetupScreen(
                         }
                     }
 
-                    // Laps or Time Limit Selector
+                    // Race Length: Number of Laps OR Max Driving Time
                     Card(
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainer
@@ -374,27 +375,58 @@ fun HostSetupScreen(
                                     tint = MaterialTheme.colorScheme.secondary
                                 )
                                 Text(
-                                    text = if (selectedWin == WinCondition.TIME_TRIAL_DISTANCE) {
-                                        "Race Time Limit"
-                                    } else {
-                                        "Number of Laps"
-                                    },
+                                    text = "Laps or Max Driving Time",
                                     style = MaterialTheme.typography.titleLarge,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
 
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val isTimeMode = selectedWin == WinCondition.TIME_TRIAL_DISTANCE
+                                FilterChip(
+                                    selected = !isTimeMode,
+                                    onClick = {
+                                        if (isTimeMode) {
+                                            draft = draft.copy(winCondition = WinCondition.FIRST_TO_FINISH.name)
+                                        }
+                                    },
+                                    label = { Text("Number of Laps") },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("setup_length_mode_laps")
+                                )
+                                FilterChip(
+                                    selected = isTimeMode,
+                                    onClick = {
+                                        draft = draft.copy(winCondition = WinCondition.TIME_TRIAL_DISTANCE.name)
+                                    },
+                                    label = { Text("Max Driving Time") },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("setup_length_mode_time")
+                                )
+                            }
+
                             if (selectedWin == WinCondition.TIME_TRIAL_DISTANCE) {
+                                Text(
+                                    text = "Race ends when the driving timer expires — furthest total distance wins.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    listOf(60, 90, 120, 180).forEach { secs ->
+                                    listOf(60, 90, 120, 180, 300).forEach { secs ->
                                         val active = draft.timeLimitSec == secs
+                                        val label = if (secs >= 180 && secs % 60 == 0) "${secs / 60}m" else "${secs}s"
                                         FilterChip(
                                             selected = active,
                                             onClick = { draft = draft.copy(timeLimitSec = secs) },
-                                            label = { Text("${secs}s") },
+                                            label = { Text(label) },
                                             modifier = Modifier
                                                 .weight(1f)
                                                 .testTag("setup_time_${secs}")
@@ -402,22 +434,78 @@ fun HostSetupScreen(
                                     }
                                 }
                             } else {
+                                Text(
+                                    text = "Starting on Lap 2, each driver receives 1 flashing red Mine!",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    listOf(2, 3, 5, 7).forEach { laps ->
+                                    listOf(1, 2, 3, 5, 7).forEach { laps ->
                                         val active = draft.totalLaps == laps
                                         FilterChip(
                                             selected = active,
                                             onClick = { draft = draft.copy(totalLaps = laps) },
-                                            label = { Text("$laps Laps") },
+                                            label = { Text("${laps}L") },
                                             modifier = Modifier
                                                 .weight(1f)
                                                 .testTag("setup_laps_${laps}")
                                         )
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+
+                // General Car Speed Selector Card (Low, Medium, Fast — default Fast)
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer
+                    ),
+                    shape = RoundedCornerShape(22.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Speed,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Text(
+                                text = "General Car Speed",
+                                style = MaterialTheme.typography.titleLarge,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Text(
+                            text = draft.carSpeedEnum.subtitle,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CarSpeedPreset.entries.forEach { preset ->
+                                val active = draft.carSpeedEnum == preset
+                                FilterChip(
+                                    selected = active,
+                                    onClick = { draft = draft.copy(carSpeed = preset.name) },
+                                    label = { Text(preset.displayName) },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("setup_speed_${preset.name}")
+                                )
                             }
                         }
                     }

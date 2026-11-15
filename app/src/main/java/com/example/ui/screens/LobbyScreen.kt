@@ -73,6 +73,7 @@ import androidx.compose.ui.unit.dp
 import com.example.data.TrackCatalog
 import com.example.model.ArenaFlagState
 import com.example.model.ArenaShape
+import com.example.model.CarSpeedPreset
 import com.example.model.CustomTrackData
 import com.example.model.GameMode
 import com.example.model.LobbyStatePayload
@@ -218,10 +219,17 @@ fun LobbyScreen(
                             val label = when {
                                 isArenaMode -> "ARENA • ${activeRules.arenaTargetMinutes}M FLAG"
                                 activeRules.winConditionEnum == WinCondition.TIME_TRIAL_DISTANCE ->
-                                    "${activeRules.timeLimitSec}s LIMIT"
-                                else -> activeRules.winConditionEnum.displayName.uppercase()
+                                    "MAX TIME • ${activeRules.timeLimitSec}s"
+                                else -> "${lobby?.totalLaps ?: activeRules.totalLaps} LAPS • ${activeRules.winConditionEnum.displayName.uppercase()}"
                             }
                             LobbyRuleBadge(label, MaterialTheme.colorScheme.primary, onOpenSettings)
+                        }
+                        item {
+                            LobbyRuleBadge(
+                                "SPEED: ${activeRules.carSpeedEnum.displayName.uppercase()}",
+                                MaterialTheme.colorScheme.secondary,
+                                onOpenSettings
+                            )
                         }
                         if (activeRules.autoAccelerate) {
                             item { LobbyRuleBadge("AUTO-GAS", MaterialTheme.colorScheme.tertiary, onOpenSettings) }
@@ -237,6 +245,31 @@ fun LobbyScreen(
                         }
                         if (activeRules.showPlayerNames) {
                             item { LobbyRuleBadge("NAME TAGS", MaterialTheme.colorScheme.tertiary, onOpenSettings) }
+                        }
+                    }
+                }
+
+                // Host / Solo Quick Car Speed Selector (Low / Medium / Fast)
+                if (isHostOrSolo && activeRules != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "CAR SPEED",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            CarSpeedPreset.entries.forEach { preset ->
+                                FilterChip(
+                                    selected = activeRules.carSpeedEnum == preset,
+                                    onClick = { onUpdateRules(activeRules.copy(carSpeed = preset.name)) },
+                                    label = { Text(preset.displayName, style = MaterialTheme.typography.labelSmall) },
+                                    modifier = Modifier.testTag("lobby_speed_${preset.name}")
+                                )
+                            }
                         }
                     }
                 }
@@ -374,6 +407,7 @@ fun LobbyScreen(
                         TrackId.valueOf(lobby?.trackId ?: TrackId.LIVING_ROOM_GP.name)
                     }.getOrDefault(TrackId.LIVING_ROOM_GP)
 
+                    val isTimeMode = activeRules?.winConditionEnum == WinCondition.TIME_TRIAL_DISTANCE
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -384,21 +418,64 @@ fun LobbyScreen(
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        if (activeRules?.winConditionEnum == WinCondition.TIME_TRIAL_DISTANCE) {
+                        if (isHostOrSolo && activeRules != null) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                FilterChip(
+                                    selected = !isTimeMode,
+                                    onClick = {
+                                        if (isTimeMode) {
+                                            onUpdateRules(activeRules.copy(winCondition = WinCondition.FIRST_TO_FINISH.name))
+                                        }
+                                    },
+                                    label = { Text("Laps", style = MaterialTheme.typography.labelSmall) },
+                                    modifier = Modifier.testTag("lobby_mode_laps")
+                                )
+                                FilterChip(
+                                    selected = isTimeMode,
+                                    onClick = {
+                                        onUpdateRules(activeRules.copy(winCondition = WinCondition.TIME_TRIAL_DISTANCE.name))
+                                    },
+                                    label = { Text("Max Time", style = MaterialTheme.typography.labelSmall) },
+                                    modifier = Modifier.testTag("lobby_mode_time")
+                                )
+                            }
+                        } else if (isTimeMode) {
                             Text(
-                                text = "TIME: ${activeRules.timeLimitSec}s",
+                                text = "TIME: ${activeRules?.timeLimitSec ?: 90}s",
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.primary
                             )
                         } else {
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                listOf(2, 3, 5).forEach { laps ->
-                                    val active = (lobby?.totalLaps ?: 3) == laps
+                            Text(
+                                text = "LAPS: ${lobby?.totalLaps ?: 3}",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+
+                    if (isHostOrSolo && activeRules != null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (isTimeMode) {
+                                listOf(60, 90, 120, 180, 300).forEach { secs ->
+                                    val label = if (secs >= 180 && secs % 60 == 0) "${secs / 60}m" else "${secs}s"
                                     FilterChip(
-                                        selected = active,
-                                        onClick = { if (isHostOrSolo) onSelectLaps(laps) },
-                                        enabled = isHostOrSolo,
-                                        label = { Text("${laps}L", style = MaterialTheme.typography.labelSmall) }
+                                        selected = activeRules.timeLimitSec == secs,
+                                        onClick = { onUpdateRules(activeRules.copy(timeLimitSec = secs)) },
+                                        label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                            } else {
+                                listOf(1, 2, 3, 5, 7).forEach { laps ->
+                                    FilterChip(
+                                        selected = (lobby?.totalLaps ?: activeRules.totalLaps) == laps,
+                                        onClick = { onSelectLaps(laps) },
+                                        label = { Text("${laps}L", style = MaterialTheme.typography.labelSmall) },
+                                        modifier = Modifier.weight(1f)
                                     )
                                 }
                             }
