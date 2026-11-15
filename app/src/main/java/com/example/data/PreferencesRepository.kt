@@ -2,6 +2,7 @@ package com.example.data
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -9,7 +10,6 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
 import com.example.model.AudioSettings
 import com.example.model.ControlMode
 import com.example.model.CustomTrackData
@@ -24,11 +24,27 @@ import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.io.File
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
-private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "microrc_prefs")
+class PreferencesRepository(context: Context) {
 
-class PreferencesRepository(private val context: Context) {
+    private val dataStore: DataStore<Preferences> = getDataStore(context)
+
+    companion object {
+        private val storesByPath = ConcurrentHashMap<String, DataStore<Preferences>>()
+
+        private fun getDataStore(context: Context): DataStore<Preferences> {
+            val appCtx = context.applicationContext ?: context
+            val targetFile = File(appCtx.filesDir, "datastore/microrc_prefs.preferences_pb")
+            return storesByPath.computeIfAbsent(targetFile.absolutePath) {
+                PreferenceDataStoreFactory.create(
+                    produceFile = { targetFile }
+                )
+            }
+        }
+    }
 
     private val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
     private val customTrackListAdapter = moshi.adapter<List<CustomTrackData>>(
@@ -59,7 +75,7 @@ class PreferencesRepository(private val context: Context) {
         val CUSTOM_TRACKS_JSON = stringPreferencesKey("custom_tracks_json")
     }
 
-    val profileFlow: Flow<PlayerProfile> = context.dataStore.data.map { prefs ->
+    val profileFlow: Flow<PlayerProfile> = dataStore.data.map { prefs ->
         val id = prefs[Keys.PLAYER_ID] ?: generateStableId()
         val name = prefs[Keys.DRIVER_NAME] ?: "Driver-${id.takeLast(4).uppercase()}"
         val carType = runCatching {
@@ -85,7 +101,7 @@ class PreferencesRepository(private val context: Context) {
         )
     }
 
-    val rulesFlow: Flow<RaceRulesSettings> = context.dataStore.data.map { prefs ->
+    val rulesFlow: Flow<RaceRulesSettings> = dataStore.data.map { prefs ->
         val mode = runCatching {
             GameMode.valueOf(prefs[Keys.RULE_GAME_MODE] ?: GameMode.RACE.name)
         }.getOrDefault(GameMode.RACE)
@@ -106,14 +122,14 @@ class PreferencesRepository(private val context: Context) {
         )
     }
 
-    val audioSettingsFlow: Flow<AudioSettings> = context.dataStore.data.map { prefs ->
+    val audioSettingsFlow: Flow<AudioSettings> = dataStore.data.map { prefs ->
         AudioSettings(
             musicEnabled = prefs[Keys.AUDIO_MUSIC_ENABLED] ?: true,
             carSfxEnabled = prefs[Keys.AUDIO_SFX_ENABLED] ?: true
         )
     }
 
-    val customTracksFlow: Flow<List<CustomTrackData>> = context.dataStore.data.map { prefs ->
+    val customTracksFlow: Flow<List<CustomTrackData>> = dataStore.data.map { prefs ->
         val raw = prefs[Keys.CUSTOM_TRACKS_JSON]
         if (raw.isNullOrBlank()) {
             emptyList()
@@ -124,7 +140,7 @@ class PreferencesRepository(private val context: Context) {
 
     suspend fun ensurePlayerId(): String {
         var resolved = ""
-        context.dataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             val existing = prefs[Keys.PLAYER_ID]
             if (existing != null) {
                 resolved = existing
@@ -138,11 +154,11 @@ class PreferencesRepository(private val context: Context) {
 
     suspend fun updateDriverName(name: String) {
         val clean = name.trim().take(16).ifEmpty { "Racer" }
-        context.dataStore.edit { it[Keys.DRIVER_NAME] = clean }
+        dataStore.edit { it[Keys.DRIVER_NAME] = clean }
     }
 
     suspend fun updateCarAndColors(carType: RcCarType, primaryArgb: Long, accentArgb: Long) {
-        context.dataStore.edit {
+        dataStore.edit {
             it[Keys.CAR_TYPE] = carType.name
             it[Keys.PRIMARY_COLOR] = primaryArgb
             it[Keys.ACCENT_COLOR] = accentArgb
@@ -154,7 +170,7 @@ class PreferencesRepository(private val context: Context) {
         tiltSensitivity: Float,
         autoGasInTilt: Boolean
     ) {
-        context.dataStore.edit {
+        dataStore.edit {
             it[Keys.CONTROL_MODE] = controlMode.name
             it[Keys.TILT_SENSITIVITY] = tiltSensitivity.coerceIn(0.6f, 2.2f)
             it[Keys.AUTO_GAS_TILT] = autoGasInTilt
@@ -162,7 +178,7 @@ class PreferencesRepository(private val context: Context) {
     }
 
     suspend fun updateRaceRules(rules: RaceRulesSettings) {
-        context.dataStore.edit {
+        dataStore.edit {
             it[Keys.RULE_GAME_MODE] = rules.gameMode
             it[Keys.RULE_AUTO_ACCEL] = rules.autoAccelerate
             it[Keys.RULE_HARD_BOUNDARY] = rules.hardTrackBoundary
@@ -177,14 +193,14 @@ class PreferencesRepository(private val context: Context) {
     }
 
     suspend fun updateAudioSettings(audio: AudioSettings) {
-        context.dataStore.edit {
+        dataStore.edit {
             it[Keys.AUDIO_MUSIC_ENABLED] = audio.musicEnabled
             it[Keys.AUDIO_SFX_ENABLED] = audio.carSfxEnabled
         }
     }
 
     suspend fun saveCustomTrack(track: CustomTrackData) {
-        context.dataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             val current = prefs[Keys.CUSTOM_TRACKS_JSON]
                 ?.let { runCatching { customTrackListAdapter.fromJson(it) }.getOrNull() }
                 .orEmpty()
@@ -200,7 +216,7 @@ class PreferencesRepository(private val context: Context) {
     }
 
     suspend fun deleteCustomTrack(trackId: String) {
-        context.dataStore.edit { prefs ->
+        dataStore.edit { prefs ->
             val current = prefs[Keys.CUSTOM_TRACKS_JSON]
                 ?.let { runCatching { customTrackListAdapter.fromJson(it) }.getOrNull() }
                 .orEmpty()

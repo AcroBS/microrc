@@ -27,6 +27,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.random.Random
 
 class RaceEngineUnitTest {
 
@@ -362,7 +363,7 @@ class RaceEngineUnitTest {
             hardTrackBoundary = true,
             randomConditionsEnabled = false
         )
-        val engine = RacePhysicsEngine(testArena, totalLaps = 3, players = players, rules = rules)
+        val engine = RacePhysicsEngine(testArena, totalLaps = 3, players = players, rules = rules, random = Random(42L))
 
         // Advance past 3.2s countdown with cars stationary
         var snap = engine.step(0.05f)
@@ -397,8 +398,8 @@ class RaceEngineUnitTest {
         assertTrue("Driving onto oil/puddle patch must spin car & drop the flag", droppedOnSpin)
 
         // 3. Give flag to p2, then ram p1 into p2 -> flag transfers to p1 on collision!
-        val cleanArena = baseArena.copy(ramps = emptyList(), props = emptyList())
-        val collisionEngine = RacePhysicsEngine(cleanArena, totalLaps = 3, players = players, rules = rules)
+        val cleanArena = baseArena.copy(ramps = emptyList(), props = emptyList(), itemSpawns = emptyList())
+        val collisionEngine = RacePhysicsEngine(cleanArena, totalLaps = 3, players = players, rules = rules, random = Random(99L))
         repeat(68) { collisionEngine.step(0.05f) }
         val cSnap0 = collisionEngine.step(0.05f)
         val cP2 = cSnap0.racers.first { it.playerId == "p2" }
@@ -452,7 +453,8 @@ class RaceEngineUnitTest {
                 gameMode = GameMode.ARENA.name,
                 arenaTargetMinutes = 3,
                 randomConditionsEnabled = false
-            )
+            ),
+            random = Random(7L)
         )
         repeat(70) { engine.step(0.05f) }
         val snap0 = engine.step(0.05f)

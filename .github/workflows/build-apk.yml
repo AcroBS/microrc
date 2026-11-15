@@ -86,7 +86,7 @@ jobs:
                 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
                 git add debug.keystore.base64
                 git commit -q -m "chore: persist CI APK signing keystore"
-                git push -q "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/ci-keystore || true
+                git push -q "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" +HEAD:refs/heads/ci-keystore || true
               )
               rm -rf "$TMP_KS_DIR"
             fi
@@ -104,10 +104,14 @@ jobs:
         with:
           gradle-version: "9.3.1"
 
-      - name: Build installable debug APK
+      - name: Configure CI build version
         env:
-          CI_VERSION_CODE: ${{ github.run_number + 10 }}
-          CI_VERSION_NAME: "1.0.${{ github.run_number }}"
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          echo "CI_VERSION_CODE=$((RUN_NUMBER + 10))" >> "$GITHUB_ENV"
+          echo "CI_VERSION_NAME=1.0.${RUN_NUMBER}" >> "$GITHUB_ENV"
+
+      - name: Build installable debug APK
         run: |
           gradle assembleDebug --no-daemon
           cp app/build/outputs/apk/debug/app-debug.apk MicroRC.apk

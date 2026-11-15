@@ -263,7 +263,7 @@ fun LobbyScreen(
                                 FilterChip(
                                     selected = active,
                                     onClick = {
-                                        if (isHostOrSolo && activeRules != null) {
+                                        if (isHostOrSolo) {
                                             onUpdateRules(activeRules.copy(arenaTargetMinutes = mins))
                                         }
                                     },
@@ -294,9 +294,7 @@ fun LobbyScreen(
                             }
                             OutlinedButton(
                                 onClick = {
-                                    if (activeRules != null) {
-                                        onUpdateRules(activeRules.copy(gameMode = GameMode.RACE.name))
-                                    }
+                                    onUpdateRules(activeRules.copy(gameMode = GameMode.RACE.name))
                                 },
                                 shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier

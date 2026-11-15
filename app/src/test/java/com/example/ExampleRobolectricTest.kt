@@ -67,6 +67,8 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("host_race_button").performScrollTo().performClick()
         composeTestRule.waitForIdle()
 
+        composeTestRule.onNodeWithTag("mode_option_RACE").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("win_condition_TIME_TRIAL_DISTANCE").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setup_random_conditions_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setup_show_player_names_switch").performScrollTo().assertIsDisplayed()
@@ -96,11 +98,11 @@ class ExampleRobolectricTest {
 
         composeTestRule.waitUntil(timeoutMillis = 5_000L) {
             runCatching {
-                composeTestRule.onNodeWithTag("arena_card_SQUARE").assertIsDisplayed()
+                composeTestRule.onNodeWithTag("arena_card_SQUARE").performScrollTo().assertIsDisplayed()
                 true
             }.getOrDefault(false)
         }
-        composeTestRule.onNodeWithTag("arena_card_CIRCLE").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("arena_card_CIRCLE").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("lobby_leave_button").performClick()
         composeTestRule.waitForIdle()
     }
