@@ -22,6 +22,7 @@ import com.example.model.TrackDefinition
 import com.example.model.TrackExplosion
 import com.example.model.TrackFieldPickup
 import com.example.model.TrackHazard
+import com.example.model.TrackPoint
 import com.example.model.TrackPuddle
 import com.example.model.WinCondition
 import kotlin.math.PI
@@ -148,11 +149,13 @@ class RacePhysicsEngine(
     private var bannerTimerMs: Long = 0L
     private var firstHumanFinishTimeMs: Long? = null
 
-    // Arena Hold-the-Flag state
+    // Arena Hold-the-Flag & Sudden Death Shrinking Arena state
     private var flagX: Float = track.worldWidth * 0.5f
     private var flagY: Float = track.worldHeight * 0.5f
     private var flagCarrierId: String? = null
     private var flagTransferCooldownMs: Long = 0L
+    private var arenaSuddenDeathStage: Int = 0
+    private var suddenDeathWarningShown: Boolean = false
 
     // Random external weather/quake event state
     private var activeEvent: ExternalEventType = ExternalEventType.NONE
@@ -319,17 +322,23 @@ class RacePhysicsEngine(
         }
     }
 
+    private fun currentArenaPolygon(): List<TrackPoint> =
+        TrackCatalog.scaledArenaPolygon(track, arenaSuddenDeathStage)
+
     private fun spawnRainPuddles() {
         if (track.isArena) {
-            val count = random.nextInt(7, 11)
+            val activePoly = currentArenaPolygon()
+            val shrinkScale = TrackCatalog.arenaShrinkScaleForStage(arenaSuddenDeathStage)
+            val count = if (arenaSuddenDeathStage >= 2) random.nextInt(4, 7) else random.nextInt(7, 11)
             val placed = mutableListOf<Pair<Float, Float>>()
             repeat(count) {
                 val (px, py) = TrackCatalog.sampleArenaInteriorPoint(
                     track = track,
                     rng = random,
-                    minWallClearance = 135f,
+                    minWallClearance = 135f * shrinkScale,
                     avoidPoints = placed,
-                    minAvoidDist = 140f
+                    minAvoidDist = 140f * shrinkScale,
+                    boundaryOverride = activePoly
                 )
                 placed.add(px to py)
                 rainPuddles.add(
@@ -428,12 +437,14 @@ class RacePhysicsEngine(
         }
 
         if (track.isArena) {
+            val shrinkScale = TrackCatalog.arenaShrinkScaleForStage(arenaSuddenDeathStage)
             return TrackCatalog.sampleArenaInteriorPoint(
                 track = track,
                 rng = random,
-                minWallClearance = 155f,
+                minWallClearance = 145f * shrinkScale,
                 avoidPoints = avoid,
-                minAvoidDist = 115f
+                minAvoidDist = 110f * shrinkScale,
+                boundaryOverride = currentArenaPolygon()
             )
         }
 
@@ -523,20 +534,30 @@ class RacePhysicsEngine(
     private fun spawnRandomPortalPair() {
         val entryIsRed = random.nextBoolean()
         if (track.isArena) {
-            val baseAvoid = racers.map { it.x to it.y } + track.props.map { it.x to it.y }
+            if (arenaSuddenDeathStage >= 3) {
+                nextPortalSpawnMs = 8000L
+                return
+            }
+            val activePoly = currentArenaPolygon()
+            val shrinkScale = TrackCatalog.arenaShrinkScaleForStage(arenaSuddenDeathStage)
+            val baseAvoid = racers.map { it.x to it.y } +
+                track.props.map { it.x to it.y } +
+                hazards.map { it.x to it.y }
             val (ax, ay) = TrackCatalog.sampleArenaInteriorPoint(
                 track = track,
                 rng = random,
-                minWallClearance = 175f,
+                minWallClearance = 165f * shrinkScale,
                 avoidPoints = baseAvoid,
-                minAvoidDist = 140f
+                minAvoidDist = 125f * shrinkScale,
+                boundaryOverride = activePoly
             )
             val (bx, by) = TrackCatalog.sampleArenaInteriorPoint(
                 track = track,
                 rng = random,
-                minWallClearance = 175f,
+                minWallClearance = 165f * shrinkScale,
                 avoidPoints = baseAvoid + (ax to ay),
-                minAvoidDist = 340f
+                minAvoidDist = 280f * shrinkScale,
+                boundaryOverride = activePoly
             )
             val centerAng = atan2(track.worldHeight * 0.5f - by, track.worldWidth * 0.5f - bx)
             activePortalEntryIdx = -1
@@ -620,6 +641,9 @@ class RacePhysicsEngine(
 
         if (phase == RacePhase.RACING) {
             raceTimeMs += dtMs
+            if (isArenaMode) {
+                updateArenaSuddenDeath()
+            }
             updateExternalEvents(dtMs, dt)
             updateFieldPickups(dtMs)
             updatePortals(dtMs)
@@ -745,6 +769,15 @@ class RacePhysicsEngine(
                     updateRankings()
                     phase = RacePhase.FINISHED
                     setBanner("${winner.name} WINS ARENA!", 3500L)
+                } else if (raceTimeMs >= ARENA_SUDDEN_DEATH_END_MS) {
+                    for (r in racers) {
+                        r.finished = true
+                        r.finishTimeMs = raceTimeMs
+                    }
+                    updateRankings()
+                    val finaleWinner = racers.minByOrNull { it.rank } ?: racers.first()
+                    phase = RacePhase.FINISHED
+                    setBanner("SUDDEN DEATH OVER! ${finaleWinner.name} WINS!", 3500L)
                 }
             } else {
                 val humanRacers = racers.filter { !it.isBot }
@@ -825,29 +858,176 @@ class RacePhysicsEngine(
         }
     }
 
-    private fun dropFlagFrom(racer: MutableRacer, reason: String) {
-        if (!isArenaMode || flagCarrierId != racer.playerId) return
-        flagCarrierId = null
-        racer.flagPickupImmunityMs = 650L
+    private fun updateArenaSuddenDeath() {
+        if (!isArenaMode || phase != RacePhase.RACING) return
+        if (racers.any { it.flagCarryMs >= arenaTargetMs }) return
 
-        val dropAng = racer.angleRad + PI.toFloat() * 0.82f
-        var fx = racer.x + cos(dropAng) * 78f
-        var fy = racer.y + sin(dropAng) * 78f
+        if (!suddenDeathWarningShown &&
+            raceTimeMs >= ARENA_SUDDEN_DEATH_START_MS - 10_000L &&
+            raceTimeMs < ARENA_SUDDEN_DEATH_START_MS
+        ) {
+            suddenDeathWarningShown = true
+            setBanner("10s TO SUDDEN DEATH — HOLD THE FLAG!", 2200L)
+        }
 
-        val poly = track.arenaBoundary.ifEmpty { track.centerline }
-        if (track.isArena && poly.size >= 3) {
-            val inside = TrackCatalog.isPointInPolygon(fx, fy, poly)
-            val (bx, by, wallDist) = TrackCatalog.closestPointOnPolygon(fx, fy, poly)
-            if (!inside || wallDist < 68f) {
-                val cx = track.worldWidth * 0.5f
-                val cy = track.worldHeight * 0.5f
-                val d = hypot(cx - bx, cy - by).coerceAtLeast(1f)
-                fx = bx + ((cx - bx) / d) * 88f
-                fy = by + ((cy - by) / d) * 88f
+        if (raceTimeMs < ARENA_SUDDEN_DEATH_START_MS) return
+
+        val overtimeMs = (raceTimeMs - ARENA_SUDDEN_DEATH_START_MS).coerceAtLeast(0L)
+        val desiredStage = ((overtimeMs / ARENA_SUDDEN_DEATH_WAVE_MS).toInt() + 1).coerceIn(1, 3)
+        while (arenaSuddenDeathStage < desiredStage) {
+            arenaSuddenDeathStage += 1
+            dropSuddenDeathBarrierWave(arenaSuddenDeathStage)
+        }
+    }
+
+    private fun dropSuddenDeathBarrierWave(stage: Int) {
+        val cx = track.worldWidth * 0.5f
+        val cy = track.worldHeight * 0.5f
+        val poly = currentArenaPolygon()
+        if (poly.size < 3) return
+
+        // Replace active barrier ring with the new tighter inward wave
+        hazards.removeAll { it.hazardTypeEnum == HazardType.BARRIER }
+
+        val perimeterCount = when (stage) {
+            1 -> 14
+            2 -> 12
+            else -> 10
+        }
+        for (k in 0 until perimeterCount) {
+            val pt = poly[(k * poly.size) / perimeterCount]
+            val toCenterX = cx - pt.x
+            val toCenterY = cy - pt.y
+            val distToCenter = hypot(toCenterX, toCenterY).coerceAtLeast(1f)
+            val bx = pt.x + (toCenterX / distToCenter) * 14f
+            val by = pt.y + (toCenterY / distToCenter) * 14f
+            hazards.add(
+                TrackHazard(
+                    id = nextHazardId++,
+                    ownerId = "arena_sudden_death",
+                    x = bx,
+                    y = by,
+                    radius = 28f,
+                    remainingMs = 45_000L,
+                    type = HazardType.BARRIER.name
+                )
+            )
+            if (k % 2 == 0) {
+                explosions.add(
+                    TrackExplosion(
+                        id = nextExplosionId++,
+                        x = bx,
+                        y = by,
+                        ageMs = 0L,
+                        durationMs = 560L
+                    )
+                )
             }
         }
 
-        // Push dropped flag clear of oil/mud slicks so next driver can pick it up cleanly
+        // In Waves 2 & 3, also drop 4 inner tactical hazard barriers inward toward center
+        if (stage >= 2) {
+            val innerRadius = if (stage == 2) 220f else 138f
+            val angleOffset = (PI / 4.0).toFloat() + (stage - 2) * 0.42f
+            for (k in 0 until 4) {
+                val ang = angleOffset + k * (PI.toFloat() / 2f)
+                var ix = cx + cos(ang) * innerRadius
+                var iy = cy + sin(ang) * innerRadius
+                for (prop in track.props) {
+                    val d = hypot(ix - prop.x, iy - prop.y)
+                    if (d < prop.radius + 42f && d > 0.1f) {
+                        ix = prop.x + ((ix - prop.x) / d) * (prop.radius + 46f)
+                        iy = prop.y + ((iy - prop.y) / d) * (prop.radius + 46f)
+                    }
+                }
+                if (TrackCatalog.isPointInPolygon(ix, iy, poly)) {
+                    hazards.add(
+                        TrackHazard(
+                            id = nextHazardId++,
+                            ownerId = "arena_sudden_death",
+                            x = ix,
+                            y = iy,
+                            radius = 25f,
+                            remainingMs = 45_000L,
+                            type = HazardType.BARRIER.name
+                        )
+                    )
+                    explosions.add(
+                        TrackExplosion(
+                            id = nextExplosionId++,
+                            x = ix,
+                            y = iy,
+                            ageMs = 0L,
+                            durationMs = 560L
+                        )
+                    )
+                }
+            }
+        }
+
+        // Shove any cars caught outside the newly dropped barrier ring inward
+        for (racer in racers) {
+            val inside = TrackCatalog.isPointInPolygon(racer.x, racer.y, poly)
+            val (bx, by, wallDist) = TrackCatalog.closestPointOnPolygon(racer.x, racer.y, poly)
+            val minClearance = racer.carType.radiusPx + 46f
+            if (!inside || wallDist < minClearance) {
+                val inDx = cx - bx
+                val inDy = cy - by
+                val inLen = hypot(inDx, inDy).coerceAtLeast(1f)
+                val inNx = inDx / inLen
+                val inNy = inDy / inLen
+                racer.x = bx + inNx * minClearance
+                racer.y = by + inNy * minClearance
+                racer.prevX = racer.x
+                racer.prevY = racer.y
+                racer.vx = inNx * 210f
+                racer.vy = inNy * 210f
+                racer.collisionSeq += 1
+            }
+        }
+
+        // Keep loose flag inside the newly shrunken safe zone & clear of barriers
+        if (flagCarrierId == null) {
+            repositionLooseFlagInsidePoly(poly)
+        }
+
+        // Remove any field pickups or portals stranded outside the shrunken ring
+        fieldPickups.removeAll { fp ->
+            !TrackCatalog.isPointInPolygon(fp.x, fp.y, poly) ||
+                TrackCatalog.closestPointOnPolygon(fp.x, fp.y, poly).third < 55f
+        }
+        portalPair?.let { pp ->
+            val okEntry = TrackCatalog.isPointInPolygon(pp.entryX, pp.entryY, poly) &&
+                TrackCatalog.closestPointOnPolygon(pp.entryX, pp.entryY, poly).third >= 65f
+            val okExit = TrackCatalog.isPointInPolygon(pp.exitX, pp.exitY, poly) &&
+                TrackCatalog.closestPointOnPolygon(pp.exitX, pp.exitY, poly).third >= 65f
+            if (!okEntry || !okExit) {
+                portalPair = null
+            }
+        }
+
+        val bannerMsg = when (stage) {
+            1 -> "SUDDEN DEATH! BARRIERS DROPPING — 30s FINALE!"
+            2 -> "SUDDEN DEATH WAVE 2! ARENA SHRINKING!"
+            else -> "FINAL CRUSH! 10 SECONDS LEFT!"
+        }
+        setBanner(bannerMsg, 2700L)
+    }
+
+    private fun repositionLooseFlagInsidePoly(poly: List<TrackPoint>) {
+        if (poly.size < 3) return
+        val cx = track.worldWidth * 0.5f
+        val cy = track.worldHeight * 0.5f
+        var fx = flagX
+        var fy = flagY
+        val inside = TrackCatalog.isPointInPolygon(fx, fy, poly)
+        val (bx, by, wallDist) = TrackCatalog.closestPointOnPolygon(fx, fy, poly)
+        if (!inside || wallDist < 72f) {
+            val d = hypot(cx - bx, cy - by).coerceAtLeast(1f)
+            val pull = 86f.coerceAtMost(d * 0.85f)
+            fx = bx + ((cx - bx) / d) * pull
+            fy = by + ((cy - by) / d) * pull
+        }
         for (prop in track.props) {
             if (prop.shape == PropShape.MUD_POOL) {
                 val dx = fx - prop.x
@@ -861,9 +1041,40 @@ class RacePhysicsEngine(
                 }
             }
         }
-
+        for (h in hazards) {
+            if (h.hazardTypeEnum == HazardType.BARRIER) {
+                val dx = fx - h.x
+                val dy = fy - h.y
+                val d = hypot(dx, dy)
+                if (d < h.radius + 36f) {
+                    val toCx = cx - h.x
+                    val toCy = cy - h.y
+                    val len = hypot(toCx, toCy).coerceAtLeast(1f)
+                    fx = h.x + (toCx / len) * (h.radius + 44f)
+                    fy = h.y + (toCy / len) * (h.radius + 44f)
+                }
+            }
+        }
         flagX = fx.coerceIn(140f, track.worldWidth - 140f)
         flagY = fy.coerceIn(120f, track.worldHeight - 120f)
+    }
+
+    private fun dropFlagFrom(racer: MutableRacer, reason: String) {
+        if (!isArenaMode || flagCarrierId != racer.playerId) return
+        flagCarrierId = null
+        racer.flagPickupImmunityMs = 650L
+
+        val dropAng = racer.angleRad + PI.toFloat() * 0.82f
+        flagX = racer.x + cos(dropAng) * 78f
+        flagY = racer.y + sin(dropAng) * 78f
+
+        val poly = currentArenaPolygon()
+        if (track.isArena && poly.size >= 3) {
+            repositionLooseFlagInsidePoly(poly)
+        } else {
+            flagX = flagX.coerceIn(140f, track.worldWidth - 140f)
+            flagY = flagY.coerceIn(120f, track.worldHeight - 120f)
+        }
         setBanner("${racer.name} $reason — FLAG DROPPED!", 2000L)
     }
 
@@ -1078,11 +1289,15 @@ class RacePhysicsEngine(
         racer.y += racer.vy * dt
 
         if (track.isArena) {
-            val poly = track.arenaBoundary.ifEmpty { track.centerline }
+            val poly = currentArenaPolygon()
             if (poly.size >= 3) {
                 val inside = TrackCatalog.isPointInPolygon(racer.x, racer.y, poly)
                 val (bx, by, wallDist) = TrackCatalog.closestPointOnPolygon(racer.x, racer.y, poly)
-                val wallMargin = if (rules.hardTrackBoundary) (racer.carType.radiusPx + 8f) else 4f
+                val wallMargin = if (rules.hardTrackBoundary || arenaSuddenDeathStage > 0) {
+                    racer.carType.radiusPx + 8f
+                } else {
+                    4f
+                }
                 if (!inside || wallDist < wallMargin) {
                     val rawDx = if (inside) (racer.x - bx) else (bx - racer.x)
                     val rawDy = if (inside) (racer.y - by) else (by - racer.y)
@@ -1534,7 +1749,63 @@ class RacePhysicsEngine(
         val it = hazards.iterator()
         while (it.hasNext()) {
             val h = it.next()
-            val isMine = h.hazardTypeEnum == HazardType.MINE
+            val hazType = h.hazardTypeEnum
+            if (hazType == HazardType.BARRIER) {
+                val dx = racer.x - h.x
+                val dy = racer.y - h.y
+                val dist = hypot(dx, dy)
+                val minDist = h.radius + racer.carType.radiusPx
+                if (dist < minDist) {
+                    val cx = track.worldWidth * 0.5f
+                    val cy = track.worldHeight * 0.5f
+                    val rawNx = if (dist > 0.05f) dx / dist else (cx - h.x) / hypot(cx - h.x, cy - h.y).coerceAtLeast(1f)
+                    val rawNy = if (dist > 0.05f) dy / dist else (cy - h.y) / hypot(cx - h.x, cy - h.y).coerceAtLeast(1f)
+                    // Bias push slightly toward arena center so cars bounce into the safe brawl zone
+                    val toCx = (cx - h.x) / hypot(cx - h.x, cy - h.y).coerceAtLeast(1f)
+                    val toCy = (cy - h.y) / hypot(cx - h.x, cy - h.y).coerceAtLeast(1f)
+                    val blendX = rawNx * 0.72f + toCx * 0.28f
+                    val blendY = rawNy * 0.72f + toCy * 0.28f
+                    val bLen = hypot(blendX, blendY).coerceAtLeast(0.01f)
+                    val nx = blendX / bLen
+                    val ny = blendY / bLen
+
+                    racer.x = h.x + nx * (minDist + 3f)
+                    racer.y = h.y + ny * (minDist + 3f)
+
+                    val vn = racer.vx * nx + racer.vy * ny
+                    if (vn < 80f) {
+                        racer.vx = (racer.vx - 1.55f * vn.coerceAtMost(0f) * nx) * 0.84f + nx * 95f
+                        racer.vy = (racer.vy - 1.55f * vn.coerceAtMost(0f) * ny) * 0.84f + ny * 95f
+                    }
+                    if (racer.wallBumpCooldownMs == 0L) {
+                        racer.wallBumpCooldownMs = 320L
+                        racer.collisionSeq += 1
+                        explosions.add(
+                            TrackExplosion(
+                                id = nextExplosionId++,
+                                x = h.x,
+                                y = h.y,
+                                ageMs = 0L,
+                                durationMs = 420L
+                            )
+                        )
+                        if (racer.shieldMs == 0L &&
+                            racer.overdriveMs == 0L &&
+                            racer.stunnedMs == 0L &&
+                            racer.spinImmunityMs == 0L
+                        ) {
+                            racer.stunnedMs = 800L
+                            racer.spinImmunityMs = 2400L
+                            if (flagCarrierId == racer.playerId) {
+                                dropFlagFrom(racer, "clipped a Sudden Death barrier")
+                            }
+                        }
+                    }
+                }
+                continue
+            }
+
+            val isMine = hazType == HazardType.MINE
             val selfGraceCutoff = if (isMine) 43800L else 9800L
             if (h.ownerId == racer.playerId && h.remainingMs > selfGraceCutoff) continue
 
@@ -1822,20 +2093,21 @@ class RacePhysicsEngine(
         var targetX: Float
         var targetY: Float
 
+        val shrinkScale = TrackCatalog.arenaShrinkScaleForStage(arenaSuddenDeathStage)
         if (carrierId == racer.playerId) {
             val radFromCenter = atan2(racer.y - cy, racer.x - cx)
             val orbitAng = radFromCenter + 0.65f
-            targetX = cx + cos(orbitAng) * 320f
-            targetY = cy + sin(orbitAng) * 235f
+            targetX = cx + cos(orbitAng) * (320f * shrinkScale)
+            targetY = cy + sin(orbitAng) * (235f * shrinkScale)
 
             val chaser = racers
                 .filter { it.playerId != racer.playerId }
                 .minByOrNull { TrackCatalog.distance(racer.x, racer.y, it.x, it.y) }
             if (chaser != null) {
                 val d = TrackCatalog.distance(racer.x, racer.y, chaser.x, chaser.y)
-                if (d < 260f && d > 1f) {
-                    targetX += ((racer.x - chaser.x) / d) * 180f
-                    targetY += ((racer.y - chaser.y) / d) * 180f
+                if (d < 260f * shrinkScale && d > 1f) {
+                    targetX += ((racer.x - chaser.x) / d) * (180f * shrinkScale)
+                    targetY += ((racer.y - chaser.y) / d) * (180f * shrinkScale)
                 }
             }
         } else if (carrierId != null) {
@@ -1869,6 +2141,16 @@ class RacePhysicsEngine(
             }
         }
 
+        for (h in hazards) {
+            if (h.hazardTypeEnum == HazardType.BARRIER) {
+                val d = TrackCatalog.distance(racer.x, racer.y, h.x, h.y)
+                if (d < h.radius + 82f && d > 1f) {
+                    targetX += ((racer.x - h.x) / d) * 145f
+                    targetY += ((racer.y - h.y) / d) * 145f
+                }
+            }
+        }
+
         val desiredAngle = atan2(targetY - racer.y, targetX - racer.x)
         val angleDiff = normalizeAngle(desiredAngle - racer.angleRad)
         val steer = (angleDiff / 0.6f).coerceIn(-1f, 1f)
@@ -1889,6 +2171,11 @@ class RacePhysicsEngine(
         val graceRem = firstHumanFinishTimeMs?.let { firstMs ->
             if (phase == RacePhase.RACING) (FINISH_GRACE_MS - (raceTimeMs - firstMs)).coerceAtLeast(0L) else 0L
         } ?: 0L
+        val suddenDeathRem = if (isArenaMode && arenaSuddenDeathStage > 0 && phase == RacePhase.RACING) {
+            (ARENA_SUDDEN_DEATH_END_MS - raceTimeMs).coerceAtLeast(0L)
+        } else {
+            0L
+        }
 
         return RaceSnapshot(
             raceTimeMs = raceTimeMs,
@@ -1962,12 +2249,18 @@ class RacePhysicsEngine(
             },
             fieldPickups = fieldPickups.toList(),
             portalPair = portalPair,
-            explosions = explosions.toList()
+            explosions = explosions.toList(),
+            arenaSuddenDeathStage = if (isArenaMode) arenaSuddenDeathStage else 0,
+            arenaSuddenDeathRemainingMs = suddenDeathRem
         )
     }
 
     companion object {
         const val FINISH_GRACE_MS = 20_000L
+        const val ARENA_SUDDEN_DEATH_START_MS = 120_000L
+        const val ARENA_SUDDEN_DEATH_WAVE_MS = 10_000L
+        const val ARENA_SUDDEN_DEATH_DURATION_MS = 30_000L
+        const val ARENA_SUDDEN_DEATH_END_MS = ARENA_SUDDEN_DEATH_START_MS + ARENA_SUDDEN_DEATH_DURATION_MS
         private const val MAX_FIELD_PICKUPS = 2
 
         fun normalizeAngle(angle: Float): Float {

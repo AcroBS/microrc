@@ -157,7 +157,9 @@ object RaceTelemetryCodec {
             .append(snap.arenaTargetMs).append(',')
             .append(flagCarrier).append(',')
             .append(String.format(Locale.US, "%.1f", flag?.x ?: 1100f)).append(',')
-            .append(String.format(Locale.US, "%.1f", flag?.y ?: 750f))
+            .append(String.format(Locale.US, "%.1f", flag?.y ?: 750f)).append(',')
+            .append(snap.arenaSuddenDeathStage).append(',')
+            .append(snap.arenaSuddenDeathRemainingMs)
         sb.append('|')
 
         // Rain puddles (index 12)
@@ -250,6 +252,8 @@ object RaceTelemetryCodec {
         val flagCarrierRaw = metaFields.getOrNull(10)?.ifEmpty { null }
         val flagX = metaFields.getOrNull(11)?.toFloatOrNull() ?: 1100f
         val flagY = metaFields.getOrNull(12)?.toFloatOrNull() ?: 750f
+        val suddenDeathStage = metaFields.getOrNull(13)?.toIntOrNull() ?: 0
+        val suddenDeathRemMs = metaFields.getOrNull(14)?.toLongOrNull() ?: 0L
 
         val rosterMap = roster.associateBy { it.id }
         val prevMap = previousSnapshot?.racers?.associateBy { it.playerId }.orEmpty()
@@ -354,7 +358,11 @@ object RaceTelemetryCodec {
                     ownerId = f[1],
                     x = f[2].toFloatOrNull() ?: 0f,
                     y = f[3].toFloatOrNull() ?: 0f,
-                    radius = if (hazType == HazardType.MINE.name) 30f else 32f,
+                    radius = when (hazType) {
+                        HazardType.MINE.name -> 30f
+                        HazardType.BARRIER.name -> 28f
+                        else -> 32f
+                    },
                     remainingMs = f[4].toLongOrNull() ?: 0L,
                     type = hazType
                 )
@@ -475,7 +483,9 @@ object RaceTelemetryCodec {
                 },
                 fieldPickups = fieldPickups,
                 portalPair = portalPair,
-                explosions = explosions
+                explosions = explosions,
+                arenaSuddenDeathStage = suddenDeathStage,
+                arenaSuddenDeathRemainingMs = suddenDeathRemMs
             )
         )
     }

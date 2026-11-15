@@ -16,6 +16,7 @@ import com.example.model.PlayerProfile
 import com.example.model.RaceRulesSettings
 import com.example.model.RaceSnapshot
 import com.example.model.RcCarType
+import com.example.model.RematchCountdownState
 import com.example.model.TrackDefinition
 import com.example.model.TrackId
 import com.example.network.RaceNavEvent
@@ -70,6 +71,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val lastResults: StateFlow<RaceSnapshot?> = raceManager.lastResults
     val activeTrack: StateFlow<TrackDefinition?> = raceManager.activeTrack
     val connectionError: StateFlow<String?> = raceManager.connectionError
+    val rematchState: StateFlow<RematchCountdownState?> = raceManager.rematchState
     val navEvents: SharedFlow<RaceNavEvent> = raceManager.navEvents
 
     private val _overviewCamera = MutableStateFlow(false)
@@ -208,6 +210,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleReady() = raceManager.toggleReady()
     fun sendChat(text: String) = raceManager.sendChatMessage(profile.value.name, text)
     fun startRace() = raceManager.startRace()
+    fun voteRematchOption(optionId: String) = raceManager.voteNextRematchTrack(optionId)
+    fun launchRematchNow() = raceManager.launchRematchNow()
     fun returnToLobby() = raceManager.returnToLobby()
     fun leaveSession() = raceManager.leaveSession()
     fun clearError() = raceManager.clearError()

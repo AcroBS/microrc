@@ -231,7 +231,26 @@ data class RaceSnapshot(
     val arenaFlag: ArenaFlagState? = null,
     val fieldPickups: List<TrackFieldPickup> = emptyList(),
     val portalPair: PortalPairState? = null,
-    val explosions: List<TrackExplosion> = emptyList()
+    val explosions: List<TrackExplosion> = emptyList(),
+    val arenaSuddenDeathStage: Int = 0,
+    val arenaSuddenDeathRemainingMs: Long = 0L
+)
+
+@JsonClass(generateAdapter = true)
+data class RematchVoteOption(
+    val id: String,
+    val displayName: String,
+    val subtitle: String,
+    val isRandom: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
+data class RematchCountdownState(
+    val secondsLeft: Int = 10,
+    val totalSeconds: Int = 10,
+    val options: List<RematchVoteOption> = emptyList(),
+    val votesByPlayerId: Map<String, String> = emptyMap(),
+    val leadingOptionId: String = "RANDOM"
 )
 
 @JsonClass(generateAdapter = true)
@@ -267,6 +286,8 @@ data class NetworkMessage(
     val rules: RaceRulesSettings? = null,
     val customTrack: CustomTrackData? = null,
     val ramps: List<TrackRamp>? = null,
+    val rematchState: RematchCountdownState? = null,
+    val voteOptionId: String? = null,
     val errorReason: String? = null
 )
 
@@ -283,4 +304,6 @@ object PacketType {
     const val RACE_SNAPSHOT = "race_snapshot"
     const val RACE_FINISHED = "race_finished"
     const val RETURN_TO_LOBBY = "return_to_lobby"
+    const val REMATCH_STATE = "rematch_state"
+    const val REMATCH_VOTE = "rematch_vote"
 }

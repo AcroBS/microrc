@@ -42,7 +42,8 @@ enum class PowerUpType(
 
 enum class HazardType {
     GLUE_SLICK,
-    MINE
+    MINE,
+    BARRIER
 }
 
 enum class FieldPickupType(

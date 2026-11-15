@@ -821,14 +821,37 @@ object TrackCatalog {
         return Triple(bestX, bestY, kotlin.math.sqrt(bestDistSq))
     }
 
+    fun arenaShrinkScaleForStage(stage: Int): Float = when {
+        stage <= 0 -> 1.0f
+        stage == 1 -> 0.78f
+        stage == 2 -> 0.60f
+        else -> 0.44f
+    }
+
+    fun scaledArenaPolygon(track: TrackDefinition, stage: Int): List<TrackPoint> {
+        val base = track.arenaBoundary.ifEmpty { track.centerline }
+        if (stage <= 0 || base.isEmpty()) return base
+        val scale = arenaShrinkScaleForStage(stage)
+        val cx = track.worldWidth * 0.5f
+        val cy = track.worldHeight * 0.5f
+        return base.map { pt ->
+            TrackPoint(
+                x = cx + (pt.x - cx) * scale,
+                y = cy + (pt.y - cy) * scale,
+                halfWidth = pt.halfWidth
+            )
+        }
+    }
+
     fun sampleArenaInteriorPoint(
         track: TrackDefinition,
         rng: Random,
         minWallClearance: Float = 130f,
         avoidPoints: List<Pair<Float, Float>> = emptyList(),
-        minAvoidDist: Float = 180f
+        minAvoidDist: Float = 180f,
+        boundaryOverride: List<TrackPoint>? = null
     ): Pair<Float, Float> {
-        val poly = track.arenaBoundary.ifEmpty { track.centerline }
+        val poly = boundaryOverride ?: track.arenaBoundary.ifEmpty { track.centerline }
         repeat(120) {
             val px = rng.nextFloat() * (track.worldWidth - 520f) + 260f
             val py = rng.nextFloat() * (track.worldHeight - 400f) + 200f
@@ -842,7 +865,7 @@ object TrackCatalog {
         }
         // Fallback: safe offset inside center
         val angle = rng.nextFloat() * (2f * PI.toFloat())
-        return (track.worldWidth / 2f + cos(angle) * 90f) to (track.worldHeight / 2f + sin(angle) * 70f)
+        return (track.worldWidth / 2f + cos(angle) * 65f) to (track.worldHeight / 2f + sin(angle) * 50f)
     }
 
     fun distance(x1: Float, y1: Float, x2: Float, y2: Float): Float = hypot(x2 - x1, y2 - y1)

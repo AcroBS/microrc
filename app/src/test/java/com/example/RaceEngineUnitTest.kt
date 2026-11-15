@@ -25,6 +25,7 @@ import com.example.model.WinCondition
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import com.example.network.RaceTelemetryCodec
+import com.example.network.WifiP2pRaceManager
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import org.junit.Assert.assertEquals
@@ -902,5 +903,194 @@ class RaceEngineUnitTest {
         assertEquals(2, decoded?.snapshot?.fieldPickups?.size)
         assertNotNull(decoded?.snapshot?.portalPair)
         assertEquals(true, decoded?.snapshot?.portalPair?.entryColorIsRed)
+    }
+
+    @Test
+    fun arenaSuddenDeath_dropsShrinkingBarriersEvery10sAt2MinAndEnds30sFinale() {
+        val arena = TrackCatalog.getArenaTrack(ArenaShape.SQUARE).copy(
+            ramps = emptyList(),
+            props = emptyList(),
+            itemSpawns = emptyList()
+        )
+        val players = listOf(
+            LobbyPlayer("p1", "Alpha", isHost = true, isBot = false, carType = RcCarType.VOLT_BUGGY.name),
+            LobbyPlayer("p2", "Bravo", isHost = false, isBot = false, carType = RcCarType.APEX_FORMULA.name)
+        )
+        val rules = RaceRulesSettings(
+            gameMode = GameMode.ARENA.name,
+            arenaTargetMinutes = 3, // 180s target so 2:00 Sudden Death triggers when nobody hits limit
+            autoAccelerate = false,
+            hardTrackBoundary = true,
+            randomConditionsEnabled = false
+        )
+        val engine = RacePhysicsEngine(
+            track = arena,
+            totalLaps = 3,
+            players = players,
+            rules = rules,
+            random = Random(2026L)
+        )
+
+        // Advance past 3.2s countdown
+        var snap = engine.step(0.05f)
+        while (snap.phase == RacePhase.COUNTDOWN.name) {
+            snap = engine.step(0.05f)
+        }
+        assertEquals(RacePhase.RACING.name, snap.phase)
+
+        // Give p1 a slight flag carry lead (~2s), then drop loose flag near outer edge so nobody hits 3:00 target
+        val p1Init = snap.racers.first { it.playerId == "p1" }
+        engine.setFlagStateForTest(p1Init.x, p1Init.y, carrierId = "p1")
+        repeat(40) { snap = engine.step(0.05f) }
+        engine.setFlagStateForTest(arena.worldWidth * 0.84f, arena.worldHeight * 0.84f, carrierId = null)
+
+        // Advance just shy of 2:00 (119.5s) -> Sudden Death must still be inactive
+        while (snap.raceTimeMs < 119_500L) {
+            snap = engine.step(0.05f)
+        }
+        assertEquals(0, snap.arenaSuddenDeathStage)
+        assertTrue(snap.hazards.none { it.hazardTypeEnum == HazardType.BARRIER })
+
+        // Cross 2:00 (120,000ms) -> Wave 1 triggers and drops perimeter hazard barriers
+        while (snap.raceTimeMs < 120_200L) {
+            snap = engine.step(0.05f)
+        }
+        assertEquals("Wave 1 should activate at 2:00", 1, snap.arenaSuddenDeathStage)
+        val wave1Barriers = snap.hazards.count { it.hazardTypeEnum == HazardType.BARRIER }
+        assertTrue("Wave 1 must drop hazard barriers ($wave1Barriers > 0)", wave1Barriers >= 8)
+        assertTrue("Remaining finale clock should be ~29-30s", snap.arenaSuddenDeathRemainingMs in 28_000L..30_000L)
+
+        // Verify UDP telemetry codec round-trips Sudden Death stage, timer, and BARRIER hazards
+        val encoded = RaceTelemetryCodec.encodeSnapshot(seq = 500L, snap = snap)
+        val decoded = RaceTelemetryCodec.decodeSnapshot(
+            text = String(encoded, Charsets.UTF_8),
+            roster = players,
+            previousSnapshot = null,
+            activeTrack = arena
+        )
+        assertNotNull(decoded)
+        assertEquals(1, decoded?.snapshot?.arenaSuddenDeathStage)
+        assertEquals(snap.arenaSuddenDeathRemainingMs, decoded?.snapshot?.arenaSuddenDeathRemainingMs)
+        assertEquals(
+            wave1Barriers,
+            decoded?.snapshot?.hazards?.count { it.hazardTypeEnum == HazardType.BARRIER }
+        )
+
+        val cx = arena.worldWidth * 0.5f
+        val cy = arena.worldHeight * 0.5f
+        fun avgBarrierRadiusFromCenter(s: com.example.model.RaceSnapshot): Float {
+            val bs = s.hazards.filter { it.hazardTypeEnum == HazardType.BARRIER }
+            return bs.map { TrackCatalog.distance(it.x, it.y, cx, cy) }.average().toFloat()
+        }
+        val wave1AvgRadius = avgBarrierRadiusFromCenter(snap)
+
+        // Cross 2:10 (130,000ms) -> Wave 2 drops further inward barriers
+        while (snap.raceTimeMs < 130_200L) {
+            snap = engine.step(0.05f)
+        }
+        assertEquals("Wave 2 should activate at 2:10", 2, snap.arenaSuddenDeathStage)
+        val wave2Barriers = snap.hazards.count { it.hazardTypeEnum == HazardType.BARRIER }
+        val wave2AvgRadius = avgBarrierRadiusFromCenter(snap)
+        assertTrue("Wave 2 must have active hazard barriers ($wave2Barriers >= 10)", wave2Barriers >= 10)
+        assertTrue(
+            "Wave 2 barriers ($wave2AvgRadius) must drop further inward than Wave 1 ($wave1AvgRadius)",
+            wave2AvgRadius < wave1AvgRadius - 60f
+        )
+
+        // Cross 2:20 (140,000ms) -> Wave 3 drops tightest finale barriers and pushes loose flag inward
+        while (snap.raceTimeMs < 140_200L) {
+            snap = engine.step(0.05f)
+        }
+        assertEquals("Wave 3 should activate at 2:20", 3, snap.arenaSuddenDeathStage)
+        val wave3Barriers = snap.hazards.count { it.hazardTypeEnum == HazardType.BARRIER }
+        val wave3AvgRadius = avgBarrierRadiusFromCenter(snap)
+        assertTrue("Wave 3 must have active hazard barriers ($wave3Barriers >= 10)", wave3Barriers >= 10)
+        assertTrue(
+            "Wave 3 barriers ($wave3AvgRadius) must drop further inward than Wave 2 ($wave2AvgRadius)",
+            wave3AvgRadius < wave2AvgRadius - 60f
+        )
+        val stage3Poly = TrackCatalog.scaledArenaPolygon(arena, 3)
+        val flagAfterShrink = snap.arenaFlag
+        assertNotNull(flagAfterShrink)
+        assertTrue(
+            "Loose flag must be shoved inside shrunken Wave 3 safe zone",
+            TrackCatalog.isPointInPolygon(flagAfterShrink!!.x, flagAfterShrink.y, stage3Poly)
+        )
+        snap.racers.forEach { r ->
+            assertTrue(
+                "Racer ${r.playerId} must be inside Wave 3 safe zone",
+                TrackCatalog.isPointInPolygon(r.x, r.y, stage3Poly)
+            )
+        }
+
+        // Cross 2:30 (150,000ms) -> 30-second Sudden Death finale concludes and crowns p1
+        while (snap.phase != RacePhase.FINISHED.name && snap.raceTimeMs < 152_000L) {
+            snap = engine.step(0.05f)
+        }
+        assertEquals("Sudden Death 30s finale must end match at 2:30", RacePhase.FINISHED.name, snap.phase)
+        assertEquals("p1", snap.racers.first { it.rank == 1 }.playerId)
+    }
+
+    @Test
+    fun rematchVoting_buildsNonRepeatingOptionsAndResolvesVotedOrRandomWinner() {
+        val raceOpts = WifiP2pRaceManager.buildRematchVoteOptions(
+            gameMode = GameMode.RACE,
+            currentTrackId = TrackId.LIVING_ROOM_GP,
+            currentArenaShape = ArenaShape.SQUARE,
+            random = Random(11L)
+        )
+        assertEquals(3, raceOpts.size)
+        assertFalse("Current circuit should not be offered as a repeat vote option", raceOpts.any { it.id == TrackId.LIVING_ROOM_GP.name })
+        assertTrue("Random option must be included", raceOpts.any { it.id == WifiP2pRaceManager.REMATCH_OPTION_RANDOM && it.isRandom })
+
+        val arenaOpts = WifiP2pRaceManager.buildRematchVoteOptions(
+            gameMode = GameMode.ARENA,
+            currentTrackId = TrackId.WAREHOUSE_DRIFT,
+            currentArenaShape = ArenaShape.HEXAGON,
+            random = Random(22L)
+        )
+        assertEquals(3, arenaOpts.size)
+        assertFalse("Current arena should not be offered as a repeat vote option", arenaOpts.any { it.id == ArenaShape.HEXAGON.name })
+        assertTrue(arenaOpts.last().isRandom)
+
+        // With zero votes, default winner is RANDOM
+        assertEquals(
+            WifiP2pRaceManager.REMATCH_OPTION_RANDOM,
+            WifiP2pRaceManager.computeLeadingRematchOption(raceOpts, emptyMap())
+        )
+        assertEquals(
+            WifiP2pRaceManager.REMATCH_OPTION_RANDOM,
+            WifiP2pRaceManager.resolveRematchWinner(raceOpts, emptyMap(), Random(1L))
+        )
+
+        // Majority vote selects the voted track
+        val votedTrackId = raceOpts[0].id
+        val otherTrackId = raceOpts[1].id
+        val votes = mapOf(
+            "p1" to votedTrackId,
+            "p2" to votedTrackId,
+            "p3" to otherTrackId
+        )
+        assertEquals(votedTrackId, WifiP2pRaceManager.computeLeadingRematchOption(raceOpts, votes))
+        assertEquals(votedTrackId, WifiP2pRaceManager.resolveRematchWinner(raceOpts, votes, Random(5L)))
+
+        // Moshi serialization round-trip for REMATCH_STATE packet
+        val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
+        val adapter = moshi.adapter(NetworkMessage::class.java)
+        val packet = NetworkMessage(
+            type = PacketType.REMATCH_STATE,
+            senderId = "host_1",
+            rematchState = com.example.model.RematchCountdownState(
+                secondsLeft = 7,
+                totalSeconds = 10,
+                options = raceOpts,
+                votesByPlayerId = votes,
+                leadingOptionId = votedTrackId
+            )
+        )
+        val decodedPacket = adapter.fromJson(adapter.toJson(packet))
+        assertEquals(7, decodedPacket?.rematchState?.secondsLeft)
+        assertEquals(votedTrackId, decodedPacket?.rematchState?.leadingOptionId)
+        assertEquals(3, decodedPacket?.rematchState?.options?.size)
     }
 }

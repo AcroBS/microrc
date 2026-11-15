@@ -8,6 +8,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -17,6 +18,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
+import com.example.data.TrackCatalog
 import com.example.model.ArenaFlagState
 import com.example.model.ExternalEventType
 import com.example.model.FieldPickupType
@@ -58,7 +60,8 @@ fun DrawScope.drawTrackWorld(
     arenaFlag: ArenaFlagState? = null,
     fieldPickups: List<TrackFieldPickup> = emptyList(),
     portalPair: PortalPairState? = null,
-    explosions: List<TrackExplosion> = emptyList()
+    explosions: List<TrackExplosion> = emptyList(),
+    arenaSuddenDeathStage: Int = 0
 ) {
     // 1. Background floor
     drawRect(
@@ -152,6 +155,70 @@ fun DrawScope.drawTrackWorld(
             end = Offset(cx, cy + 170f),
             strokeWidth = 3f
         )
+
+        // Sudden Death Shrinking Arena collapsed danger zone & inward barrier rings
+        if (arenaSuddenDeathStage > 0) {
+            val activePts = TrackCatalog.scaledArenaPolygon(track, arenaSuddenDeathStage)
+            if (activePts.size >= 3) {
+                val activeRingPath = Path().apply {
+                    moveTo(activePts[0].x, activePts[0].y)
+                    for (i in 1 until activePts.size) {
+                        lineTo(activePts[i].x, activePts[i].y)
+                    }
+                    close()
+                }
+                val collapsedZonePath = Path.combine(PathOperation.Difference, roadPath, activeRingPath)
+                val dangerPulse = 0.5f + 0.5f * sin(animTimeSec * 9f)
+                drawPath(
+                    path = collapsedZonePath,
+                    color = Color(0xFFD50000).copy(alpha = 0.26f + 0.14f * dangerPulse)
+                )
+
+                // Ghost outlines for previous inward waves so each 10s step is visible
+                for (prevStage in 1 until arenaSuddenDeathStage) {
+                    val prevPts = TrackCatalog.scaledArenaPolygon(track, prevStage)
+                    if (prevPts.size >= 3) {
+                        val prevPath = Path().apply {
+                            moveTo(prevPts[0].x, prevPts[0].y)
+                            for (i in 1 until prevPts.size) {
+                                lineTo(prevPts[i].x, prevPts[i].y)
+                            }
+                            close()
+                        }
+                        drawPath(
+                            path = prevPath,
+                            color = Color(0xFFFF5252).copy(alpha = 0.42f),
+                            style = Stroke(
+                                width = 6f,
+                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(22f, 18f), 0f)
+                            )
+                        )
+                    }
+                }
+
+                // Active Sudden Death hazard perimeter guardrail
+                drawPath(
+                    path = activeRingPath,
+                    color = Color(0xFF141820),
+                    style = Stroke(width = 22f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                )
+                drawPath(
+                    path = activeRingPath,
+                    color = Color(0xFFFF1744).copy(alpha = 0.85f + 0.15f * dangerPulse),
+                    style = Stroke(width = 16f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                )
+                drawPath(
+                    path = activeRingPath,
+                    color = Color(0xFFFFEA00),
+                    style = Stroke(
+                        width = 14f,
+                        cap = StrokeCap.Butt,
+                        join = StrokeJoin.Round,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(28f, 28f), animTimeSec * 56f)
+                    )
+                )
+            }
+        }
     } else {
         val avgHalfW = pts[0].halfWidth
         val roadWidth = avgHalfW * 2f
@@ -435,52 +502,106 @@ fun DrawScope.drawTrackWorld(
         )
     }
 
-    // 7. Dropped Glue Slicks & Flashing Red Mines
+    // 7. Dropped Glue Slicks, Flashing Red Mines & Sudden Death Hazard Barriers
     for (h in hazards) {
-        if (h.hazardTypeEnum == HazardType.MINE) {
-            val fastBlink = 0.5f + 0.5f * sin(animTimeSec * 16f + h.id * 1.3f)
-            val sharpFlash = fastBlink > 0.42f
-            // Pulsing red danger halo on asphalt
-            drawCircle(
-                color = Color(0xFFFF1744).copy(alpha = 0.16f + 0.28f * fastBlink),
-                radius = h.radius * (1.15f + 0.18f * fastBlink),
-                center = Offset(h.x, h.y)
-            )
-            drawCircle(
-                color = Color(0xFFFF1744).copy(alpha = 0.72f),
-                radius = h.radius,
-                center = Offset(h.x, h.y),
-                style = Stroke(width = 2.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), animTimeSec * 24f))
-            )
-            // Heavy metallic mine casing
-            drawCircle(Color.Black.copy(alpha = 0.5f), h.radius * 0.72f, Offset(h.x + 3f, h.y + 4f))
-            drawCircle(Color(0xFF1B222E), h.radius * 0.70f, Offset(h.x, h.y))
-            drawCircle(Color(0xFF455A64), h.radius * 0.70f, Offset(h.x, h.y), style = Stroke(width = 3f))
-            for (lug in 0 until 6) {
-                val ang = lug * (PI.toFloat() / 3f)
+        when (h.hazardTypeEnum) {
+            HazardType.BARRIER -> {
+                val strobe = 0.5f + 0.5f * sin(animTimeSec * 12f + h.id * 0.9f)
+                val r = h.radius
+                // Danger ground aura
                 drawCircle(
-                    color = Color(0xFF90A4AE),
-                    radius = 2.6f,
-                    center = Offset(h.x + cos(ang) * (h.radius * 0.52f), h.y + sin(ang) * (h.radius * 0.52f))
+                    color = Color(0xFFFF1744).copy(alpha = 0.20f + 0.20f * strobe),
+                    radius = r * 1.24f,
+                    center = Offset(h.x, h.y)
+                )
+                // Drop shadow + heavy octagonal/rounded steel block
+                drawRoundRect(
+                    color = Color.Black.copy(alpha = 0.52f),
+                    topLeft = Offset(h.x - r + 4f, h.y - r + 5f),
+                    size = Size(r * 2f, r * 2f),
+                    cornerRadius = CornerRadius(10f, 10f)
+                )
+                drawRoundRect(
+                    color = Color(0xFF1A202C),
+                    topLeft = Offset(h.x - r, h.y - r),
+                    size = Size(r * 2f, r * 2f),
+                    cornerRadius = CornerRadius(10f, 10f)
+                )
+                // Caution yellow-and-red diagonal hazard bars
+                drawLine(
+                    color = Color(0xFFFFEA00),
+                    start = Offset(h.x - r * 0.62f, h.y - r * 0.62f),
+                    end = Offset(h.x + r * 0.62f, h.y + r * 0.62f),
+                    strokeWidth = 5.5f,
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    color = Color(0xFFFFEA00),
+                    start = Offset(h.x + r * 0.62f, h.y - r * 0.62f),
+                    end = Offset(h.x - r * 0.62f, h.y + r * 0.62f),
+                    strokeWidth = 5.5f,
+                    cap = StrokeCap.Round
+                )
+                drawRoundRect(
+                    color = if (strobe > 0.45f) Color(0xFFFF1744) else Color(0xFFFFAB00),
+                    topLeft = Offset(h.x - r, h.y - r),
+                    size = Size(r * 2f, r * 2f),
+                    cornerRadius = CornerRadius(10f, 10f),
+                    style = Stroke(width = 3.8f)
+                )
+                // Center warning strobe
+                drawCircle(
+                    color = if (strobe > 0.45f) Color(0xFFFF1744) else Color(0xFF7F0019),
+                    radius = r * 0.30f,
+                    center = Offset(h.x, h.y)
                 )
             }
-            // Flashing bright red core LED
-            drawCircle(
-                color = if (sharpFlash) Color(0xFFFF1744) else Color(0xFF5D0011),
-                radius = h.radius * 0.34f,
-                center = Offset(h.x, h.y)
-            )
-            if (sharpFlash) {
+            HazardType.MINE -> {
+                val fastBlink = 0.5f + 0.5f * sin(animTimeSec * 16f + h.id * 1.3f)
+                val sharpFlash = fastBlink > 0.42f
+                // Pulsing red danger halo on asphalt
                 drawCircle(
-                    color = Color(0xFFFFCDD2),
-                    radius = h.radius * 0.15f,
-                    center = Offset(h.x - 2f, h.y - 2f)
+                    color = Color(0xFFFF1744).copy(alpha = 0.16f + 0.28f * fastBlink),
+                    radius = h.radius * (1.15f + 0.18f * fastBlink),
+                    center = Offset(h.x, h.y)
                 )
+                drawCircle(
+                    color = Color(0xFFFF1744).copy(alpha = 0.72f),
+                    radius = h.radius,
+                    center = Offset(h.x, h.y),
+                    style = Stroke(width = 2.5f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), animTimeSec * 24f))
+                )
+                // Heavy metallic mine casing
+                drawCircle(Color.Black.copy(alpha = 0.5f), h.radius * 0.72f, Offset(h.x + 3f, h.y + 4f))
+                drawCircle(Color(0xFF1B222E), h.radius * 0.70f, Offset(h.x, h.y))
+                drawCircle(Color(0xFF455A64), h.radius * 0.70f, Offset(h.x, h.y), style = Stroke(width = 3f))
+                for (lug in 0 until 6) {
+                    val ang = lug * (PI.toFloat() / 3f)
+                    drawCircle(
+                        color = Color(0xFF90A4AE),
+                        radius = 2.6f,
+                        center = Offset(h.x + cos(ang) * (h.radius * 0.52f), h.y + sin(ang) * (h.radius * 0.52f))
+                    )
+                }
+                // Flashing bright red core LED
+                drawCircle(
+                    color = if (sharpFlash) Color(0xFFFF1744) else Color(0xFF5D0011),
+                    radius = h.radius * 0.34f,
+                    center = Offset(h.x, h.y)
+                )
+                if (sharpFlash) {
+                    drawCircle(
+                        color = Color(0xFFFFCDD2),
+                        radius = h.radius * 0.15f,
+                        center = Offset(h.x - 2f, h.y - 2f)
+                    )
+                }
             }
-        } else {
-            drawCircle(Color(0xFFFFD54F).copy(alpha = 0.8f), h.radius, Offset(h.x, h.y))
-            drawCircle(Color(0xFFFF8F00), h.radius * 0.65f, Offset(h.x + 4f, h.y - 3f))
-            drawCircle(Color(0xFFFFECB3), h.radius * 0.25f, Offset(h.x - 7f, h.y + 5f))
+            HazardType.GLUE_SLICK -> {
+                drawCircle(Color(0xFFFFD54F).copy(alpha = 0.8f), h.radius, Offset(h.x, h.y))
+                drawCircle(Color(0xFFFF8F00), h.radius * 0.65f, Offset(h.x + 4f, h.y - 3f))
+                drawCircle(Color(0xFFFFECB3), h.radius * 0.25f, Offset(h.x - 7f, h.y + 5f))
+            }
         }
     }
 
@@ -903,7 +1024,8 @@ fun DrawScope.drawTrackMiniMap(
     racers: List<RacerState> = emptyList(),
     localPlayerId: String? = null,
     arenaFlag: ArenaFlagState? = null,
-    portalPair: PortalPairState? = null
+    portalPair: PortalPairState? = null,
+    arenaSuddenDeathStage: Int = 0
 ) {
     val pad = 8.dp.toPx()
     val availW = (size.width - pad * 2f).coerceAtLeast(1f)
@@ -930,9 +1052,30 @@ fun DrawScope.drawTrackMiniMap(
         )
         drawPath(
             path = path,
-            color = Color(track.id.kerbPrimaryHex),
+            color = if (arenaSuddenDeathStage > 0) {
+                Color(0xFFD50000).copy(alpha = 0.55f)
+            } else {
+                Color(track.id.kerbPrimaryHex)
+            },
             style = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
+        if (arenaSuddenDeathStage > 0) {
+            val activePts = TrackCatalog.scaledArenaPolygon(track, arenaSuddenDeathStage)
+            if (activePts.size >= 3) {
+                val safePath = Path().apply {
+                    moveTo(offsetX + activePts[0].x * scale, offsetY + activePts[0].y * scale)
+                    for (i in 1 until activePts.size) {
+                        lineTo(offsetX + activePts[i].x * scale, offsetY + activePts[i].y * scale)
+                    }
+                    close()
+                }
+                drawPath(
+                    path = safePath,
+                    color = Color(0xFFFF1744),
+                    style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                )
+            }
+        }
     } else {
         drawPath(
             path = path,

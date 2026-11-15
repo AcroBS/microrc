@@ -76,6 +76,7 @@ fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
     val lastResults by viewModel.lastResults.collectAsState()
     val activeTrack by viewModel.activeTrack.collectAsState()
     val connectionError by viewModel.connectionError.collectAsState()
+    val rematchState by viewModel.rematchState.collectAsState()
     val overviewCamera by viewModel.overviewCamera.collectAsState()
 
     val effectiveRules = lobbyState?.rules ?: rules
@@ -91,6 +92,7 @@ fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
                 }
                 is RaceNavEvent.StartRace -> {
                     navController.navigate(Routes.RACE) {
+                        popUpTo(Routes.LOBBY) { inclusive = false }
                         launchSingleTop = true
                     }
                 }
@@ -254,6 +256,9 @@ fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
                 localPlayerId = profile.playerId,
                 results = lastResults ?: raceSnapshot,
                 lobby = lobbyState,
+                rematchState = rematchState,
+                onVoteRematch = viewModel::voteRematchOption,
+                onLaunchRematchNow = viewModel::launchRematchNow,
                 onReturnToLobby = viewModel::returnToLobby,
                 onExitHome = {
                     viewModel.leaveSession()

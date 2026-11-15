@@ -21,6 +21,8 @@ import com.example.model.RaceRulesSettings
 import com.example.model.RaceSnapshot
 import com.example.model.RcCarType
 import com.example.model.RcColorPresets
+import com.example.model.RematchCountdownState
+import com.example.model.RematchVoteOption
 import com.example.model.TrackDefinition
 import com.example.model.TrackId
 import com.squareup.moshi.Moshi
@@ -55,6 +57,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
+import kotlin.random.Random
 
 sealed interface SessionRole {
     data object None : SessionRole
@@ -77,6 +80,96 @@ class WifiP2pRaceManager(
 ) {
     companion object {
         const val DEFAULT_TCP_PORT = 45456
+        const val REMATCH_COUNTDOWN_SECONDS = 10
+        const val REMATCH_OPTION_RANDOM = "RANDOM"
+
+        fun buildRematchVoteOptions(
+            gameMode: GameMode,
+            currentTrackId: TrackId,
+            currentArenaShape: ArenaShape,
+            hasActiveCustomTrack: Boolean = false,
+            random: Random = Random.Default
+        ): List<RematchVoteOption> {
+            return if (gameMode == GameMode.ARENA) {
+                val candidates = ArenaShape.entries
+                    .filter { it != currentArenaShape }
+                    .shuffled(random)
+                    .take(2)
+                    .map { shape ->
+                        RematchVoteOption(
+                            id = shape.name,
+                            displayName = shape.displayName,
+                            subtitle = "${shape.shapeLabel} Arena",
+                            isRandom = false
+                        )
+                    }
+                candidates + RematchVoteOption(
+                    id = REMATCH_OPTION_RANDOM,
+                    displayName = "Random Arena",
+                    subtitle = "Surprise battleground",
+                    isRandom = true
+                )
+            } else {
+                val pool = if (hasActiveCustomTrack) {
+                    TrackId.entries.toList()
+                } else {
+                    TrackId.entries.filter { it != currentTrackId }
+                }
+                val candidates = pool
+                    .shuffled(random)
+                    .take(2)
+                    .map { track ->
+                        RematchVoteOption(
+                            id = track.name,
+                            displayName = track.displayName,
+                            subtitle = "${track.surfaceLabel} • ${track.difficulty}",
+                            isRandom = false
+                        )
+                    }
+                candidates + RematchVoteOption(
+                    id = REMATCH_OPTION_RANDOM,
+                    displayName = "Random Circuit",
+                    subtitle = "Mystery circuit or generated layout",
+                    isRandom = true
+                )
+            }
+        }
+
+        fun computeLeadingRematchOption(
+            options: List<RematchVoteOption>,
+            votesByPlayerId: Map<String, String>
+        ): String {
+            val validIds = options.map { it.id }.toSet()
+            val counts = votesByPlayerId.values
+                .filter { it in validIds }
+                .groupingBy { it }
+                .eachCount()
+            if (counts.isEmpty()) return REMATCH_OPTION_RANDOM
+            val maxCount = counts.values.maxOrNull() ?: return REMATCH_OPTION_RANDOM
+            val tied = options.map { it.id }.filter { counts[it] == maxCount }
+            return if (REMATCH_OPTION_RANDOM in tied) {
+                REMATCH_OPTION_RANDOM
+            } else {
+                tied.firstOrNull() ?: REMATCH_OPTION_RANDOM
+            }
+        }
+
+        fun resolveRematchWinner(
+            options: List<RematchVoteOption>,
+            votesByPlayerId: Map<String, String>,
+            random: Random = Random.Default
+        ): String {
+            val validIds = options.map { it.id }.toSet()
+            val counts = votesByPlayerId.values
+                .filter { it in validIds }
+                .groupingBy { it }
+                .eachCount()
+            if (counts.isEmpty()) return REMATCH_OPTION_RANDOM
+            val maxCount = counts.values.maxOrNull() ?: return REMATCH_OPTION_RANDOM
+            val tied = options.map { it.id }.filter { counts[it] == maxCount }
+            if (tied.isEmpty()) return REMATCH_OPTION_RANDOM
+            return tied[random.nextInt(tied.size)]
+        }
     }
 
     val discovery = LocalNetworkDiscovery(context)
@@ -101,6 +194,9 @@ class WifiP2pRaceManager(
 
     private val _connectionError = MutableStateFlow<String?>(null)
     val connectionError: StateFlow<String?> = _connectionError.asStateFlow()
+
+    private val _rematchState = MutableStateFlow<RematchCountdownState?>(null)
+    val rematchState: StateFlow<RematchCountdownState?> = _rematchState.asStateFlow()
 
     private val _navEvents = MutableSharedFlow<RaceNavEvent>(extraBufferCapacity = 8)
     val navEvents: SharedFlow<RaceNavEvent> = _navEvents.asSharedFlow()
@@ -161,6 +257,10 @@ class WifiP2pRaceManager(
     private var tcpPort: Int = DEFAULT_TCP_PORT
     private var physicsEngine: RacePhysicsEngine? = null
     private var pointsAwardedForCurrentRace = false
+    private var rematchJob: Job? = null
+    private var rematchOptions: List<RematchVoteOption> = emptyList()
+    private val rematchVotes = ConcurrentHashMap<String, String>()
+    @Volatile private var rematchSecondsLeft: Int = REMATCH_COUNTDOWN_SECONDS
 
     fun clearError() {
         _connectionError.value = null
@@ -449,6 +549,7 @@ class WifiP2pRaceManager(
                                     )
                                 }
                                 PacketType.RACE_START -> {
+                                    _rematchState.value = null
                                     lastReceivedUdpStateSeq = -1L
                                     clientFinishEmitted.set(false)
                                     msg.rules?.let { r ->
@@ -490,7 +591,11 @@ class WifiP2pRaceManager(
                                         _raceSnapshot.value = snap
                                     }
                                 }
+                                PacketType.REMATCH_STATE -> {
+                                    _rematchState.value = msg.rematchState
+                                }
                                 PacketType.RETURN_TO_LOBBY -> {
+                                    _rematchState.value = null
                                     clientUdpSendJob?.cancel()
                                     msg.lobbyState?.let { _lobbyState.value = it }
                                     _navEvents.tryEmit(RaceNavEvent.BackToLobby)
@@ -660,6 +765,7 @@ class WifiP2pRaceManager(
                 val cid = registeredClient?.playerId
                 if (cid != null) {
                     connectedClients.remove(cid)
+                    val hadVote = rematchVotes.remove(cid) != null
                     var removedName: String? = null
                     synchronized(playersList) {
                         val existing = playersList.find { it.id == cid }
@@ -669,6 +775,9 @@ class WifiP2pRaceManager(
                     if (removedName != null) {
                         addSystemChat("$removedName disconnected.")
                         broadcastLobbyState()
+                    }
+                    if (hadVote && _rematchState.value != null) {
+                        publishAndBroadcastRematchState()
                     }
                 }
                 registeredClient?.writerJob?.cancel()
@@ -714,6 +823,13 @@ class WifiP2pRaceManager(
             PacketType.CONTROL_INPUT -> {
                 val input = msg.controlInput ?: return
                 physicsEngine?.submitInput(clientId, input)
+            }
+            PacketType.REMATCH_VOTE -> {
+                val optId = msg.voteOptionId ?: return
+                if (_rematchState.value != null && rematchOptions.any { it.id == optId }) {
+                    rematchVotes[clientId] = optId
+                    publishAndBroadcastRematchState()
+                }
             }
         }
     }
@@ -904,6 +1020,7 @@ class WifiP2pRaceManager(
         val snapshotPlayers = synchronized(playersList) { playersList.toList() }
         if (snapshotPlayers.isEmpty()) return
 
+        cancelRematchCountdown()
         inRace = true
         pointsAwardedForCurrentRace = false
         hostStateSeq.set(0L)
@@ -988,8 +1105,9 @@ class WifiP2pRaceManager(
                             )
                         )
                     }
-                    _navEvents.tryEmit(RaceNavEvent.ShowResults)
                     inRace = false
+                    _navEvents.tryEmit(RaceNavEvent.ShowResults)
+                    startRematchCountdown()
                     break
                 } else if (_role.value == SessionRole.Host) {
                     // Send ultra-compact 60Hz UDP state to clients that registered UDP,
@@ -1101,7 +1219,150 @@ class WifiP2pRaceManager(
         }
     }
 
+    private fun cancelRematchCountdown() {
+        rematchJob?.cancel()
+        rematchJob = null
+        rematchVotes.clear()
+        rematchOptions = emptyList()
+        _rematchState.value = null
+    }
+
+    private fun publishAndBroadcastRematchState() {
+        val opts = rematchOptions
+        if (opts.isEmpty()) return
+        val votesMap = rematchVotes.toMap()
+        val state = RematchCountdownState(
+            secondsLeft = rematchSecondsLeft,
+            totalSeconds = REMATCH_COUNTDOWN_SECONDS,
+            options = opts,
+            votesByPlayerId = votesMap,
+            leadingOptionId = computeLeadingRematchOption(opts, votesMap)
+        )
+        _rematchState.value = state
+        if (_role.value == SessionRole.Host) {
+            broadcastReliablePacket(
+                NetworkMessage(
+                    type = PacketType.REMATCH_STATE,
+                    senderId = localPlayerId,
+                    rematchState = state
+                )
+            )
+        }
+    }
+
+    private fun startRematchCountdown() {
+        if (_role.value != SessionRole.Host && _role.value != SessionRole.Solo) return
+        rematchJob?.cancel()
+        rematchVotes.clear()
+        rematchOptions = buildRematchVoteOptions(
+            gameMode = currentRules.gameModeEnum,
+            currentTrackId = currentTrackId,
+            currentArenaShape = currentArenaShape,
+            hasActiveCustomTrack = currentCustomTrack != null
+        )
+        rematchSecondsLeft = REMATCH_COUNTDOWN_SECONDS
+        publishAndBroadcastRematchState()
+
+        rematchJob = scope.launch(Dispatchers.Default) {
+            for (sec in (REMATCH_COUNTDOWN_SECONDS - 1) downTo 1) {
+                delay(1000L)
+                if (!isActive || inRace) return@launch
+                rematchSecondsLeft = sec
+                publishAndBroadcastRematchState()
+            }
+            delay(1000L)
+            if (!isActive || inRace) return@launch
+            launchRematchNow()
+        }
+    }
+
+    fun voteNextRematchTrack(optionId: String) {
+        when (_role.value) {
+            SessionRole.Host, SessionRole.Solo -> {
+                if (_rematchState.value == null || rematchOptions.none { it.id == optionId }) return
+                rematchVotes[localPlayerId] = optionId
+                publishAndBroadcastRematchState()
+            }
+            SessionRole.Client -> {
+                val cur = _rematchState.value ?: return
+                if (cur.options.none { it.id == optionId }) return
+                val updatedVotes = cur.votesByPlayerId + (localPlayerId to optionId)
+                _rematchState.value = cur.copy(
+                    votesByPlayerId = updatedVotes,
+                    leadingOptionId = computeLeadingRematchOption(cur.options, updatedVotes)
+                )
+                clientSendChannel?.trySend(
+                    msgAdapter.toJson(
+                        NetworkMessage(
+                            type = PacketType.REMATCH_VOTE,
+                            senderId = localPlayerId,
+                            voteOptionId = optionId
+                        )
+                    )
+                )
+            }
+            SessionRole.None -> Unit
+        }
+    }
+
+    fun launchRematchNow() {
+        if (_role.value != SessionRole.Host && _role.value != SessionRole.Solo) return
+        if (inRace) return
+        val opts = rematchOptions
+        val votes = rematchVotes.toMap()
+        cancelRematchCountdown()
+
+        val winnerId = if (opts.isNotEmpty()) {
+            resolveRematchWinner(opts, votes)
+        } else {
+            REMATCH_OPTION_RANDOM
+        }
+
+        if (currentRules.gameModeEnum == GameMode.ARENA) {
+            val nextShape = if (winnerId == REMATCH_OPTION_RANDOM) {
+                ArenaShape.entries.filter { it != currentArenaShape }.randomOrNull() ?: currentArenaShape
+            } else {
+                runCatching { ArenaShape.valueOf(winnerId) }.getOrDefault(currentArenaShape)
+            }
+            currentArenaShape = nextShape
+            currentTrackId = nextShape.themeTrackId
+            currentCustomTrack = null
+            _activeTrack.value = TrackCatalog.getArenaTrack(nextShape)
+            addSystemChat("Rematch locked in: ${nextShape.displayName}!")
+        } else {
+            if (winnerId == REMATCH_OPTION_RANDOM) {
+                if (Random.nextFloat() < 0.35f) {
+                    val generated = TrackCatalog.generateRandomTrack(seed = System.currentTimeMillis())
+                    currentCustomTrack = generated
+                    currentTrackId = runCatching { TrackId.valueOf(generated.themeId) }.getOrDefault(TrackId.NEON_ROOFTOP)
+                    _activeTrack.value = TrackCatalog.buildCustomTrack(generated)
+                    addSystemChat("Rematch locked in: ${generated.name}!")
+                } else {
+                    val choices = if (currentCustomTrack != null) {
+                        TrackId.entries.toList()
+                    } else {
+                        TrackId.entries.filter { it != currentTrackId }
+                    }
+                    val nextTrack = choices.randomOrNull() ?: currentTrackId
+                    currentTrackId = nextTrack
+                    currentCustomTrack = null
+                    _activeTrack.value = TrackCatalog.getTrack(nextTrack)
+                    addSystemChat("Rematch locked in: ${nextTrack.displayName}!")
+                }
+            } else {
+                val nextTrack = runCatching { TrackId.valueOf(winnerId) }.getOrDefault(currentTrackId)
+                currentTrackId = nextTrack
+                currentCustomTrack = null
+                _activeTrack.value = TrackCatalog.getTrack(nextTrack)
+                addSystemChat("Rematch vote winner: ${nextTrack.displayName}!")
+            }
+        }
+
+        startRace()
+    }
+
     fun returnToLobby() {
+        cancelRematchCountdown()
         physicsJob?.cancel()
         physicsJob = null
         physicsEngine = null
@@ -1145,6 +1406,7 @@ class WifiP2pRaceManager(
     }
 
     fun leaveSession() {
+        cancelRematchCountdown()
         physicsJob?.cancel()
         physicsJob = null
         physicsEngine = null

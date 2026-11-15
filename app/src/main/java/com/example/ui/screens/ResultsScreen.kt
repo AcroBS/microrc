@@ -3,6 +3,7 @@ package com.example.ui.screens
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,12 +26,18 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.HowToVote
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -43,13 +51,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.model.ArenaShape
 import com.example.model.GameMode
 import com.example.model.LobbyStatePayload
 import com.example.model.RaceSnapshot
+import com.example.model.RematchCountdownState
 import com.example.model.TrackId
 import com.example.model.WinCondition
 import com.example.network.SessionRole
@@ -63,6 +74,9 @@ fun ResultsScreen(
     localPlayerId: String,
     results: RaceSnapshot?,
     lobby: LobbyStatePayload?,
+    rematchState: RematchCountdownState? = null,
+    onVoteRematch: (String) -> Unit = {},
+    onLaunchRematchNow: () -> Unit = {},
     onReturnToLobby: () -> Unit,
     onExitHome: () -> Unit
 ) {
@@ -81,7 +95,7 @@ fun ResultsScreen(
             runCatching { ArenaShape.valueOf(it).displayName }.getOrNull()
         } ?: "Battle Arena"
     } else {
-        runCatching {
+        lobby?.activeCustomTrack?.name ?: runCatching {
             TrackId.valueOf(results?.trackId ?: TrackId.LIVING_ROOM_GP.name).displayName
         }.getOrDefault("Circuit")
     }
@@ -131,8 +145,13 @@ fun ResultsScreen(
                             style = MaterialTheme.typography.headlineLarge,
                             color = MaterialTheme.colorScheme.onBackground
                         )
+                        val suddenDeathWave = results?.arenaSuddenDeathStage ?: 0
                         val modeDesc = if (isArena) {
-                            "${arenaTargetMs / 60_000L} Min Flag Hold Target"
+                            if (suddenDeathWave > 0) {
+                                "Sudden Death Finale (Wave $suddenDeathWave/3)"
+                            } else {
+                                "${arenaTargetMs / 60_000L} Min Flag Hold Target"
+                            }
                         } else {
                             when (winCond) {
                                 WinCondition.TIME_TRIAL_DISTANCE -> "${results?.timeLimitSec ?: 90}s Time Limit"
@@ -232,6 +251,18 @@ fun ResultsScreen(
                             )
                         }
                     }
+                }
+
+                // 10-Second Auto-Rematch & Next Track/Arena Voting Loop
+                if (rematchState != null) {
+                    RematchCountdownCard(
+                        rematchState = rematchState,
+                        localPlayerId = localPlayerId,
+                        isHostOrSolo = isHostOrSolo,
+                        isArena = isArena,
+                        onVoteRematch = onVoteRematch,
+                        onLaunchRematchNow = onLaunchRematchNow
+                    )
                 }
 
                 if (isArena) {
@@ -400,9 +431,9 @@ fun ResultsScreen(
                     }
                 }
 
-                if (!isHostOrSolo) {
+                if (!isHostOrSolo && rematchState == null) {
                     Text(
-                        text = "Stay here to automatically rejoin the paddock when the host hits Rematch.",
+                        text = "Stay here to automatically rejoin the paddock when the host starts the next match.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -428,17 +459,225 @@ fun ResultsScreen(
                     }
 
                     if (isHostOrSolo) {
-                        Button(
+                        OutlinedButton(
                             onClick = onReturnToLobby,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary),
                             shape = RoundedCornerShape(14.dp),
                             modifier = Modifier
                                 .weight(1.6f)
                                 .height(52.dp)
                                 .testTag("results_rematch_button")
                         ) {
-                            Icon(Icons.Default.Replay, contentDescription = null)
+                            Icon(Icons.Default.Replay, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Back to Lobby (Rematch)", style = MaterialTheme.typography.labelLarge)
+                            Text(
+                                text = "Back to Lobby (Edit Rules)",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RematchCountdownCard(
+    rematchState: RematchCountdownState,
+    localPlayerId: String,
+    isHostOrSolo: Boolean,
+    isArena: Boolean,
+    onVoteRematch: (String) -> Unit,
+    onLaunchRematchNow: () -> Unit
+) {
+    val totalSec = rematchState.totalSeconds.coerceAtLeast(1)
+    val secLeft = rematchState.secondsLeft.coerceIn(0, totalSec)
+    val progress = secLeft.toFloat() / totalSec.toFloat()
+    val myVote = rematchState.votesByPlayerId[localPlayerId]
+    val leadingOption = rematchState.options.find { it.id == rematchState.leadingOptionId }
+        ?: rematchState.options.lastOrNull()
+    val urgentAccent = if (secLeft <= 3) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+        border = BorderStroke(1.5.dp, urgentAccent.copy(alpha = 0.85f)),
+        shape = RoundedCornerShape(20.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("rematch_countdown_card")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            urgentAccent.copy(alpha = 0.14f),
+                            MaterialTheme.colorScheme.secondary.copy(alpha = 0.08f)
+                        )
+                    )
+                )
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Surface(
+                        color = urgentAccent.copy(alpha = 0.22f),
+                        shape = CircleShape,
+                        border = BorderStroke(1.dp, urgentAccent),
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Bolt,
+                                contentDescription = null,
+                                tint = urgentAccent,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    Column {
+                        Text(
+                            text = if (isArena) "NEXT BATTLE IN ${secLeft}S" else "NEXT RACE IN ${secLeft}S",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.testTag("rematch_countdown_timer")
+                        )
+                        Text(
+                            text = "Up Next: ${leadingOption?.displayName ?: "Random"} • Tap below to vote!",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
+                }
+
+                if (isHostOrSolo) {
+                    Button(
+                        onClick = onLaunchRematchNow,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                            .testTag("rematch_launch_now_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Launch next race immediately",
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Go Now", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+            }
+
+            LinearProgressIndicator(
+                progress = { progress },
+                color = urgentAccent,
+                trackColor = MaterialTheme.colorScheme.surfaceContainer,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(7.dp)
+                    .clip(RoundedCornerShape(50))
+            )
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                rematchState.options.forEach { option ->
+                    val voteCount = rematchState.votesByPlayerId.values.count { it == option.id }
+                    val isSelected = myVote == option.id
+                    val isLeading = rematchState.leadingOptionId == option.id
+
+                    Surface(
+                        color = if (isSelected) {
+                            MaterialTheme.colorScheme.secondary.copy(alpha = 0.18f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainer
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(
+                            width = if (isSelected || isLeading) 1.5.dp else 1.dp,
+                            color = when {
+                                isSelected -> MaterialTheme.colorScheme.secondary
+                                isLeading -> GoldTrophy.copy(alpha = 0.8f)
+                                else -> MaterialTheme.colorScheme.outlineVariant
+                            }
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 52.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable { onVoteRematch(option.id) }
+                            .testTag("rematch_vote_${option.id}")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = when {
+                                    isSelected -> Icons.Default.CheckCircle
+                                    option.isRandom -> Icons.Default.Shuffle
+                                    else -> Icons.Default.HowToVote
+                                },
+                                contentDescription = null,
+                                tint = when {
+                                    isSelected -> MaterialTheme.colorScheme.secondary
+                                    option.isRandom -> GoldTrophy
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = option.displayName,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = option.subtitle,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            if (voteCount > 0 || isLeading) {
+                                Surface(
+                                    color = if (voteCount > 0) {
+                                        MaterialTheme.colorScheme.secondary.copy(alpha = 0.22f)
+                                    } else {
+                                        GoldTrophy.copy(alpha = 0.18f)
+                                    },
+                                    shape = RoundedCornerShape(50)
+                                ) {
+                                    Text(
+                                        text = if (voteCount > 0) {
+                                            "$voteCount ${if (voteCount == 1) "VOTE" else "VOTES"}"
+                                        } else {
+                                            "DEFAULT"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (voteCount > 0) MaterialTheme.colorScheme.secondary else GoldTrophy,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }

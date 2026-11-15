@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -351,7 +352,8 @@ fun RaceScreen(
                         arenaFlag = arenaFlagToDraw,
                         fieldPickups = snapshot?.fieldPickups.orEmpty(),
                         portalPair = snapshot?.portalPair,
-                        explosions = snapshot?.explosions.orEmpty()
+                        explosions = snapshot?.explosions.orEmpty(),
+                        arenaSuddenDeathStage = snapshot?.arenaSuddenDeathStage ?: 0
                     )
                 }
             } else {
@@ -375,7 +377,8 @@ fun RaceScreen(
                         arenaFlag = arenaFlagToDraw,
                         fieldPickups = snapshot?.fieldPickups.orEmpty(),
                         portalPair = snapshot?.portalPair,
-                        explosions = snapshot?.explosions.orEmpty()
+                        explosions = snapshot?.explosions.orEmpty(),
+                        arenaSuddenDeathStage = snapshot?.arenaSuddenDeathStage ?: 0
                     )
                 }
             }
@@ -448,6 +451,29 @@ fun RaceScreen(
                                     }
                                 )
                             }
+                            Column {
+                                val sdStage = snapshot?.arenaSuddenDeathStage ?: 0
+                                val curClockMs = snapshot?.raceTimeMs ?: 0L
+                                Text(
+                                    text = if (sdStage > 0) "FINALE" else "CLOCK",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = TextSecondary
+                                )
+                                Text(
+                                    text = if (sdStage > 0) {
+                                        val remSec = ((snapshot?.arenaSuddenDeathRemainingMs ?: 0L) + 999L) / 1000L
+                                        "${remSec.coerceAtLeast(0L)}s"
+                                    } else {
+                                        formatArenaHoldClock(curClockMs)
+                                    },
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = when {
+                                        sdStage > 0 -> AlertRed
+                                        curClockMs >= 110_000L -> SignalOrange
+                                        else -> Color.White
+                                    }
+                                )
+                            }
                         } else if (winCond == WinCondition.TIME_TRIAL_DISTANCE) {
                             val totalMs = ((snapshot?.timeLimitSec ?: rules.timeLimitSec) * 1000L)
                             val remMs = (totalMs - (snapshot?.raceTimeMs ?: 0L)).coerceAtLeast(0L)
@@ -496,6 +522,37 @@ fun RaceScreen(
                                     )
                                 }
                             }
+                        }
+                    }
+                }
+
+                // Arena Sudden Death Shrinking Finale Badge
+                val suddenDeathStage = snapshot?.arenaSuddenDeathStage ?: 0
+                if (isArenaMode && suddenDeathStage > 0 && snapshot?.phase == RacePhase.RACING.name) {
+                    val sdPulse = 0.5f + 0.5f * sin(animTimeSec * 12f)
+                    val remSec = (((snapshot.arenaSuddenDeathRemainingMs) + 999L) / 1000L).coerceAtLeast(1L)
+                    Surface(
+                        color = Color(0xFF33060E).copy(alpha = 0.92f),
+                        shape = RoundedCornerShape(50),
+                        border = BorderStroke(1.5.dp, AlertRed.copy(alpha = 0.7f + 0.3f * sdPulse)),
+                        modifier = Modifier.testTag("sudden_death_badge")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = AlertRed,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(
+                                text = "SUDDEN DEATH • WAVE $suddenDeathStage/3 • ${remSec}s",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White
+                            )
                         }
                     }
                 }
@@ -582,7 +639,8 @@ fun RaceScreen(
                                     racers = racersToDraw,
                                     localPlayerId = profile.playerId,
                                     arenaFlag = arenaFlagToDraw,
-                                    portalPair = snapshot?.portalPair
+                                    portalPair = snapshot?.portalPair,
+                                    arenaSuddenDeathStage = snapshot?.arenaSuddenDeathStage ?: 0
                                 )
                             }
                             Text(
