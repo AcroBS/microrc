@@ -1,5 +1,6 @@
 package com.example
 
+import com.example.audio.RaceAudioEngine
 import com.example.data.TrackCatalog
 import com.example.engine.RacePhysicsEngine
 import com.example.model.ArenaShape
@@ -11,12 +12,15 @@ import com.example.model.LobbyPlayer
 import com.example.model.LobbyStatePayload
 import com.example.model.NetworkMessage
 import com.example.model.PacketType
+import com.example.model.PowerUpType
 import com.example.model.PropShape
 import com.example.model.RacePhase
 import com.example.model.RaceRulesSettings
 import com.example.model.RcCarType
 import com.example.model.TrackId
 import com.example.model.WinCondition
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import com.example.network.RaceTelemetryCodec
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -476,5 +480,92 @@ class RaceEngineUnitTest {
         assertEquals("p2", decoded?.snapshot?.arenaFlag?.carrierId)
         val decodedP2 = decoded?.snapshot?.racers?.first { it.playerId == "p2" }
         assertTrue((decodedP2?.flagCarryMs ?: 0L) >= 50L)
+    }
+
+    @Test
+    fun arenaMode_activeShieldAllowsLooseFlagPickupAndReclaimWithoutLosingShield() {
+        val arena = TrackCatalog.getArenaTrack(ArenaShape.CIRCLE).copy(
+            ramps = emptyList(),
+            props = emptyList(),
+            itemSpawns = emptyList()
+        )
+        val players = listOf(
+            LobbyPlayer("p1", "ShieldDriver", isHost = true, isBot = false, carType = RcCarType.VOLT_BUGGY.name),
+            LobbyPlayer("p2", "Rival", isHost = false, isBot = false, carType = RcCarType.APEX_FORMULA.name)
+        )
+        val rules = RaceRulesSettings(
+            gameMode = GameMode.ARENA.name,
+            arenaTargetMinutes = 1,
+            autoAccelerate = false,
+            randomConditionsEnabled = false
+        )
+        val engine = RacePhysicsEngine(arena, totalLaps = 3, players = players, rules = rules, random = Random(17L))
+
+        // Finish countdown
+        var snap = engine.step(0.05f)
+        repeat(68) { snap = engine.step(0.05f) }
+        assertEquals(RacePhase.RACING.name, snap.phase)
+
+        // Activate Shield on p1 and place loose flag 70px away (overlapping visual shield + flag ring, > old 48px limit)
+        engine.givePowerUpForTest("p1", PowerUpType.SHIELD, triggerImmediately = true)
+        val r1 = snap.racers.first { it.playerId == "p1" }
+        engine.setFlagStateForTest(r1.x + 70f, r1.y, carrierId = null)
+
+        snap = engine.step(0.05f)
+        val p1AfterPickup = snap.racers.first { it.playerId == "p1" }
+        assertEquals("Shielded car should pick up flag when shield ring touches flag zone", "p1", snap.arenaFlag?.carrierId)
+        assertTrue("Shield must remain active on flag pickup", p1AfterPickup.shieldMs > 4000L)
+
+        // Also verify reclaiming a dropped flag immediately after activating a new Shield
+        val glueArena = arena.copy(
+            props = listOf(
+                TrackCatalog.getArenaTrack(ArenaShape.CIRCLE).props.first().copy(
+                    x = p1AfterPickup.x,
+                    y = p1AfterPickup.y,
+                    radius = 50f,
+                    shape = PropShape.MUD_POOL
+                )
+            )
+        )
+        val reclaimEngine = RacePhysicsEngine(glueArena, totalLaps = 3, players = players, rules = rules, random = Random(23L))
+        repeat(68) { reclaimEngine.step(0.05f) }
+        var rSnap = reclaimEngine.step(0.05f)
+        val startP1 = rSnap.racers.first { it.playerId == "p1" }
+        reclaimEngine.setFlagStateForTest(startP1.x, startP1.y, carrierId = "p1")
+        // Trigger spin drop on oil patch (sets flagPickupImmunityMs), wait for stun to clear, then pop Shield right on flag
+        rSnap = reclaimEngine.step(0.05f)
+        assertEquals(null, rSnap.arenaFlag?.carrierId)
+
+        // Simulate rival stealing from p1 (sets 950ms flagPickupImmunityMs without stunning p1), then dropping flag near p1 with Shield
+        val cleanEngine = RacePhysicsEngine(arena, totalLaps = 3, players = players, rules = rules, random = Random(31L))
+        repeat(68) { cleanEngine.step(0.05f) }
+        var cSnap = cleanEngine.step(0.05f)
+        val cp1 = cSnap.racers.first { it.playerId == "p1" }
+        cleanEngine.givePowerUpForTest("p1", PowerUpType.SHIELD, triggerImmediately = true)
+        cleanEngine.setFlagStateForTest(cp1.x + 58f, cp1.y, carrierId = null)
+        cSnap = cleanEngine.step(0.05f)
+        assertEquals("p1", cSnap.arenaFlag?.carrierId)
+    }
+
+    @Test
+    fun raceAudioEngine_randomizesSoundtrackPerRunWithoutImmediateRepeats() {
+        val scope = CoroutineScope(SupervisorJob())
+        val audioEngine = RaceAudioEngine(scope)
+        val pickedIndices = mutableListOf<Int>()
+        for (run in 1..20) {
+            val theme = audioEngine.selectNextRunArrangement(seed = run * 987654321L)
+            if (pickedIndices.isNotEmpty()) {
+                assertTrue(
+                    "Consecutive race runs should switch soundtrack themes (${pickedIndices.last()} vs ${theme.index})",
+                    theme.index != pickedIndices.last()
+                )
+            }
+            pickedIndices.add(theme.index)
+        }
+        assertTrue(
+            "Multiple distinct race soundtracks should be chosen across runs",
+            pickedIndices.toSet().size >= 3
+        )
+        audioEngine.stop()
     }
 }

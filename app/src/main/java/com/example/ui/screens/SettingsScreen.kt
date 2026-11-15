@@ -173,8 +173,8 @@ fun SettingsScreen(
                 RuleToggleCard(
                     icon = Icons.Default.MusicNote,
                     accent = MaterialTheme.colorScheme.primary,
-                    title = "Hard Rock Guitar BGM",
-                    description = "Play randomized high-energy electric guitar riffs & drums during races.",
+                    title = "Menu & Race Music",
+                    description = "Calm semi-electronic menu ambience and realistic groove soundtracks randomized each run.",
                     checked = audioSettings.musicEnabled,
                     enabled = true,
                     switchTestTag = "setting_music_switch",

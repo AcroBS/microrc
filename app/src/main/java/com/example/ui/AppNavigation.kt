@@ -1,12 +1,17 @@
 package com.example.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.network.RaceNavEvent
 import com.example.network.SessionRole
@@ -35,6 +40,30 @@ object Routes {
 @Composable
 fun MicroRCApp(viewModel: MainViewModel = viewModel()) {
     val navController = rememberNavController()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val navBackStackEntry by navController.currentBackStackEntryAsState()
+    val currentRoute = navBackStackEntry?.destination?.route
+
+    DisposableEffect(lifecycleOwner, viewModel.audioEngine) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> viewModel.audioEngine.setAppForeground(true)
+                Lifecycle.Event.ON_STOP -> viewModel.audioEngine.setAppForeground(false)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.audioEngine.stop()
+        }
+    }
+
+    LaunchedEffect(currentRoute) {
+        if (currentRoute != null && currentRoute != Routes.RACE) {
+            viewModel.audioEngine.setMenuMode()
+        }
+    }
 
     val profile by viewModel.profile.collectAsState()
     val rules by viewModel.rules.collectAsState()

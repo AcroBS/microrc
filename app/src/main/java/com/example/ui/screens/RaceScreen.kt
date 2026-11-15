@@ -8,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -66,6 +67,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.audio.RaceAudioEngine
 import com.example.data.TrackCatalog
@@ -123,10 +125,10 @@ fun RaceScreen(
         onDispose { view.keepScreenOn = oldKeep }
     }
 
-    // Start & feed procedural guitar riff BGM + per-car RC motor SFX
+    // Pick a fresh randomized race soundtrack for this run + feed per-car RC motor SFX
     DisposableEffect(audioEngine) {
-        audioEngine?.start()
-        onDispose { audioEngine?.stop() }
+        audioEngine?.startRaceRun()
+        onDispose { audioEngine?.setMenuMode() }
     }
     LaunchedEffect(snapshot, profile.playerId, audioEngine) {
         audioEngine?.updateSnapshot(snapshot, profile.playerId)
@@ -629,190 +631,217 @@ fun RaceScreen(
             runCatching { PowerUpType.valueOf(it) }.getOrNull()
         }
 
-        Column(
+        BoxWithConstraints(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 12.dp, vertical = 12.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Bottom
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (isArenaMode && arenaFlagToDraw?.carrierId == localRacer?.playerId) {
-                        StatusChip("CARRYING FLAG!", GoldTrophy)
-                    }
-                    if ((localRacer?.jumpZ ?: 0f) > 0.1f) StatusChip("AIRBORNE!", GoldTrophy)
-                    if ((localRacer?.boostMs ?: 0L) > 0L) StatusChip("TURBO", SignalOrange)
-                    if ((localRacer?.shieldMs ?: 0L) > 0L) StatusChip("SHIELD", AcidLime)
-                    if ((localRacer?.overdriveMs ?: 0L) > 0L) StatusChip("OVERDRIVE", Color(0xFFE040FB))
-                    if ((localRacer?.stunnedMs ?: 0L) > 0L) StatusChip("ZAPPED!", AlertRed)
-                }
-
-                val powerUpColor = heldPowerUp?.let { Color(it.colorHex) } ?: PaddockOutline
-                Surface(
-                    color = if (heldPowerUp != null) powerUpColor.copy(alpha = 0.92f) else CarbonBg.copy(alpha = 0.65f),
-                    shape = RoundedCornerShape(18.dp),
-                    border = BorderStroke(2.dp, powerUpColor),
-                    modifier = Modifier
-                        .size(width = 120.dp, height = 56.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .clickable(enabled = heldPowerUp != null) { onTriggerPowerUp() }
-                        .testTag("use_powerup_button")
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            Icons.Default.Bolt,
-                            contentDescription = "Power-up",
-                            tint = if (heldPowerUp != null) CarbonBg else TextSecondary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = heldPowerUp?.shortName ?: "EMPTY",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = if (heldPowerUp != null) CarbonBg else TextSecondary
-                        )
-                    }
-                }
+            val steerWidth = when {
+                maxWidth >= 520.dp -> 116.dp
+                maxWidth >= 360.dp -> 100.dp
+                else -> 88.dp
+            }
+            val controlHeight = when {
+                maxWidth >= 520.dp -> 100.dp
+                maxWidth >= 360.dp -> 94.dp
+                else -> 86.dp
+            }
+            val steerIconSize = when {
+                maxWidth >= 520.dp -> 52.dp
+                maxWidth >= 360.dp -> 48.dp
+                else -> 44.dp
             }
 
-            Row(
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Bottom
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                if (profile.controlMode == ControlMode.TOUCH_OVERLAY) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        HoldControlPad(
-                            label = null,
-                            icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                            contentDesc = "Steer Left",
-                            activeColor = ElectricCyan,
-                            modifier = Modifier
-                                .size(78.dp)
-                                .testTag("steer_left_button"),
-                            onPressedChange = { steerLeftPressed = it }
-                        )
-                        HoldControlPad(
-                            label = null,
-                            icon = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDesc = "Steer Right",
-                            activeColor = ElectricCyan,
-                            modifier = Modifier
-                                .size(78.dp)
-                                .testTag("steer_right_button"),
-                            onPressedChange = { steerRightPressed = it }
-                        )
-                    }
-                } else {
-                    Surface(
-                        color = CarbonBg.copy(alpha = 0.84f),
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.6f)),
-                        modifier = Modifier.width(172.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(
-                            modifier = Modifier.padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                        if (rules.autoAccelerate) {
+                            Surface(
+                                color = AcidLime.copy(alpha = 0.22f),
+                                shape = RoundedCornerShape(50),
+                                border = BorderStroke(1.dp, AcidLime.copy(alpha = 0.7f)),
+                                modifier = Modifier.testTag("auto_gas_badge")
                             ) {
-                                Text("TILT STEER", style = MaterialTheme.typography.labelSmall, color = ElectricCyan)
-                                Icon(
-                                    Icons.Default.Refresh,
-                                    contentDescription = "Calibrate Neutral Tilt",
-                                    tint = Color.White,
-                                    modifier = Modifier
-                                        .size(22.dp)
-                                        .clip(CircleShape)
-                                        .clickable { tiltController.calibrateNeutral() }
+                                Text(
+                                    text = "AUTO GAS",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AcidLime,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                                 )
                             }
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(10.dp)
-                                    .clip(RoundedCornerShape(50))
-                                    .background(PaddockSurface)
-                            ) {
-                                val frac = ((tiltSteer + 1f) / 2f).coerceIn(0.05f, 0.95f)
-                                Box(modifier = Modifier.fillMaxWidth(frac).height(10.dp)) {
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.CenterEnd)
-                                            .size(14.dp, 10.dp)
-                                            .clip(CircleShape)
-                                            .background(ElectricCyan)
-                                    )
-                                }
-                            }
+                        }
+                        if (isArenaMode && arenaFlagToDraw?.carrierId == localRacer?.playerId) {
+                            StatusChip("CARRYING FLAG!", GoldTrophy)
+                        }
+                        if ((localRacer?.jumpZ ?: 0f) > 0.1f) StatusChip("AIRBORNE!", GoldTrophy)
+                        if ((localRacer?.boostMs ?: 0L) > 0L) StatusChip("TURBO", SignalOrange)
+                        if ((localRacer?.shieldMs ?: 0L) > 0L) StatusChip("SHIELD", AcidLime)
+                        if ((localRacer?.overdriveMs ?: 0L) > 0L) StatusChip("OVERDRIVE", Color(0xFFE040FB))
+                        if ((localRacer?.stunnedMs ?: 0L) > 0L) StatusChip("ZAPPED!", AlertRed)
+                    }
+
+                    val powerUpColor = heldPowerUp?.let { Color(it.colorHex) } ?: PaddockOutline
+                    Surface(
+                        color = if (heldPowerUp != null) powerUpColor.copy(alpha = 0.92f) else CarbonBg.copy(alpha = 0.65f),
+                        shape = RoundedCornerShape(18.dp),
+                        border = BorderStroke(2.dp, powerUpColor),
+                        modifier = Modifier
+                            .size(width = 120.dp, height = 56.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .clickable(enabled = heldPowerUp != null) { onTriggerPowerUp() }
+                            .testTag("use_powerup_button")
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Bolt,
+                                contentDescription = "Power-up",
+                                tint = if (heldPowerUp != null) CarbonBg else TextSecondary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = heldPowerUp?.shortName ?: "EMPTY",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = if (heldPowerUp != null) CarbonBg else TextSecondary
+                            )
                         }
                     }
                 }
 
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom
                 ) {
-                    if (rules.autoAccelerate) {
-                        Surface(
-                            color = AcidLime.copy(alpha = 0.2f),
-                            shape = RoundedCornerShape(12.dp),
-                            border = BorderStroke(1.dp, AcidLime.copy(alpha = 0.6f)),
-                            modifier = Modifier.testTag("auto_gas_badge")
-                        ) {
-                            Text(
-                                text = "AUTO\nGAS",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = AcidLime,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp)
+                    if (profile.controlMode == ControlMode.TOUCH_OVERLAY) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            HoldControlPad(
+                                label = null,
+                                icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                                contentDesc = "Steer Left",
+                                activeColor = ElectricCyan,
+                                iconSize = steerIconSize,
+                                modifier = Modifier
+                                    .size(width = steerWidth, height = controlHeight)
+                                    .testTag("steer_left_button"),
+                                onPressedChange = { steerLeftPressed = it }
+                            )
+                            HoldControlPad(
+                                label = null,
+                                icon = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDesc = "Steer Right",
+                                activeColor = ElectricCyan,
+                                iconSize = steerIconSize,
+                                modifier = Modifier
+                                    .size(width = steerWidth, height = controlHeight)
+                                    .testTag("steer_right_button"),
+                                onPressedChange = { steerRightPressed = it }
                             )
                         }
-                        HoldControlPad(
-                            label = "BRAKE",
-                            icon = null,
-                            contentDesc = "Brake or Reverse",
-                            activeColor = AlertRed,
-                            modifier = Modifier
-                                .size(width = 108.dp, height = 78.dp)
-                                .testTag("brake_button"),
-                            onPressedChange = { brakePressed = it }
-                        )
                     } else {
-                        HoldControlPad(
-                            label = "BRK",
-                            icon = null,
-                            contentDesc = "Brake or Reverse",
-                            activeColor = AlertRed,
-                            modifier = Modifier
-                                .size(width = 68.dp, height = 78.dp)
-                                .testTag("brake_button"),
-                            onPressedChange = { brakePressed = it }
-                        )
-                        HoldControlPad(
-                            label = if (profile.controlMode == ControlMode.TILT_SENSOR && profile.autoGasInTilt) "AUTO" else "GAS",
-                            icon = null,
-                            contentDesc = "Accelerate",
-                            activeColor = AcidLime,
-                            modifier = Modifier
-                                .size(width = 88.dp, height = 78.dp)
-                                .testTag("gas_button"),
-                            onPressedChange = { gasPressed = it }
-                        )
+                        Surface(
+                            color = CarbonBg.copy(alpha = 0.84f),
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.6f)),
+                            modifier = Modifier.width(172.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("TILT STEER", style = MaterialTheme.typography.labelSmall, color = ElectricCyan)
+                                    Icon(
+                                        Icons.Default.Refresh,
+                                        contentDescription = "Calibrate Neutral Tilt",
+                                        tint = Color.White,
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .clip(CircleShape)
+                                            .clickable { tiltController.calibrateNeutral() }
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(10.dp)
+                                        .clip(RoundedCornerShape(50))
+                                        .background(PaddockSurface)
+                                ) {
+                                    val frac = ((tiltSteer + 1f) / 2f).coerceIn(0.05f, 0.95f)
+                                    Box(modifier = Modifier.fillMaxWidth(frac).height(10.dp)) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.CenterEnd)
+                                                .size(14.dp, 10.dp)
+                                                .clip(CircleShape)
+                                                .background(ElectricCyan)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (rules.autoAccelerate) {
+                            HoldControlPad(
+                                label = "BRAKE",
+                                icon = null,
+                                contentDesc = "Brake or Reverse",
+                                activeColor = AlertRed,
+                                modifier = Modifier
+                                    .size(width = 116.dp, height = controlHeight)
+                                    .testTag("brake_button"),
+                                onPressedChange = { brakePressed = it }
+                            )
+                        } else {
+                            HoldControlPad(
+                                label = "BRK",
+                                icon = null,
+                                contentDesc = "Brake or Reverse",
+                                activeColor = AlertRed,
+                                modifier = Modifier
+                                    .size(width = 68.dp, height = controlHeight)
+                                    .testTag("brake_button"),
+                                onPressedChange = { brakePressed = it }
+                            )
+                            HoldControlPad(
+                                label = if (profile.controlMode == ControlMode.TILT_SENSOR && profile.autoGasInTilt) "AUTO" else "GAS",
+                                icon = null,
+                                contentDesc = "Accelerate",
+                                activeColor = AcidLime,
+                                modifier = Modifier
+                                    .size(width = 88.dp, height = controlHeight)
+                                    .testTag("gas_button"),
+                                onPressedChange = { gasPressed = it }
+                            )
+                        }
                     }
                 }
             }
@@ -858,7 +887,16 @@ fun RaceScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Guitar Riff BGM", style = MaterialTheme.typography.bodyMedium)
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Background Music", style = MaterialTheme.typography.bodyMedium)
+                            audioEngine?.activeThemeName?.let { trackTitle ->
+                                Text(
+                                    text = "Now playing: $trackTitle",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                         Switch(
                             checked = audioSettings.musicEnabled,
                             onCheckedChange = {
@@ -923,6 +961,7 @@ private fun HoldControlPad(
     icon: androidx.compose.ui.graphics.vector.ImageVector?,
     contentDesc: String,
     activeColor: Color,
+    iconSize: Dp = 44.dp,
     modifier: Modifier = Modifier,
     onPressedChange: (Boolean) -> Unit
 ) {
@@ -938,9 +977,9 @@ private fun HoldControlPad(
     }
 
     Surface(
-        color = if (pressed) activeColor.copy(alpha = 0.85f) else CarbonBg.copy(alpha = 0.72f),
-        shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(2.dp, if (pressed) Color.White else activeColor.copy(alpha = 0.75f)),
+        color = if (pressed) activeColor.copy(alpha = 0.85f) else CarbonBg.copy(alpha = 0.75f),
+        shape = RoundedCornerShape(22.dp),
+        border = BorderStroke(2.2.dp, if (pressed) Color.White else activeColor.copy(alpha = 0.8f)),
         modifier = modifier.pointerInput(Unit) {
             awaitPointerEventScope {
                 while (true) {
@@ -961,7 +1000,7 @@ private fun HoldControlPad(
                     imageVector = icon,
                     contentDescription = contentDesc,
                     tint = if (pressed) CarbonBg else activeColor,
-                    modifier = Modifier.size(38.dp)
+                    modifier = Modifier.size(iconSize)
                 )
             } else if (label != null) {
                 Text(

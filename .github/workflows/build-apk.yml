@@ -50,28 +50,49 @@ jobs:
         run: |
           rm -f debug.keystore
 
+          validate_keystore() {
+            if [ -s debug.keystore ] && keytool -list -keystore debug.keystore -storepass android -alias androiddebugkey >/dev/null 2>&1; then
+              return 0
+            fi
+            rm -f debug.keystore
+            return 1
+          }
+
           # 1. Prefer user-configured GitHub Actions secret SIGNING_KEYSTORE_BASE64 if provided
           if [ -n "${SIGNING_KEYSTORE_BASE64:-}" ]; then
             printf '%s' "$SIGNING_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > debug.keystore || rm -f debug.keystore
+            validate_keystore && echo "Using keystore from SIGNING_KEYSTORE_BASE64 secret." || true
           fi
 
-          # 2. Otherwise use debug.keystore.base64 if present in the repository
-          if [ ! -s debug.keystore ] && [ -s debug.keystore.base64 ]; then
-            tr -d '[:space:]' < debug.keystore.base64 | base64 -d > debug.keystore || rm -f debug.keystore
-          fi
-
-          # 3. Otherwise restore the persistent CI keystore from orphan branch 'ci-keystore'
-          #    (AI Studio does not export debug.keystore* to GitHub; persisting it once on
-          #    'ci-keystore' guarantees every release is signed with the exact same certificate
-          #    so Obtainium / Android direct in-place updates succeed without uninstalling.)
-          if [ ! -s debug.keystore ]; then
-            if git fetch --depth=1 origin refs/heads/ci-keystore:refs/remotes/origin/ci-keystore 2>/dev/null; then
-              git show refs/remotes/origin/ci-keystore:debug.keystore.base64 | tr -d '[:space:]' | base64 -d > debug.keystore || rm -f debug.keystore
+          # 2. Otherwise restore the persistent CI keystore from orphan branch 'ci-keystore'
+          #    First try GitHub Contents API via gh (immune to shallow/refspec checkout settings),
+          #    then fall back to git fetch.
+          if [ ! -s debug.keystore ] && [ -n "${GH_TOKEN:-}" ]; then
+            if gh api "repos/${GITHUB_REPOSITORY}/contents/debug.keystore.base64?ref=ci-keystore" --jq '.content' 2>/dev/null \
+              | tr -d '[:space:]' | base64 -d > debug.keystore 2>/dev/null; then
+              validate_keystore && echo "Restored persistent keystore via GitHub API (ci-keystore)." || true
+            else
+              rm -f debug.keystore
             fi
           fi
 
-          # 4. Very first CI run fallback: generate once and persist to 'ci-keystore' branch
           if [ ! -s debug.keystore ]; then
+            if git fetch --depth=1 origin refs/heads/ci-keystore:refs/remotes/origin/ci-keystore 2>/dev/null; then
+              git show refs/remotes/origin/ci-keystore:debug.keystore.base64 | tr -d '[:space:]' | base64 -d > debug.keystore || rm -f debug.keystore
+              validate_keystore && echo "Restored persistent keystore via git fetch (ci-keystore)." || true
+            fi
+          fi
+
+          # 3. Otherwise use debug.keystore.base64 if present in the repository
+          if [ ! -s debug.keystore ] && [ -s debug.keystore.base64 ]; then
+            tr -d '[:space:]' < debug.keystore.base64 | base64 -d > debug.keystore || rm -f debug.keystore
+            validate_keystore && echo "Using repository debug.keystore.base64." || true
+          fi
+
+          # 4. Very first CI run fallback: generate once and persist to 'ci-keystore' branch
+          #    so all future GitHub Release APKs share the exact same signing certificate for Obtainium.
+          if [ ! -s debug.keystore ]; then
+            echo "No existing persistent keystore found; generating new persistent CI keystore..."
             keytool -genkeypair -v -keystore debug.keystore \
               -storepass android -alias androiddebugkey -keypass android \
               -keyalg RSA -keysize 2048 -validity 10000 \
@@ -86,11 +107,14 @@ jobs:
                 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
                 git add debug.keystore.base64
                 git commit -q -m "chore: persist CI APK signing keystore"
-                git push -q "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" +HEAD:refs/heads/ci-keystore || true
-              )
+                git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" +HEAD:refs/heads/ci-keystore
+              ) && echo "Saved persistent keystore to branch 'ci-keystore'." || echo "::warning::Failed to push persistent keystore to 'ci-keystore' branch."
               rm -rf "$TMP_KS_DIR"
             fi
           fi
+
+          echo "Active APK signing certificate fingerprint:"
+          keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey | grep -E "SHA256:" || true
 
           if [ ! -f .env ] && [ -f .env.example ]; then
             cp .env.example .env
@@ -108,7 +132,7 @@ jobs:
         env:
           RUN_NUMBER: ${{ github.run_number }}
         run: |
-          echo "CI_VERSION_CODE=$((RUN_NUMBER + 10))" >> "$GITHUB_ENV"
+          echo "CI_VERSION_CODE=$((RUN_NUMBER + 100))" >> "$GITHUB_ENV"
           echo "CI_VERSION_NAME=1.0.${RUN_NUMBER}" >> "$GITHUB_ENV"
 
       - name: Build installable debug APK

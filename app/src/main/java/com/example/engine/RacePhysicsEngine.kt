@@ -43,6 +43,8 @@ class RacePhysicsEngine(
         val accentColorArgb: Long,
         var x: Float,
         var y: Float,
+        var prevX: Float = x,
+        var prevY: Float = y,
         var angleRad: Float,
         var vx: Float = 0f,
         var vy: Float = 0f,
@@ -168,6 +170,14 @@ class RacePhysicsEngine(
         flagY = y
         flagCarrierId = carrierId
         flagTransferCooldownMs = 0L
+    }
+
+    fun givePowerUpForTest(playerId: String, powerUp: PowerUpType, triggerImmediately: Boolean = false) {
+        val racer = racers.find { it.playerId == playerId } ?: return
+        racer.heldPowerUp = powerUp
+        if (triggerImmediately) {
+            activatePowerUp(racer)
+        }
     }
 
     /**
@@ -522,11 +532,11 @@ class RacePhysicsEngine(
     private fun dropFlagFrom(racer: MutableRacer, reason: String) {
         if (!isArenaMode || flagCarrierId != racer.playerId) return
         flagCarrierId = null
-        racer.flagPickupImmunityMs = 1600L
+        racer.flagPickupImmunityMs = 650L
 
         val dropAng = racer.angleRad + PI.toFloat() * 0.82f
-        var fx = racer.x + cos(dropAng) * 72f
-        var fy = racer.y + sin(dropAng) * 72f
+        var fx = racer.x + cos(dropAng) * 78f
+        var fy = racer.y + sin(dropAng) * 78f
 
         val poly = track.arenaBoundary.ifEmpty { track.centerline }
         if (track.isArena && poly.size >= 3) {
@@ -561,6 +571,29 @@ class RacePhysicsEngine(
         setBanner("${racer.name} $reason — FLAG DROPPED!", 2000L)
     }
 
+    private fun sweptFlagDistance(racer: MutableRacer, fx: Float, fy: Float): Float {
+        val segDx = racer.x - racer.prevX
+        val segDy = racer.y - racer.prevY
+        val lenSq = segDx * segDx + segDy * segDy
+        if (lenSq < 0.001f) {
+            return TrackCatalog.distance(racer.x, racer.y, fx, fy)
+        }
+        val t = (((fx - racer.prevX) * segDx + (fy - racer.prevY) * segDy) / lenSq).coerceIn(0f, 1f)
+        val projX = racer.prevX + segDx * t
+        val projY = racer.prevY + segDy * t
+        return hypot(fx - projX, fy - projY)
+    }
+
+    private fun flagCaptureRadiusFor(racer: MutableRacer): Float {
+        // Loose flag ring is rendered at 46f; active Shield bubble is rendered at ~30.5f
+        val bodyOrShieldRadius = if (racer.shieldMs > 0L) {
+            max(racer.carType.radiusPx, 31f)
+        } else {
+            racer.carType.radiusPx * 0.85f
+        }
+        return 46f + bodyOrShieldRadius
+    }
+
     private fun updateArenaFlag(dtMs: Long) {
         if (flagTransferCooldownMs > 0L) {
             flagTransferCooldownMs = (flagTransferCooldownMs - dtMs).coerceAtLeast(0L)
@@ -582,20 +615,20 @@ class RacePhysicsEngine(
 
         if (flagCarrierId == null) {
             val eligible = racers
-                .filter {
-                    !it.finished &&
-                        it.jumpZ < 0.35f &&
-                        it.stunnedMs == 0L &&
-                        it.flagPickupImmunityMs == 0L &&
-                        TrackCatalog.distance(it.x, it.y, flagX, flagY) <= 48f
+                .filter { r ->
+                    !r.finished &&
+                        r.jumpZ < 0.55f &&
+                        r.stunnedMs == 0L &&
+                        (r.flagPickupImmunityMs == 0L || r.shieldMs > 0L) &&
+                        sweptFlagDistance(r, flagX, flagY) <= flagCaptureRadiusFor(r)
                 }
-                .minByOrNull { TrackCatalog.distance(it.x, it.y, flagX, flagY) }
+                .minByOrNull { r -> sweptFlagDistance(r, flagX, flagY) }
 
             if (eligible != null) {
                 flagCarrierId = eligible.playerId
                 flagX = eligible.x
                 flagY = eligible.y
-                flagTransferCooldownMs = 550L
+                flagTransferCooldownMs = 250L
                 eligible.racePoints += 15
                 setBanner("${eligible.name} captured the FLAG!", 1800L)
             }
@@ -603,6 +636,8 @@ class RacePhysicsEngine(
     }
 
     private fun integrateCarPhysics(racer: MutableRacer, input: ControlInput, dt: Float) {
+        racer.prevX = racer.x
+        racer.prevY = racer.y
         val isAirborne = racer.jumpZ > 0.08f
         var closestIdx = racer.lastTrackIdx
         var isOffRoad = false
@@ -968,6 +1003,7 @@ class RacePhysicsEngine(
             }
             PowerUpType.SHIELD -> {
                 racer.shieldMs = 5500L
+                racer.flagPickupImmunityMs = 0L
                 setBanner("${racer.name} raised RC Shield!", 1400L)
             }
             PowerUpType.GLUE_SLICK -> {
