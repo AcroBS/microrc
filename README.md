@@ -1,6 +1,6 @@
 # MicroRC
 
-Top-down local Wi-Fi, Hotspot, and 2–4 player Online Web multiplayer RC racing game built with Kotlin and Jetpack Compose.
+Top-down local Wi-Fi, Hotspot, and 2–4 player Online multiplayer RC racing game built with Kotlin and Jetpack Compose.
 
 ## Installing the APK from GitHub
 
@@ -8,27 +8,22 @@ Every commit pushed to this repository triggers the **Build Android APK** workfl
 
 1. Open the **Releases** section of this GitHub repository (or configure **Obtainium** to track this repository).
 2. Download `MicroRC.apk` from the **Latest** release (`v1.0.<build>`).
-3. Open `MicroRC.apk` on your Android devices (Android 7.0+ / API 24+) to install.
+3. Open `MicroRC.apk` on your Android devices (Android 7.0+ / API 24+) to install, then sign in with your Google account for online play, friends, and leaderboards.
 
-## Online Web Play, Friends List, WhatsApp Invites & Google Sign-In on GitHub Builds
+## Maintainer CI & Google Play Console Deployment
 
-When pushing from Google AI Studio to GitHub, AI Studio excludes `app/google-services.json` (and `debug.keystore.base64`) from the Git export. You can enable **Firebase & Google Sign-In** on GitHub builds in **either** of two ways:
-
-### Method 1 — Instant In-App Setup (No Rebuild Needed)
-1. Install `MicroRC.apk` and open **Online Web Play**.
-2. Tap **Paste google-services.json** on the Cloud Sign-In card and paste the JSON from AI Studio's `app/google-services.json`. MicroRC initializes Firebase immediately on your device!
-3. Tap **APK Signing Info** on the same screen, copy the `SHA-1` & `SHA-256` fingerprints of your GitHub/Obtainium APK, and add them once in [Firebase Console](https://console.firebase.google.com/) → **Project Settings → Your apps (`com.aistudio.microrc.k7m9xp`) → Add fingerprint**.
-
-### Method 2 — Permanent GitHub Actions Secret (Baked into Every Release APK)
-1. In your GitHub repository → **Settings → Secrets and variables → Actions → New repository secret**:
-   - Name: `GOOGLE_SERVICES_JSON` — Value: paste the contents of `app/google-services.json` from AI Studio.
-2. Match the APK signing certificate (pick A or B):
-   - **Keep your Obtainium `ci-keystore`:** Add the GitHub APK's `SHA-1` and `SHA-256` (shown in the GitHub Actions workflow summary or in-app **APK Signing Info**) to Firebase Console → **Project Settings**, then update `GOOGLE_SERVICES_JSON`.
-   - **Or use AI Studio's key:** Add secret `SIGNING_KEYSTORE_BASE64` with the contents of `debug.keystore.base64`.
+- **Online Google Sign-In (`GOOGLE_SERVICES_JSON`):** Set `GOOGLE_SERVICES_JSON` in GitHub **Settings → Secrets and variables → Actions** (supported under either **Secrets** or **Variables**). Make sure the APK/Play App Signing `SHA-1` & `SHA-256` certificates are registered for `com.aistudio.microrc.k7m9xp` in your cloud project's Android app settings.
+- **Google Play Developer Console (`.aab` Release Bundle):**
+  1. Generate an upload keystore with alias `upload`:
+     ```bash
+     keytool -genkeypair -v -keystore my-upload-key.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+     ```
+  2. Base64-encode `my-upload-key.jks` (`base64 -w 0 my-upload-key.jks`) and add three GitHub Actions **Secrets**: `UPLOAD_KEYSTORE_BASE64`, `STORE_PASSWORD`, and `KEY_PASSWORD`.
+  3. Each workflow run will automatically produce a signed **`MicroRC-play-store-aab`** (`MicroRC-play-store.aab`) artifact ready to upload to Google Play Console. After enabling **Play App Signing** in Google Play Console, copy Google Play's **App signing key certificate (`SHA-1` & `SHA-256`)** from **Setup → App signing** into your cloud project's Android app settings so Google Sign-In works seamlessly for Play Store installs.
 
 ## Local Wi-Fi / Hotspot Multiplayer Setup
 
-No internet connection is required:
+No internet connection or sign-in is required for local play:
 - **Option A (Shared Wi-Fi):** Connect 2–4 phones to the same Wi-Fi network.
 - **Option B (Mobile Hotspot):** Enable a Wi-Fi Hotspot on one phone and connect the other phones to it.
 - One player taps **Host Race**; the other players tap **Join Race** (or connect via the Host IP shown in the lobby).

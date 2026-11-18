@@ -237,7 +237,7 @@ object SessionNotificationHelper {
             .getOrDefault(invite.gameMode)
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_race_invite)
             .setContentTitle("${invite.senderName} invited you to race!")
             .setContentText("Join ${invite.roomName} (#${invite.roomCode} • $modeLabel)")
             .setPriority(NotificationCompat.PRIORITY_HIGH)

@@ -645,6 +645,17 @@ class OnlineViewModel(
         sessionManager.leaveCurrentRoomInternal()
     }
 
+    suspend fun deleteAllCloudDataBeforeAccountRemoval() {
+        presenceHeartbeatJob?.cancel()
+        friendshipsJob?.cancel()
+        invitesJob?.cancel()
+        roomsSubscriptionJob?.cancel()
+        leaderboardSubscriptionJob?.cancel()
+        sessionManager.leaveCurrentRoomInternal()
+        repository.deleteAllUserRaceAndLeaderboardData()
+        friendsRepository.deleteAllUserSocialData()
+    }
+
     override fun onCleared() {
         super.onCleared()
         presenceHeartbeatJob?.cancel()

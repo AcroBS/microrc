@@ -1,6 +1,6 @@
 {
   "name": "MicroRC",
-  "description": "Top-down offline local Wi-Fi multiplayer RC racing game for 2-4 players with 5 tracks, custom vehicles, power-ups, touch or tilt steering, and lobby chat.",
+  "description": "Top-down local Wi-Fi, Hotspot, and 2-4 player online RC racing game with friends list, WhatsApp session invites, custom tracks, stunts, and ghost leaderboards.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

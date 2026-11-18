@@ -803,4 +803,43 @@ class OnlineRaceRepository(
             Result.failure(e)
         }
     }
+
+    suspend fun deleteAllUserRaceAndLeaderboardData(): Result<Unit> {
+        val uid = auth.currentUser?.uid ?: return Result.success(Unit)
+        return try {
+            runCatching {
+                val entries = db.collection("leaderboardEntries")
+                    .whereEqualTo("publicEntry", true)
+                    .whereEqualTo("userId", uid)
+                    .get()
+                    .await()
+                entries.documents.forEach { doc -> doc.reference.delete().await() }
+            }
+            runCatching {
+                val ghosts = db.collection("ghostRuns")
+                    .whereEqualTo("publicGhost", true)
+                    .whereEqualTo("userId", uid)
+                    .get()
+                    .await()
+                ghosts.documents.forEach { doc -> doc.reference.delete().await() }
+            }
+            runCatching {
+                val hostedRooms = db.collection("onlineRooms")
+                    .whereEqualTo("discoverable", true)
+                    .whereEqualTo("hostUid", uid)
+                    .get()
+                    .await()
+                hostedRooms.documents.forEach { doc ->
+                    runCatching { doc.reference.collection("inputs").document(uid).delete().await() }
+                    runCatching { doc.reference.collection("players").document(uid).delete().await() }
+                    runCatching { doc.reference.delete().await() }
+                }
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            rethrowIfRealCancellation(e)
+            handleFirestoreError(e, OperationType.DELETE, "leaderboardEntries")
+            Result.failure(e)
+        }
+    }
 }

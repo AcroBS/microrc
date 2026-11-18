@@ -33,6 +33,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.material.icons.filled.AddCircle
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
@@ -101,6 +102,7 @@ fun OnlineHubScreen(
     onOpenFriends: () -> Unit = {},
     onOpenLeaderboards: () -> Unit,
     onSignOut: () -> Unit,
+    onDeleteAccount: () -> Unit = {},
     onBack: () -> Unit
 ) {
     BackHandler { onBack() }
@@ -118,6 +120,7 @@ fun OnlineHubScreen(
     var passwordPromptRoom by remember { mutableStateOf<OnlineRoomDoc?>(null) }
     var joinPasswordDraft by remember { mutableStateOf("") }
     var localValidationHint by remember { mutableStateOf<String?>(null) }
+    var showDeleteAccountDialog by remember { mutableStateOf(false) }
 
     Surface(
         color = MaterialTheme.colorScheme.background,
@@ -763,8 +766,73 @@ fun OnlineHubScreen(
                         }
                     }
                 }
+
+                // Account & Privacy Footer (Google Play User Data Policy)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp, bottom = 4.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(
+                        onClick = { showDeleteAccountDialog = true },
+                        modifier = Modifier
+                            .height(48.dp)
+                            .testTag("delete_online_account_button")
+                    ) {
+                        Icon(
+                            Icons.Default.DeleteForever,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Delete Online Account & Data",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
             }
         }
+    }
+
+    if (showDeleteAccountDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAccountDialog = false },
+            title = {
+                Text("Delete Online Account & Data?", style = MaterialTheme.typography.titleLarge)
+            },
+            text = {
+                Text(
+                    text = "This permanently deletes your MicroRC online profile, friends list, race invites, cloud leaderboard scores, and Ghost runs, and signs out your Google account. Your offline garage and local tracks remain on your phone.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteAccountDialog = false
+                        onDeleteAccount()
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    ),
+                    modifier = Modifier.testTag("confirm_delete_account_button")
+                ) {
+                    Text("Delete Permanently")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteAccountDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     // Password Entry Modal for Private / Locked Online Groups

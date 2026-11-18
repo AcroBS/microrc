@@ -519,4 +519,40 @@ class FriendsRepository(
             Result.failure(e)
         }
     }
+
+    suspend fun deleteAllUserSocialData(): Result<Unit> {
+        val uid = auth.currentUser?.uid ?: return Result.success(Unit)
+        return withContext(NonCancellable) {
+            try {
+                runCatching {
+                    val friendships = db.collection("friendships")
+                        .whereArrayContains("memberUids", uid)
+                        .get()
+                        .await()
+                    friendships.documents.forEach { doc -> doc.reference.delete().await() }
+                }
+                runCatching {
+                    val sentInvites = db.collection("sessionInvites")
+                        .whereEqualTo("senderUid", uid)
+                        .get()
+                        .await()
+                    sentInvites.documents.forEach { doc -> doc.reference.delete().await() }
+                }
+                runCatching {
+                    val receivedInvites = db.collection("sessionInvites")
+                        .whereEqualTo("recipientUid", uid)
+                        .get()
+                        .await()
+                    receivedInvites.documents.forEach { doc -> doc.reference.delete().await() }
+                }
+                runCatching {
+                    db.collection("driverProfiles").document(uid).delete().await()
+                }
+                Result.success(Unit)
+            } catch (e: Exception) {
+                handleFirestoreError(e, OperationType.DELETE, "driverProfiles/$uid")
+                Result.failure(e)
+            }
+        }
+    }
 }

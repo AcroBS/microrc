@@ -439,11 +439,14 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("pure_solo_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("leaderboards_button").performScrollTo().assertIsDisplayed()
 
-        // Tapping Online Web Play while signed out opens the Google Sign-In gate
+        // Tapping Online Web Play while signed out opens the clean end-user Google Sign-In gate
         composeTestRule.onNodeWithTag("online_play_button").performScrollTo().performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("google_sign_in_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("auth_back_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("github_firebase_setup_banner").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("paste_google_services_button").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("copy_apk_fingerprints_button").assertDoesNotExist()
 
         // Backing out returns cleanly to Home
         composeTestRule.onNodeWithTag("auth_back_button").performScrollTo().performClick()

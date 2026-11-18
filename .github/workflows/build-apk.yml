@@ -116,8 +116,8 @@ jobs:
           ACTIVE_SHA256="$(printf '%s\n' "$CERT_INFO" | grep -E "SHA256:|SHA-256:" | head -n 1 | sed -E 's/.*SHA-?256:[[:space:]]*//' | tr -d '[:space:]' || true)"
           echo "  SHA1:   ${ACTIVE_SHA1:-unknown}"
           echo "  SHA256: ${ACTIVE_SHA256:-unknown}"
-          echo "ACTIVE_APK_SHA1=${ACTIVE_APK_SHA1:-$ACTIVE_SHA1}" >> "$GITHUB_ENV"
-          echo "ACTIVE_APK_SHA256=${ACTIVE_APK_SHA256:-$ACTIVE_SHA256}" >> "$GITHUB_ENV"
+          echo "ACTIVE_APK_SHA1=${ACTIVE_SHA1}" >> "$GITHUB_ENV"
+          echo "ACTIVE_APK_SHA256=${ACTIVE_SHA256}" >> "$GITHUB_ENV"
 
           if [ ! -f .env ] && [ -f .env.example ]; then
             cp .env.example .env
@@ -126,10 +126,12 @@ jobs:
             chmod +x gradlew
           fi
 
-      - name: Restore Firebase google-services.json & BuildConfig secrets
+      - name: Restore google-services.json from GitHub Secrets or Variables
         env:
-          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
-          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+          GOOGLE_SERVICES_JSON_SECRET: ${{ secrets.GOOGLE_SERVICES_JSON }}
+          GOOGLE_SERVICES_JSON_VAR: ${{ vars.GOOGLE_SERVICES_JSON }}
+          GOOGLE_SERVICES_JSON_B64_SECRET: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+          GOOGLE_SERVICES_JSON_B64_VAR: ${{ vars.GOOGLE_SERVICES_JSON_BASE64 }}
           FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
           FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
@@ -139,6 +141,8 @@ jobs:
         run: |
           FIREBASE_STATUS="MISSING"
           EXPECTED_PKG="com.aistudio.microrc.k7m9xp"
+          export GOOGLE_SERVICES_JSON="${GOOGLE_SERVICES_JSON_SECRET:-${GOOGLE_SERVICES_JSON_VAR:-}}"
+          export GOOGLE_SERVICES_JSON_BASE64="${GOOGLE_SERVICES_JSON_B64_SECRET:-${GOOGLE_SERVICES_JSON_B64_VAR:-}}"
 
           if [ ! -s app/google-services.json ] && [ -n "${GOOGLE_SERVICES_JSON:-}" ]; then
             python3 - <<'PYEOF' || rm -f app/google-services.json
@@ -157,7 +161,7 @@ jobs:
               with open("app/google-services.json", "w", encoding="utf-8") as f:
                   json.dump(parsed, f, indent=2)
           except Exception as exc:
-              print(f"::warning::Could not parse GOOGLE_SERVICES_JSON secret ({exc}); falling back to runtime/env config.")
+              print(f"::warning::Could not parse GOOGLE_SERVICES_JSON ({exc}); falling back to env config.")
           PYEOF
           elif [ ! -s app/google-services.json ] && [ -n "${GOOGLE_SERVICES_JSON_BASE64:-}" ]; then
             printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | tr -d '[:space:]' | base64 -d > app/google-services.json 2>/dev/null || rm -f app/google-services.json
@@ -229,7 +233,7 @@ jobs:
                 ;;
               EXTRACTED_PACKAGE_MISMATCH)
                 FIREBASE_STATUS="EXTRACTED_TO_BUILDCONFIG"
-                echo "::warning::google-services.json did not contain package ${EXPECTED_PKG}; extracted Firebase credentials into CI BuildConfig fallback so the APK still builds cleanly."
+                echo "::warning::google-services.json did not contain package ${EXPECTED_PKG}; extracted credentials into CI BuildConfig fallback."
                 ;;
               *)
                 rm -f app/google-services.json
@@ -248,9 +252,8 @@ jobs:
 
           if [ "$FIREBASE_STATUS" = "MISSING" ] && [ -n "${FIREBASE_PROJECT_ID:-}" ] && [ -n "${FIREBASE_APP_ID:-}" ] && [ -n "${FIREBASE_API_KEY:-}" ]; then
             FIREBASE_STATUS="ENV_BUILDCONFIG"
-            echo "Configured Firebase fallback via FIREBASE_* secrets in GITHUB_ENV."
           elif [ "$FIREBASE_STATUS" = "MISSING" ]; then
-            echo "::warning::app/google-services.json was not found! Add repository secret GOOGLE_SERVICES_JSON (or paste google-services.json once inside MicroRC -> Online Web Play) to enable Google Sign-In."
+            echo "::warning::GOOGLE_SERVICES_JSON was not found in repository Secrets or Variables."
           fi
 
           SHA_MATCH_NOTE="N/A (no google-services.json)"
@@ -258,19 +261,18 @@ jobs:
             EXPECTED_HASH="$(printf '%s' "${ACTIVE_APK_SHA1:-}" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
             if [ -n "$EXPECTED_HASH" ] && grep -qi "$EXPECTED_HASH" app/google-services.json; then
               SHA_MATCH_NOTE="Matched in google-services.json"
-              echo "Verified APK SHA-1 (${ACTIVE_APK_SHA1}) is registered in app/google-services.json."
             else
-              SHA_MATCH_NOTE="Add SHA-1 ${ACTIVE_APK_SHA1} in Firebase Console -> Project Settings (or set secret SIGNING_KEYSTORE_BASE64)"
-              echo "::warning::Active APK SHA-1 (${ACTIVE_APK_SHA1}) is not listed in app/google-services.json. Register SHA-1 ${ACTIVE_APK_SHA1} (and SHA-256 ${ACTIVE_APK_SHA256}) in Firebase Console or set SIGNING_KEYSTORE_BASE64."
+              SHA_MATCH_NOTE="Register SHA-1 ${ACTIVE_APK_SHA1} & SHA-256 ${ACTIVE_APK_SHA256} in your cloud project's Android app settings"
+              echo "::warning::Active APK SHA-1 (${ACTIVE_APK_SHA1}) is not listed in google-services.json yet."
             fi
           fi
 
           {
-            echo "### Firebase & Online Play Build Check"
-            echo "- **Firebase Config**: \`${FIREBASE_STATUS}\`"
+            echo "### Build & Google Sign-In Check"
+            echo "- **Google Sign-In Config**: \`${FIREBASE_STATUS}\`"
             echo "- **APK Signing SHA-1**: \`${ACTIVE_APK_SHA1:-unknown}\`"
             echo "- **APK Signing SHA-256**: \`${ACTIVE_APK_SHA256:-unknown}\`"
-            echo "- **Google Sign-In Cert Match**: ${SHA_MATCH_NOTE}"
+            echo "- **Cert Match**: ${SHA_MATCH_NOTE}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Gradle 9.3.1
@@ -290,6 +292,24 @@ jobs:
           gradle assembleDebug --no-daemon
           cp app/build/outputs/apk/debug/app-debug.apk MicroRC.apk
 
+      - name: Build Google Play Store AAB (when upload key secrets are configured)
+        env:
+          UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "${UPLOAD_KEYSTORE_BASE64:-}" ] && [ -n "${STORE_PASSWORD:-}" ] && [ -n "${KEY_PASSWORD:-}" ]; then
+            printf '%s' "$UPLOAD_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > my-upload-key.jks
+            KEYSTORE_PATH="${GITHUB_WORKSPACE}/my-upload-key.jks" gradle bundleRelease --no-daemon
+            cp app/build/outputs/bundle/release/app-release.aab MicroRC-play-store.aab
+            rm -f my-upload-key.jks
+            echo "HAS_PLAY_AAB=true" >> "$GITHUB_ENV"
+            echo "Built signed Google Play App Bundle: MicroRC-play-store.aab"
+          else
+            echo "HAS_PLAY_AAB=false" >> "$GITHUB_ENV"
+            echo "Skipping optional bundleRelease (.aab): set secrets UPLOAD_KEYSTORE_BASE64, STORE_PASSWORD, and KEY_PASSWORD (alias 'upload') to produce MicroRC-play-store.aab in CI."
+          fi
+
       - name: Run unit and Robolectric tests
         run: gradle testDebugUnitTest --no-daemon
 
@@ -298,6 +318,15 @@ jobs:
         with:
           name: MicroRC-apk
           path: MicroRC.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Google Play AAB artifact
+        if: env.HAS_PLAY_AAB == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: MicroRC-play-store-aab
+          path: MicroRC-play-store.aab
           if-no-files-found: error
           retention-days: 30
 

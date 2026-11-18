@@ -141,6 +141,7 @@ fun MicroRCApp(
 
     var activeOnlineVm: OnlineViewModel? = null
     var signOutCleanupAction: (suspend () -> Unit)? = null
+    var deleteAccountCleanupAction: (suspend () -> Unit)? = null
 
     if (currentUser != null) {
         val uid = currentUser!!.uid
@@ -159,6 +160,7 @@ fun MicroRCApp(
             )
             activeOnlineVm = onlineVm
             signOutCleanupAction = { onlineVm.cleanupBeforeSignOut() }
+            deleteAccountCleanupAction = { onlineVm.deleteAllCloudDataBeforeAccountRemoval() }
 
             LaunchedEffect(onlineVm) {
                 viewModel.latestCompletedSoloRun.collect { summary ->
@@ -445,6 +447,14 @@ fun MicroRCApp(
                                 GoogleAuthManager.signOut(
                                     context = context,
                                     beforeSignOutCleanup = signOutCleanupAction
+                                )
+                            }
+                        },
+                        onDeleteAccount = {
+                            uiScope.launch {
+                                GoogleAuthManager.deleteAccountAndSignOut(
+                                    context = context,
+                                    beforeDeleteCleanup = deleteAccountCleanupAction
                                 )
                             }
                         },
