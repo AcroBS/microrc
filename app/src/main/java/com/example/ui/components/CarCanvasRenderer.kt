@@ -304,6 +304,68 @@ fun DrawScope.drawRcCar(
     }
 }
 
+fun DrawScope.drawGhostRcCar(
+    x: Float,
+    y: Float,
+    angleRad: Float,
+    carType: RcCarType,
+    primaryColor: Color,
+    accentColor: Color,
+    jumpZ: Float = 0f,
+    scale: Float = 1f,
+    animTimeSec: Float = 0f
+) {
+    val deg = angleRad * 180f / PI.toFloat()
+    val airElevation = jumpZ.coerceIn(0f, 1.4f)
+    val airScale = scale * (1f + airElevation * 0.44f)
+    val pulse = 0.5f + 0.5f * sin(animTimeSec * 7f)
+    val ghostPrimary = Color(
+        red = primaryColor.red * 0.45f + 0.0f,
+        green = primaryColor.green * 0.45f + 0.50f,
+        blue = primaryColor.blue * 0.45f + 0.55f,
+        alpha = 0.44f
+    )
+    val ghostAccent = Color(
+        red = accentColor.red * 0.35f + 0.55f,
+        green = accentColor.green * 0.35f + 0.62f,
+        blue = accentColor.blue * 0.35f + 0.65f,
+        alpha = 0.56f
+    )
+
+    // Holographic ground projection ring
+    drawCircle(
+        color = Color(0xFF00E5FF).copy(alpha = 0.14f + 0.08f * pulse),
+        radius = (26f + 3f * pulse) * scale,
+        center = Offset(x, y)
+    )
+    drawCircle(
+        color = Color(0xFF80D8FF).copy(alpha = 0.52f),
+        radius = (26f + 3f * pulse) * scale,
+        center = Offset(x, y),
+        style = Stroke(width = 1.8f * scale)
+    )
+
+    withTransform({
+        translate(left = x, top = y)
+        scale(scaleX = airScale, scaleY = airScale, pivot = Offset.Zero)
+        rotate(degrees = deg, pivot = Offset.Zero)
+    }) {
+        when (carType) {
+            RcCarType.VOLT_BUGGY -> drawVoltBuggy(ghostPrimary, ghostAccent, 0f)
+            RcCarType.APEX_FORMULA -> drawApexFormula(ghostPrimary, ghostAccent, 0f)
+            RcCarType.TUNDRA_MONSTER -> drawTundraMonster(ghostPrimary, ghostAccent, 0f)
+            RcCarType.DRIFT_PHANTOM -> drawDriftPhantom(ghostPrimary, ghostAccent, 0f)
+        }
+        // Cyan holographic rim highlight
+        drawOval(
+            color = Color(0xFF00E5FF).copy(alpha = 0.62f),
+            topLeft = Offset(-22f, -14f),
+            size = Size(45f, 28f),
+            style = Stroke(width = 1.8f)
+        )
+    }
+}
+
 private fun DrawScope.drawWheel(
     cx: Float,
     cy: Float,

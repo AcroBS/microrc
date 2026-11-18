@@ -5,12 +5,17 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import com.example.data.TrackCatalog
 import com.example.engine.RacePhysicsEngine
+import com.example.model.ActiveGhostCarState
 import com.example.model.ArenaShape
 import com.example.model.ChatMessage
 import com.example.model.ControlInput
 import com.example.model.CustomTrackData
 import com.example.model.DiscoveredLobby
 import com.example.model.GameMode
+import com.example.model.GhostCodec
+import com.example.model.GhostFrame
+import com.example.model.GhostRunPlayback
+import com.example.model.LeaderboardBoardKey
 import com.example.model.LobbyPlayer
 import com.example.model.LobbyStatePayload
 import com.example.model.NetworkMessage
@@ -26,6 +31,7 @@ import com.example.model.RematchVoteOption
 import com.example.model.StuntVariant
 import com.example.model.TrackDefinition
 import com.example.model.TrackId
+import com.example.model.WinCondition
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.CoroutineScope
@@ -65,7 +71,27 @@ sealed interface SessionRole {
     data object Solo : SessionRole
     data object Host : SessionRole
     data object Client : SessionRole
+    data object OnlineHost : SessionRole
+    data object OnlineClient : SessionRole
+
+    val isHostLike: Boolean
+        get() = this == Host || this == Solo || this == OnlineHost
+
+    val isOnline: Boolean
+        get() = this == OnlineHost || this == OnlineClient
 }
+
+data class CompletedSoloRunSummary(
+    val boardKey: String,
+    val gameMode: GameMode,
+    val trackKey: String,
+    val totalLaps: Int,
+    val finishTimeMs: Long,
+    val bestLapMs: Long,
+    val bestScore: Int,
+    val pureSoloNoBots: Boolean,
+    val encodedGhostFrames: String
+)
 
 sealed interface RaceNavEvent {
     data object EnterLobby : RaceNavEvent
@@ -239,6 +265,15 @@ class WifiP2pRaceManager(
 
     private val _rematchState = MutableStateFlow<RematchCountdownState?>(null)
     val rematchState: StateFlow<RematchCountdownState?> = _rematchState.asStateFlow()
+
+    private val _activeChallengeGhost = MutableStateFlow<GhostRunPlayback?>(null)
+    val activeChallengeGhost: StateFlow<GhostRunPlayback?> = _activeChallengeGhost.asStateFlow()
+
+    private val _activeGhostCar = MutableStateFlow<ActiveGhostCarState?>(null)
+    val activeGhostCar: StateFlow<ActiveGhostCarState?> = _activeGhostCar.asStateFlow()
+
+    private val _completedSoloRuns = MutableSharedFlow<CompletedSoloRunSummary>(extraBufferCapacity = 4)
+    val completedSoloRuns: SharedFlow<CompletedSoloRunSummary> = _completedSoloRuns.asSharedFlow()
 
     private val _navEvents = MutableSharedFlow<RaceNavEvent>(extraBufferCapacity = 8)
     val navEvents: SharedFlow<RaceNavEvent> = _navEvents.asSharedFlow()
@@ -421,36 +456,57 @@ class WifiP2pRaceManager(
     fun startSoloSession(
         profile: PlayerProfile,
         initialRules: RaceRulesSettings = RaceRulesSettings(),
-        initialCustomTrack: CustomTrackData? = null
+        initialCustomTrack: CustomTrackData? = null,
+        includeBots: Boolean = true,
+        challengeGhost: GhostRunPlayback? = null
     ) {
         leaveSession()
         localPlayerId = profile.playerId
         configureInitialSessionMode(initialRules, initialCustomTrack)
         _role.value = SessionRole.Solo
+        _activeChallengeGhost.value = challengeGhost
+        _activeGhostCar.value = null
         inRace = false
         chatLog.clear()
         playersList.clear()
         playersList.add(profile.toLobbyPlayer(isHost = true, isReady = true))
-        val botNames = listOf("Volt-AI", "Apex-AI", "Turbo-AI")
-        val botCars = listOf(RcCarType.APEX_FORMULA, RcCarType.DRIFT_PHANTOM, RcCarType.TUNDRA_MONSTER)
-        botNames.forEachIndexed { idx, botName ->
-            val preset = RcColorPresets[(idx + 1) % RcColorPresets.size]
-            playersList.add(
-                LobbyPlayer(
-                    id = "bot_$idx",
-                    name = botName,
-                    isHost = false,
-                    isBot = true,
-                    isReady = true,
-                    carType = botCars[idx].name,
-                    primaryColorArgb = preset.primaryArgb,
-                    accentColorArgb = preset.accentArgb
+        if (includeBots) {
+            val botNames = listOf("Volt-AI", "Apex-AI", "Turbo-AI")
+            val botCars = listOf(RcCarType.APEX_FORMULA, RcCarType.DRIFT_PHANTOM, RcCarType.TUNDRA_MONSTER)
+            botNames.forEachIndexed { idx, botName ->
+                val preset = RcColorPresets[(idx + 1) % RcColorPresets.size]
+                playersList.add(
+                    LobbyPlayer(
+                        id = "bot_$idx",
+                        name = botName,
+                        isHost = false,
+                        isBot = true,
+                        isReady = true,
+                        carType = botCars[idx].name,
+                        primaryColorArgb = preset.primaryArgb,
+                        accentColorArgb = preset.accentArgb
+                    )
                 )
-            )
+            }
+            addSystemChat("Solo paddock ready. Customize track or tap Pure Solo (0 Bots) for time trials!")
+        } else {
+            val ghostMsg = challengeGhost?.let {
+                "Ghost Challenge loaded vs ${it.driverName} (${String.format("%.2fs", it.finishTimeMs / 1000f)})!"
+            } ?: "Pure Solo Driving (0 AI Bots). Set Personal Best times & record your Ghost car!"
+            addSystemChat(ghostMsg)
         }
-        addSystemChat("Solo paddock ready. Customize track or hit Start Race!")
         publishLocalLobbyState()
         _navEvents.tryEmit(RaceNavEvent.EnterLobby)
+    }
+
+    fun setChallengeGhost(ghost: GhostRunPlayback?) {
+        _activeChallengeGhost.value = ghost
+        if (ghost == null) {
+            _activeGhostCar.value = null
+        } else if (_role.value == SessionRole.Solo && !inRace) {
+            addSystemChat("Ghost target set: ${ghost.driverName} (${String.format("%.2fs", ghost.finishTimeMs / 1000f)})")
+            publishLocalLobbyState()
+        }
     }
 
     fun hostLobby(
@@ -1104,7 +1160,7 @@ class WifiP2pRaceManager(
                 )
                 clientSendChannel?.trySend(msgAdapter.toJson(msg))
             }
-            SessionRole.None -> Unit
+            SessionRole.None, SessionRole.OnlineHost, SessionRole.OnlineClient -> Unit
         }
     }
 
@@ -1131,7 +1187,7 @@ class WifiP2pRaceManager(
                 }
                 if (_role.value == SessionRole.Host) broadcastLobbyState() else publishLocalLobbyState()
             }
-            SessionRole.None -> Unit
+            SessionRole.None, SessionRole.OnlineHost, SessionRole.OnlineClient -> Unit
         }
     }
 
@@ -1243,6 +1299,20 @@ class WifiP2pRaceManager(
         if (_role.value == SessionRole.Host) broadcastLobbyState() else publishLocalLobbyState()
     }
 
+    fun clearBots() {
+        if (_role.value != SessionRole.Host && _role.value != SessionRole.Solo) return
+        var removedCount = 0
+        synchronized(playersList) {
+            val before = playersList.size
+            playersList.removeAll { it.isBot }
+            removedCount = before - playersList.size
+        }
+        if (removedCount > 0) {
+            addSystemChat("Switched to Pure Solo Driving (0 AI Bots).")
+        }
+        if (_role.value == SessionRole.Host) broadcastLobbyState() else publishLocalLobbyState()
+    }
+
     fun sendChatMessage(senderName: String, text: String) {
         val clean = text.trim()
         if (clean.isEmpty()) return
@@ -1267,7 +1337,7 @@ class WifiP2pRaceManager(
                     )
                 )
             }
-            SessionRole.None -> Unit
+            SessionRole.None, SessionRole.OnlineHost, SessionRole.OnlineClient -> Unit
         }
     }
 
@@ -1360,9 +1430,56 @@ class WifiP2pRaceManager(
         }
         _navEvents.tryEmit(RaceNavEvent.StartRace)
 
+        val isSoloSession = _role.value == SessionRole.Solo
+        val pureSoloNoBots = isSoloSession && snapshotPlayers.none { it.isBot }
+        val activeGhostForRun = if (isSoloSession && concreteMode == GameMode.RACE && !isHybrid) {
+            _activeChallengeGhost.value?.takeIf { ghost ->
+                ghost.trackId == (customData?.id ?: currentTrackId.name)
+            }
+        } else {
+            null
+        }
+        val recordedGhostFrames = mutableListOf<GhostFrame>()
+        if (isSoloSession && concreteMode == GameMode.RACE && !isHybrid) {
+            initialSnap.racers.find { it.playerId == localPlayerId }?.let { me ->
+                recordedGhostFrames.add(
+                    GhostFrame(
+                        tMs = 0L,
+                        x = me.x,
+                        y = me.y,
+                        angleRad = me.angleRad,
+                        jumpZ = me.jumpZ,
+                        progress = me.totalProgress
+                    )
+                )
+            }
+        }
+        if (activeGhostForRun != null) {
+            val g0 = GhostCodec.interpolateAt(activeGhostForRun.frames, 0L)
+            _activeGhostCar.value = g0?.let {
+                ActiveGhostCarState(
+                    driverName = activeGhostForRun.driverName,
+                    carType = activeGhostForRun.carType,
+                    primaryColorArgb = activeGhostForRun.primaryColorArgb,
+                    accentColorArgb = activeGhostForRun.accentColorArgb,
+                    finishTimeMs = activeGhostForRun.finishTimeMs,
+                    bestLapMs = activeGhostForRun.bestLapMs,
+                    x = it.x,
+                    y = it.y,
+                    angleRad = it.angleRad,
+                    jumpZ = it.jumpZ,
+                    finished = false,
+                    splitDeltaMs = null
+                )
+            }
+        } else {
+            _activeGhostCar.value = null
+        }
+
         physicsJob?.cancel()
         physicsJob = scope.launch(Dispatchers.Default) {
             var tickCounter = 0
+            var lastGhostRecordMs = -100L
             var lastNs = System.nanoTime()
             while (isActive && inRace) {
                 delay(16L)
@@ -1390,6 +1507,53 @@ class WifiP2pRaceManager(
                 }
                 _raceSnapshot.value = snap
 
+                // Ghost recording & live Ghost Challenge interpolation in Solo mode
+                if (isSoloSession && concreteMode == GameMode.RACE && !isHybrid) {
+                    val me = snap.racers.find { it.playerId == localPlayerId }
+                    if (me != null && snap.phase == RacePhase.RACING.name && (snap.raceTimeMs - lastGhostRecordMs) >= 95L) {
+                        lastGhostRecordMs = snap.raceTimeMs
+                        recordedGhostFrames.add(
+                            GhostFrame(
+                                tMs = snap.raceTimeMs,
+                                x = me.x,
+                                y = me.y,
+                                angleRad = me.angleRad,
+                                jumpZ = me.jumpZ,
+                                progress = me.totalProgress
+                            )
+                        )
+                    }
+                    if (activeGhostForRun != null) {
+                        val ghostTime = if (snap.phase == RacePhase.COUNTDOWN.name) 0L else snap.raceTimeMs
+                        val pose = GhostCodec.interpolateAt(activeGhostForRun.frames, ghostTime)
+                        if (pose != null) {
+                            val deltaMs = if (snap.phase == RacePhase.RACING.name && me != null) {
+                                GhostCodec.computeSplitDeltaMs(
+                                    frames = activeGhostForRun.frames,
+                                    playerProgress = me.totalProgress,
+                                    playerRaceTimeMs = snap.raceTimeMs
+                                )
+                            } else {
+                                null
+                            }
+                            _activeGhostCar.value = ActiveGhostCarState(
+                                driverName = activeGhostForRun.driverName,
+                                carType = activeGhostForRun.carType,
+                                primaryColorArgb = activeGhostForRun.primaryColorArgb,
+                                accentColorArgb = activeGhostForRun.accentColorArgb,
+                                finishTimeMs = activeGhostForRun.finishTimeMs,
+                                bestLapMs = activeGhostForRun.bestLapMs,
+                                x = pose.x,
+                                y = pose.y,
+                                angleRad = pose.angleRad,
+                                jumpZ = pose.jumpZ,
+                                finished = ghostTime >= activeGhostForRun.finishTimeMs,
+                                splitDeltaMs = deltaMs
+                            )
+                        }
+                    }
+                }
+
                 tickCounter++
                 val isFinished = snap.phase == RacePhase.FINISHED.name
                 if (isFinished) {
@@ -1398,6 +1562,65 @@ class WifiP2pRaceManager(
                         awardChampionshipPoints(snap)
                     }
                     _lastResults.value = snap
+                    _activeGhostCar.value = null
+                    if (isSoloSession && !isHybrid) {
+                        val me = snap.racers.find { it.playerId == localPlayerId }
+                        if (me != null) {
+                            val finishMs = me.finishTimeMs ?: snap.raceTimeMs
+                            if (concreteMode == GameMode.RACE &&
+                                currentRules.winConditionEnum == WinCondition.FIRST_TO_FINISH &&
+                                finishMs > 0L
+                            ) {
+                                recordedGhostFrames.add(
+                                    GhostFrame(
+                                        tMs = finishMs,
+                                        x = me.x,
+                                        y = me.y,
+                                        angleRad = me.angleRad,
+                                        jumpZ = me.jumpZ,
+                                        progress = me.totalProgress
+                                    )
+                                )
+                                val trackKey = customData?.id ?: currentTrackId.name
+                                val bKey = LeaderboardBoardKey.build(
+                                    gameMode = GameMode.RACE,
+                                    trackKey = trackKey,
+                                    totalLaps = currentTotalLaps
+                                )
+                                _completedSoloRuns.tryEmit(
+                                    CompletedSoloRunSummary(
+                                        boardKey = bKey,
+                                        gameMode = GameMode.RACE,
+                                        trackKey = trackKey,
+                                        totalLaps = currentTotalLaps,
+                                        finishTimeMs = finishMs,
+                                        bestLapMs = me.bestLapMs ?: 0L,
+                                        bestScore = me.racePoints,
+                                        pureSoloNoBots = pureSoloNoBots,
+                                        encodedGhostFrames = GhostCodec.encodeFrames(recordedGhostFrames)
+                                    )
+                                )
+                            } else if (concreteMode == GameMode.STUNTS && me.racePoints > 0) {
+                                val bKey = LeaderboardBoardKey.build(
+                                    gameMode = GameMode.STUNTS,
+                                    trackKey = "STUNT_GAUNTLET"
+                                )
+                                _completedSoloRuns.tryEmit(
+                                    CompletedSoloRunSummary(
+                                        boardKey = bKey,
+                                        gameMode = GameMode.STUNTS,
+                                        trackKey = "STUNT_GAUNTLET",
+                                        totalLaps = 4,
+                                        finishTimeMs = snap.raceTimeMs.coerceAtLeast(1L),
+                                        bestLapMs = 0L,
+                                        bestScore = me.racePoints,
+                                        pureSoloNoBots = pureSoloNoBots,
+                                        encodedGhostFrames = ""
+                                    )
+                                )
+                            }
+                        }
+                    }
                     if (_role.value == SessionRole.Host) {
                         val finalSeq = hostStateSeq.incrementAndGet()
                         val finalLine = String(RaceTelemetryCodec.encodeSnapshot(finalSeq, snap), Charsets.UTF_8)
@@ -1616,7 +1839,7 @@ class WifiP2pRaceManager(
                     )
                 )
             }
-            SessionRole.None -> Unit
+            SessionRole.None, SessionRole.OnlineHost, SessionRole.OnlineClient -> Unit
         }
     }
 
@@ -1707,6 +1930,7 @@ class WifiP2pRaceManager(
         physicsJob?.cancel()
         physicsJob = null
         physicsEngine = null
+        _activeGhostCar.value = null
         inRace = false
         if (_role.value == SessionRole.Host) {
             broadcastLobbyState()
@@ -1804,6 +2028,8 @@ class WifiP2pRaceManager(
         _lobbyState.value = null
         _raceSnapshot.value = null
         _activeTrack.value = null
+        _activeChallengeGhost.value = null
+        _activeGhostCar.value = null
         currentCustomTrack = null
     }
 

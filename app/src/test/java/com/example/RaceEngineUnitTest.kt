@@ -10,10 +10,14 @@ import com.example.model.ControlInput
 import com.example.model.ExternalEventType
 import com.example.model.FieldPickupType
 import com.example.model.GameMode
+import com.example.model.GhostCodec
+import com.example.model.GhostFrame
 import com.example.model.HazardType
+import com.example.model.LeaderboardBoardKey
 import com.example.model.LobbyPlayer
 import com.example.model.LobbyStatePayload
 import com.example.model.NetworkMessage
+import com.example.model.OnlinePasswordHasher
 import com.example.model.PacketType
 import com.example.model.PowerUpType
 import com.example.model.PropShape
@@ -38,6 +42,7 @@ import org.junit.Test
 import android.view.Surface
 import com.example.sensors.TiltSteeringController
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.sin
@@ -2129,5 +2134,133 @@ class RaceEngineUnitTest {
         val p1StillDisabled = snap.racers.first { it.playerId == "p1" }
         assertEquals("Laser-disabled car must remain motionless at 0 speed", 0f, p1StillDisabled.speed, 0.01f)
     }
+
+    @Test
+    fun pureSoloMode_grantsOnlyDrivingPowerUpsAndNeverSpawnsMultiCarFieldPickups() {
+        // Use a single AI-steered racer so racers.size == 1 and the car drives around the circuit hitting item boxes
+        val soloPlayer = listOf(
+            LobbyPlayer("solo_1", "PureSoloDriver", isHost = true, isBot = true, carType = RcCarType.APEX_FORMULA.name)
+        )
+        val engine = RacePhysicsEngine(
+            track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP),
+            totalLaps = 5,
+            players = soloPlayer,
+            rules = RaceRulesSettings(autoAccelerate = true, randomConditionsEnabled = false),
+            random = Random(1234L)
+        )
+
+        var snap = engine.step(0.05f)
+        while (snap.phase == RacePhase.COUNTDOWN.name) {
+            snap = engine.step(0.05f)
+        }
+
+        val allowedSoloPool = setOf(
+            PowerUpType.TURBO_NITRO.name,
+            PowerUpType.OVERDRIVE_GRIP.name,
+            PowerUpType.SHIELD.name
+        )
+        val collectedPowerUps = mutableListOf<String>()
+
+        repeat(750) {
+            snap = engine.step(0.04f)
+            assertTrue(
+                "Pure 1-player solo mode must never spawn multi-car POSITION_SWAP or STEER_INVERT field pickups",
+                snap.fieldPickups.isEmpty()
+            )
+            val racer = snap.racers.first()
+            val held = racer.heldPowerUp
+            if (held != null) {
+                collectedPowerUps.add(held)
+                assertTrue(
+                    "Solo power-up '$held' must belong exclusively to solo driving pool $allowedSoloPool",
+                    held in allowedSoloPool
+                )
+                engine.submitInput("solo_1", ControlInput(throttle = 1f, steer = 0f, usePowerUp = true))
+            } else {
+                // Steer smoothly toward nearest available item box to maximize pickups during test
+                val targetBox = snap.itemBoxes.filter { it.available }.minByOrNull { box ->
+                    TrackCatalog.distance(racer.x, racer.y, box.x, box.y)
+                }
+                if (targetBox != null) {
+                    var angleDiff = atan2(targetBox.y - racer.y, targetBox.x - racer.x) - racer.angleRad
+                    while (angleDiff > Math.PI) angleDiff -= (2.0 * Math.PI).toFloat()
+                    while (angleDiff < -Math.PI) angleDiff += (2.0 * Math.PI).toFloat()
+                    val steer = (angleDiff * 1.4f).coerceIn(-1f, 1f)
+                    engine.submitInput("solo_1", ControlInput(throttle = 1f, steer = steer))
+                }
+            }
+        }
+
+        assertTrue(
+            "Pure solo car must collect multiple item boxes across the circuit (collected=${collectedPowerUps.size})",
+            collectedPowerUps.size >= 3
+        )
+    }
+
+    @Test
+    fun ghostCodec_encodesDecodesInterpolatesAndComputesLiveSplitDelta() {
+        val frames = listOf(
+            GhostFrame(tMs = 0L, x = 100f, y = 200f, angleRad = 0.0f, jumpZ = 0f, progress = 0.00f),
+            GhostFrame(tMs = 1000L, x = 220f, y = 240f, angleRad = 0.5f, jumpZ = 0.1f, progress = 0.25f),
+            GhostFrame(tMs = 2000L, x = 340f, y = 300f, angleRad = 1.0f, jumpZ = 0.4f, progress = 0.50f),
+            GhostFrame(tMs = 4000L, x = 580f, y = 420f, angleRad = 1.4f, jumpZ = 0.0f, progress = 1.00f)
+        )
+
+        val encoded = GhostCodec.encodeFrames(frames)
+        assertTrue("Encoded ghost string must not be blank", encoded.isNotBlank())
+
+        val decoded = GhostCodec.decodeFrames(encoded)
+        assertEquals(frames.size, decoded.size)
+        assertEquals(1000L, decoded[1].tMs)
+        assertEquals(220f, decoded[1].x, 0.15f)
+        assertEquals(0.25f, decoded[1].progress, 0.005f)
+
+        // Midpoint interpolation between t=1000ms and t=2000ms -> t=1500ms
+        val mid = GhostCodec.interpolateAt(decoded, 1500L)
+        assertNotNull(mid)
+        assertEquals(280f, mid!!.x, 0.2f)
+        assertEquals(270f, mid.y, 0.2f)
+        assertEquals(0.25f, mid.jumpZ, 0.02f)
+        assertEquals(0.375f, mid.progress, 0.01f)
+
+        // Live split delta at progress = 0.50 (ghost reached 0.50 at t = 2000ms):
+        // Player reaches 0.50 at 1650ms -> -350ms (0.35s AHEAD of ghost)
+        val aheadDelta = GhostCodec.computeSplitDeltaMs(decoded, playerProgress = 0.50f, playerRaceTimeMs = 1650L)
+        assertNotNull(aheadDelta)
+        assertTrue("Expected ahead split delta near -350ms, got $aheadDelta", abs(aheadDelta!! - (-350L)) <= 15L)
+
+        // Player reaches 0.50 at 2480ms -> +480ms (0.48s BEHIND ghost)
+        val behindDelta = GhostCodec.computeSplitDeltaMs(decoded, playerProgress = 0.50f, playerRaceTimeMs = 2480L)
+        assertNotNull(behindDelta)
+        assertTrue("Expected behind split delta near +480ms, got $behindDelta", abs(behindDelta!! - 480L) <= 15L)
+    }
+
+    @Test
+    fun onlinePasswordHasherAndBoardKeys_verifySaltedHashesRoomCodesAndSanitizedIds() {
+        val salt = OnlinePasswordHasher.generateSalt()
+        assertEquals(16, salt.length)
+
+        val hash1 = OnlinePasswordHasher.hashPassword(salt, "  BrothersCup42 ")
+        val hash2 = OnlinePasswordHasher.hashPassword(salt, "BrothersCup42")
+        val wrongHash = OnlinePasswordHasher.hashPassword(salt, "WrongPass")
+
+        assertEquals(64, hash1.length)
+        assertEquals("Trimmed password with identical salt must match deterministically", hash1, hash2)
+        assertNotEquals("Different password must never match salted SHA-256 hash", hash1, wrongHash)
+
+        val code = OnlinePasswordHasher.generateRoomCode()
+        assertEquals(6, code.length)
+        assertTrue("Room code must contain only unambiguous uppercase alphanumeric characters", code.all { it.isUpperCase() || it.isDigit() })
+
+        val raceBoard = LeaderboardBoardKey.build(GameMode.RACE, "LIVING_ROOM_GP", totalLaps = 3)
+        assertEquals("RACE_LIVING_ROOM_GP_3L", raceBoard)
+        val stuntBoard = LeaderboardBoardKey.build(GameMode.STUNTS, "ANY", totalLaps = 3)
+        assertEquals("STUNTS_GAUNTLET_4R", stuntBoard)
+
+        val docId = LeaderboardBoardKey.buildUserBoardDocId("uid/with spaces", raceBoard)
+        assertFalse("Sanitized leaderboard docId must never contain slashes or spaces", docId.contains('/') || docId.contains(' '))
+        assertTrue(docId.endsWith("RACE_LIVING_ROOM_GP_3L"))
+    }
 }
+
 

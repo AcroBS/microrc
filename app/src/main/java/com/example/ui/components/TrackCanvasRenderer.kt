@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import com.example.data.TrackCatalog
+import com.example.model.ActiveGhostCarState
 import com.example.model.ActiveRocketState
 import com.example.model.ArenaFlagState
 import com.example.model.ExternalEventType
@@ -66,7 +67,8 @@ fun DrawScope.drawTrackWorld(
     explosions: List<TrackExplosion> = emptyList(),
     arenaSuddenDeathStage: Int = 0,
     stuntState: StuntStateSnapshot? = null,
-    rockets: List<ActiveRocketState> = emptyList()
+    rockets: List<ActiveRocketState> = emptyList(),
+    ghostCar: ActiveGhostCarState? = null
 ) {
     // 1. Background floor
     drawRect(
@@ -779,6 +781,22 @@ fun DrawScope.drawTrackWorld(
         drawPath(banner, Color(0xFFFFF8E1), style = Stroke(width = 2f))
     }
 
+    // 8c. Virtual Ghost Car (drawn underneath solid racers so solid cars always stay crisp)
+    if (ghostCar != null) {
+        val ghostType = runCatching { RcCarType.valueOf(ghostCar.carType) }.getOrDefault(RcCarType.VOLT_BUGGY)
+        drawGhostRcCar(
+            x = ghostCar.x,
+            y = ghostCar.y,
+            angleRad = ghostCar.angleRad,
+            carType = ghostType,
+            primaryColor = Color(ghostCar.primaryColorArgb),
+            accentColor = Color(ghostCar.accentColorArgb),
+            jumpZ = ghostCar.jumpZ,
+            scale = 1f,
+            animTimeSec = animTimeSec
+        )
+    }
+
     // 9. Draw all RC cars (grounded first, airborne cars rendered on top)
     val orderedRacers = racers.sortedBy { it.jumpZ }
     for (r in orderedRacers) {
@@ -964,6 +982,35 @@ fun DrawScope.drawTrackWorld(
         }
         val baselineY = labelY - (fm.ascent + fm.descent) / 2f
         drawContext.canvas.nativeCanvas.drawText(label, labelX, baselineY, racerNamePaint)
+    }
+
+    // Ghost driver floating label pill
+    if (ghostCar != null) {
+        val gName = ghostCar.driverName.trim().take(10).ifEmpty { "PB" }
+        val gLabel = if (ghostCar.finished) "GHOST • $gName ✓" else "GHOST • $gName"
+        val gx = ghostCar.x
+        val gy = ghostCar.y - 38f * textScale - (ghostCar.jumpZ * 26f)
+        val tw = racerNamePaint.measureText(gLabel)
+        val px = 7f * textScale
+        val py = 3f * textScale
+        val pw = tw + px * 2f
+        val ph = textHeight + py * 2f
+        drawRoundRect(
+            color = Color(0xFF071A24).copy(alpha = 0.72f),
+            topLeft = Offset(gx - pw / 2f, gy - ph / 2f),
+            size = Size(pw, ph),
+            cornerRadius = CornerRadius(7f * textScale, 7f * textScale)
+        )
+        drawRoundRect(
+            color = Color(0xFF00E5FF).copy(alpha = 0.72f),
+            topLeft = Offset(gx - pw / 2f, gy - ph / 2f),
+            size = Size(pw, ph),
+            cornerRadius = CornerRadius(7f * textScale, 7f * textScale),
+            style = Stroke(width = 1.4f * textScale)
+        )
+        racerNamePaint.color = Color(0xFF80D8FF).toArgb()
+        val baselineY = gy - (fm.ascent + fm.descent) / 2f
+        drawContext.canvas.nativeCanvas.drawText(gLabel, gx, baselineY, racerNamePaint)
     }
 }
 
@@ -1179,7 +1226,8 @@ fun DrawScope.drawTrackMiniMap(
     arenaFlag: ArenaFlagState? = null,
     portalPair: PortalPairState? = null,
     arenaSuddenDeathStage: Int = 0,
-    stuntState: StuntStateSnapshot? = null
+    stuntState: StuntStateSnapshot? = null,
+    ghostCar: ActiveGhostCarState? = null
 ) {
     val pad = 8.dp.toPx()
     val availW = (size.width - pad * 2f).coerceAtLeast(1f)
@@ -1334,6 +1382,23 @@ fun DrawScope.drawTrackMiniMap(
             radius = 3.5.dp.toPx(),
             center = Offset(offsetX + portalPair.exitX * scale, offsetY + portalPair.exitY * scale),
             style = Stroke(width = 1.6.dp.toPx())
+        )
+    }
+
+    // Ghost Car hollow cyan beacon on mini-map
+    if (ghostCar != null) {
+        val gx = offsetX + ghostCar.x * scale
+        val gy = offsetY + ghostCar.y * scale
+        drawCircle(
+            color = Color(0xFF00E5FF).copy(alpha = 0.25f),
+            radius = 5.4.dp.toPx(),
+            center = Offset(gx, gy)
+        )
+        drawCircle(
+            color = Color(0xFF80D8FF),
+            radius = 3.8.dp.toPx(),
+            center = Offset(gx, gy),
+            style = Stroke(width = 1.5.dp.toPx())
         )
     }
 

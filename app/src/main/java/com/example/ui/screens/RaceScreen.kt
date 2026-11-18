@@ -92,6 +92,7 @@ import androidx.compose.ui.unit.dp
 import com.example.audio.RaceAudioEngine
 import com.example.data.TrackCatalog
 import com.example.engine.RacePhysicsEngine
+import com.example.model.ActiveGhostCarState
 import com.example.model.AudioSettings
 import com.example.model.ControlMode
 import com.example.model.ExternalEventType
@@ -130,6 +131,7 @@ fun RaceScreen(
     profile: PlayerProfile,
     snapshot: RaceSnapshot?,
     activeTrack: TrackDefinition? = null,
+    ghostCar: ActiveGhostCarState? = null,
     rules: RaceRulesSettings = RaceRulesSettings(),
     audioSettings: AudioSettings = AudioSettings(),
     audioEngine: RaceAudioEngine? = null,
@@ -433,7 +435,8 @@ fun RaceScreen(
                         explosions = snapshot?.explosions.orEmpty(),
                         arenaSuddenDeathStage = snapshot?.arenaSuddenDeathStage ?: 0,
                         stuntState = stuntState,
-                        rockets = snapshot?.rockets.orEmpty()
+                        rockets = snapshot?.rockets.orEmpty(),
+                        ghostCar = ghostCar
                     )
                 }
             } else {
@@ -460,7 +463,8 @@ fun RaceScreen(
                         explosions = snapshot?.explosions.orEmpty(),
                         arenaSuddenDeathStage = snapshot?.arenaSuddenDeathStage ?: 0,
                         stuntState = stuntState,
-                        rockets = snapshot?.rockets.orEmpty()
+                        rockets = snapshot?.rockets.orEmpty(),
+                        ghostCar = ghostCar
                     )
                 }
             }
@@ -770,7 +774,8 @@ fun RaceScreen(
                                     arenaFlag = arenaFlagToDraw,
                                     portalPair = snapshot?.portalPair,
                                     arenaSuddenDeathStage = snapshot?.arenaSuddenDeathStage ?: 0,
-                                    stuntState = stuntState
+                                    stuntState = stuntState,
+                                    ghostCar = ghostCar
                                 )
                             }
                             Text(
@@ -829,6 +834,46 @@ fun RaceScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            if (ghostCar != null && snapshot?.phase != RacePhase.FINISHED.name) {
+                val delta = ghostCar.splitDeltaMs
+                val ahead = delta != null && delta <= 0L
+                val deltaText = when {
+                    delta == null -> "TARGET ${formatRaceTime(ghostCar.finishTimeMs)}"
+                    delta <= 0L -> String.format(java.util.Locale.US, "%.2fs", delta / 1000f)
+                    else -> String.format(java.util.Locale.US, "+%.2fs", delta / 1000f)
+                }
+                val badgeColor = when {
+                    delta == null -> ElectricCyan
+                    ahead -> AcidLime
+                    else -> SignalOrange
+                }
+                Surface(
+                    color = CarbonBg.copy(alpha = 0.90f),
+                    shape = RoundedCornerShape(50),
+                    border = BorderStroke(1.5.dp, badgeColor),
+                    modifier = Modifier.testTag("ghost_delta_badge")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = "GHOST • ${ghostCar.driverName.take(10).uppercase()}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = ElectricCyan,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = deltaText,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = badgeColor
+                        )
+                    }
+                }
+            }
+
             if (isStuntsMode && snapshot?.phase != RacePhase.FINISHED.name && stuntState != null) {
                 Surface(
                     color = if (isLocalActiveStuntDriver) {

@@ -1,0 +1,407 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Reusable Hardened Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isNumberInRange(val, minVal, maxVal) {
+      return (val is int || val is float) && val >= minVal && val <= maxVal;
+    }
+
+    function isValidTimestampBound(ts) {
+      return ts is timestamp && ts <= request.time;
+    }
+
+    // --- Validation Blueprints ---
+
+    function isValidOnlineRoom(data) {
+      return data.hostUid is string && data.hostUid.size() >= 1 && data.hostUid.size() <= 128 &&
+             data.hostName is string && data.hostName.size() >= 1 && data.hostName.size() <= 24 &&
+             data.roomName is string && data.roomName.size() >= 1 && data.roomName.size() <= 40 &&
+             data.roomCode is string && data.roomCode.size() >= 4 && data.roomCode.size() <= 12 &&
+             data.discoverable is bool &&
+             data.passwordProtected is bool &&
+             data.passwordSalt is string && data.passwordSalt.size() <= 32 &&
+             data.passwordHash is string && data.passwordHash.size() <= 64 &&
+             (!data.passwordProtected || (data.passwordSalt.size() >= 8 && data.passwordHash.size() == 64)) &&
+             (data.passwordProtected || data.passwordHash.size() == 0) &&
+             data.status is string && data.status in ['OPEN', 'RACING', 'FINISHED'] &&
+             data.gameMode is string && data.gameMode in ['RACE', 'ARENA', 'STUNTS', 'HYBRID'] &&
+             data.trackId is string && data.trackId.size() >= 1 && data.trackId.size() <= 64 &&
+             data.playerCount is int && data.playerCount >= 1 && data.playerCount <= 4 &&
+             data.maxPlayers is int && data.maxPlayers >= 2 && data.maxPlayers <= 4 &&
+             data.playerCount <= data.maxPlayers &&
+             data.memberUids is list && data.memberUids.size() >= 1 && data.memberUids.size() <= 4 &&
+             data.memberUids[0] is string && data.memberUids[0].size() <= 128 &&
+             data.lobbyJson is string && data.lobbyJson.size() >= 2 && data.lobbyJson.size() <= 30000 &&
+             data.raceStartJson is string && data.raceStartJson.size() <= 40000 &&
+             data.telemetrySeq is int && data.telemetrySeq >= 0 &&
+             data.telemetryLine is string && data.telemetryLine.size() <= 16000 &&
+             data.rematchJson is string && data.rematchJson.size() <= 8000 &&
+             isValidTimestampBound(data.createdAt) &&
+             isValidTimestampBound(data.updatedAt);
+    }
+
+    function isValidOnlineRoomPlayer(data) {
+      return data.roomId is string && data.roomId.size() >= 1 && data.roomId.size() <= 128 &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.name is string && data.name.size() >= 1 && data.name.size() <= 24 &&
+             data.carType is string && data.carType.size() >= 1 && data.carType.size() <= 32 &&
+             data.primaryColorArgb is int &&
+             data.accentColorArgb is int &&
+             data.ready is bool &&
+             data.host is bool &&
+             data.rematchVote is string && data.rematchVote.size() <= 64 &&
+             data.joinToken is string && data.joinToken.size() <= 64 &&
+             isValidTimestampBound(data.createdAt) &&
+             isValidTimestampBound(data.updatedAt);
+    }
+
+    function isValidOnlineRoomInput(data) {
+      return data.roomId is string && data.roomId.size() >= 1 && data.roomId.size() <= 128 &&
+             data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.seq is int && data.seq >= 0 &&
+             isNumberInRange(data.throttle, -1.0, 1.0) &&
+             isNumberInRange(data.steer, -1.0, 1.0) &&
+             data.powerUpSeq is int && data.powerUpSeq >= 0 &&
+             data.mineDropSeq is int && data.mineDropSeq >= 0 &&
+             isValidTimestampBound(data.createdAt) &&
+             isValidTimestampBound(data.updatedAt);
+    }
+
+    function isValidOnlineRoomChat(data) {
+      return data.roomId is string && data.roomId.size() >= 1 && data.roomId.size() <= 128 &&
+             data.senderUid is string && data.senderUid.size() >= 1 && data.senderUid.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 24 &&
+             data.text is string && data.text.size() >= 1 && data.text.size() <= 140 &&
+             data.systemMessage is bool &&
+             isValidTimestampBound(data.createdAt);
+    }
+
+    function isValidLeaderboardEntry(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.driverName is string && data.driverName.size() >= 1 && data.driverName.size() <= 24 &&
+             data.carType is string && data.carType.size() >= 1 && data.carType.size() <= 32 &&
+             data.primaryColorArgb is int &&
+             data.accentColorArgb is int &&
+             data.gameMode is string && data.gameMode in ['RACE', 'STUNTS', 'ARENA'] &&
+             data.trackKey is string && data.trackKey.size() >= 1 && data.trackKey.size() <= 64 &&
+             data.boardKey is string && data.boardKey.size() >= 3 && data.boardKey.size() <= 96 &&
+             data.totalLaps is int && data.totalLaps >= 1 && data.totalLaps <= 9 &&
+             data.bestRaceTimeMs is int && data.bestRaceTimeMs >= 0 && data.bestRaceTimeMs <= 3600000 &&
+             data.bestLapTimeMs is int && data.bestLapTimeMs >= 0 && data.bestLapTimeMs <= 3600000 &&
+             data.bestScore is int && data.bestScore >= 0 && data.bestScore <= 1000000 &&
+             data.hasGhost is bool &&
+             data.ghostId is string && data.ghostId.size() <= 128 &&
+             data.publicEntry is bool &&
+             isValidTimestampBound(data.createdAt) &&
+             isValidTimestampBound(data.updatedAt);
+    }
+
+    function isValidGhostRun(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.driverName is string && data.driverName.size() >= 1 && data.driverName.size() <= 24 &&
+             data.carType is string && data.carType.size() >= 1 && data.carType.size() <= 32 &&
+             data.primaryColorArgb is int &&
+             data.accentColorArgb is int &&
+             data.boardKey is string && data.boardKey.size() >= 3 && data.boardKey.size() <= 96 &&
+             data.trackId is string && data.trackId.size() >= 1 && data.trackId.size() <= 64 &&
+             data.totalLaps is int && data.totalLaps >= 1 && data.totalLaps <= 9 &&
+             data.finishTimeMs is int && data.finishTimeMs >= 1 && data.finishTimeMs <= 3600000 &&
+             data.bestLapMs is int && data.bestLapMs >= 0 && data.bestLapMs <= 3600000 &&
+             data.framesData is string && data.framesData.size() >= 3 && data.framesData.size() <= 120000 &&
+             data.publicGhost is bool &&
+             isValidTimestampBound(data.createdAt) &&
+             isValidTimestampBound(data.updatedAt);
+    }
+
+    // --- 1. Online Multiplayer Rooms (/onlineRooms/{roomId}) ---
+    match /onlineRooms/{roomId} {
+      allow get: if isSignedIn() && isValidId(roomId);
+      allow list: if isSignedIn() && existing().discoverable == true;
+
+      allow create: if isSignedIn() &&
+                       isValidId(roomId) &&
+                       incoming().keys().hasAll([
+                         'hostUid', 'hostName', 'roomName', 'roomCode', 'discoverable',
+                         'passwordProtected', 'passwordSalt', 'passwordHash', 'status',
+                         'gameMode', 'trackId', 'playerCount', 'maxPlayers', 'memberUids',
+                         'lobbyJson', 'raceStartJson', 'telemetrySeq', 'telemetryLine',
+                         'rematchJson', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'hostUid', 'hostName', 'roomName', 'roomCode', 'discoverable',
+                         'passwordProtected', 'passwordSalt', 'passwordHash', 'status',
+                         'gameMode', 'trackId', 'playerCount', 'maxPlayers', 'memberUids',
+                         'lobbyJson', 'raceStartJson', 'telemetrySeq', 'telemetryLine',
+                         'rematchJson', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().hostUid == request.auth.uid &&
+                       incoming().status == 'OPEN' &&
+                       isValidOnlineRoom(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(roomId) &&
+                       isValidOnlineRoom(incoming()) &&
+                       existing().hostUid == request.auth.uid &&
+                       incoming().hostUid == existing().hostUid &&
+                       incoming().roomCode == existing().roomCode &&
+                       incoming().passwordProtected == existing().passwordProtected &&
+                       incoming().passwordSalt == existing().passwordSalt &&
+                       incoming().passwordHash == existing().passwordHash &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'hostName', 'roomName', 'discoverable', 'status', 'gameMode',
+                         'trackId', 'playerCount', 'maxPlayers', 'memberUids',
+                         'lobbyJson', 'raceStartJson', 'telemetrySeq', 'telemetryLine',
+                         'rematchJson', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && isValidId(roomId) && existing().hostUid == request.auth.uid;
+
+      // --- 1a. Online Room Players (/onlineRooms/{roomId}/players/{playerId}) ---
+      match /players/{playerId} {
+        allow get: if isSignedIn() && isValidId(roomId) && isValidId(playerId) && existing().roomId == roomId;
+        allow list: if isSignedIn() && isValidId(roomId) && existing().roomId == roomId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(playerId) &&
+                         request.auth.uid == playerId &&
+                         incoming().keys().hasAll([
+                           'roomId', 'userId', 'name', 'carType', 'primaryColorArgb',
+                           'accentColorArgb', 'ready', 'host', 'rematchVote', 'joinToken',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'roomId', 'userId', 'name', 'carType', 'primaryColorArgb',
+                           'accentColorArgb', 'ready', 'host', 'rematchVote', 'joinToken',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().roomId == roomId &&
+                         incoming().userId == request.auth.uid &&
+                         isValidOnlineRoomPlayer(incoming()) &&
+                         exists(/databases/$(database)/documents/onlineRooms/$(roomId)) &&
+                         (
+                           (
+                             incoming().host == true &&
+                             get(/databases/$(database)/documents/onlineRooms/$(roomId)).data.hostUid == request.auth.uid
+                           ) ||
+                           (
+                             incoming().host == false &&
+                             get(/databases/$(database)/documents/onlineRooms/$(roomId)).data.status == 'OPEN' &&
+                             get(/databases/$(database)/documents/onlineRooms/$(roomId)).data.playerCount < get(/databases/$(database)/documents/onlineRooms/$(roomId)).data.maxPlayers &&
+                             (
+                               !get(/databases/$(database)/documents/onlineRooms/$(roomId)).data.passwordProtected ||
+                               incoming().joinToken == get(/databases/$(database)/documents/onlineRooms/$(roomId)).data.passwordHash
+                             )
+                           )
+                         );
+
+        allow update: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(playerId) &&
+                         isValidOnlineRoomPlayer(incoming()) &&
+                         request.auth.uid == playerId &&
+                         existing().userId == request.auth.uid &&
+                         incoming().userId == existing().userId &&
+                         incoming().roomId == existing().roomId &&
+                         incoming().host == existing().host &&
+                         incoming().joinToken == existing().joinToken &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'name', 'carType', 'primaryColorArgb', 'accentColorArgb',
+                           'ready', 'rematchVote', 'updatedAt'
+                         ]);
+
+        allow delete: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(playerId) &&
+                         (
+                           request.auth.uid == playerId ||
+                           (
+                             exists(/databases/$(database)/documents/onlineRooms/$(roomId)) &&
+                             get(/databases/$(database)/documents/onlineRooms/$(roomId)).data.hostUid == request.auth.uid
+                           )
+                         );
+      }
+
+      // --- 1b. Online Room Driver Inputs (/onlineRooms/{roomId}/inputs/{playerId}) ---
+      match /inputs/{playerId} {
+        allow get: if isSignedIn() && isValidId(roomId) && isValidId(playerId) && existing().roomId == roomId;
+        allow list: if isSignedIn() && isValidId(roomId) && existing().roomId == roomId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(playerId) &&
+                         request.auth.uid == playerId &&
+                         incoming().keys().hasAll([
+                           'roomId', 'userId', 'seq', 'throttle', 'steer',
+                           'powerUpSeq', 'mineDropSeq', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'roomId', 'userId', 'seq', 'throttle', 'steer',
+                           'powerUpSeq', 'mineDropSeq', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().roomId == roomId &&
+                         incoming().userId == request.auth.uid &&
+                         isValidOnlineRoomInput(incoming()) &&
+                         exists(/databases/$(database)/documents/onlineRooms/$(roomId)/players/$(request.auth.uid));
+
+        allow update: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(playerId) &&
+                         isValidOnlineRoomInput(incoming()) &&
+                         request.auth.uid == playerId &&
+                         existing().userId == request.auth.uid &&
+                         incoming().userId == existing().userId &&
+                         incoming().roomId == existing().roomId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'seq', 'throttle', 'steer', 'powerUpSeq', 'mineDropSeq', 'updatedAt'
+                         ]);
+
+        allow delete: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(playerId) &&
+                         (
+                           request.auth.uid == playerId ||
+                           (
+                             exists(/databases/$(database)/documents/onlineRooms/$(roomId)) &&
+                             get(/databases/$(database)/documents/onlineRooms/$(roomId)).data.hostUid == request.auth.uid
+                           )
+                         );
+      }
+
+      // --- 1c. Online Room Chat (/onlineRooms/{roomId}/chat/{messageId}) ---
+      match /chat/{messageId} {
+        allow get: if isSignedIn() && isValidId(roomId) && isValidId(messageId) && existing().roomId == roomId;
+        allow list: if isSignedIn() && isValidId(roomId) && existing().roomId == roomId;
+
+        allow create: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(messageId) &&
+                         incoming().keys().hasAll([
+                           'roomId', 'senderUid', 'senderName', 'text', 'systemMessage', 'createdAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'roomId', 'senderUid', 'senderName', 'text', 'systemMessage', 'createdAt'
+                         ]) &&
+                         incoming().roomId == roomId &&
+                         incoming().senderUid == request.auth.uid &&
+                         isValidOnlineRoomChat(incoming()) &&
+                         exists(/databases/$(database)/documents/onlineRooms/$(roomId)/players/$(request.auth.uid));
+
+        allow update: if false;
+
+        allow delete: if isSignedIn() &&
+                         isValidId(roomId) &&
+                         isValidId(messageId) &&
+                         (
+                           existing().senderUid == request.auth.uid ||
+                           (
+                             exists(/databases/$(database)/documents/onlineRooms/$(roomId)) &&
+                             get(/databases/$(database)/documents/onlineRooms/$(roomId)).data.hostUid == request.auth.uid
+                           )
+                         );
+      }
+    }
+
+    // --- 2. Leaderboards (/leaderboardEntries/{entryId}) ---
+    match /leaderboardEntries/{entryId} {
+      allow get: if isSignedIn() && isValidId(entryId) && (existing().publicEntry == true || existing().userId == request.auth.uid);
+      allow list: if isSignedIn() && existing().publicEntry == true;
+
+      allow create: if isSignedIn() &&
+                       isValidId(entryId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'driverName', 'carType', 'primaryColorArgb', 'accentColorArgb',
+                         'gameMode', 'trackKey', 'boardKey', 'totalLaps', 'bestRaceTimeMs',
+                         'bestLapTimeMs', 'bestScore', 'hasGhost', 'ghostId', 'publicEntry',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'driverName', 'carType', 'primaryColorArgb', 'accentColorArgb',
+                         'gameMode', 'trackKey', 'boardKey', 'totalLaps', 'bestRaceTimeMs',
+                         'bestLapTimeMs', 'bestScore', 'hasGhost', 'ghostId', 'publicEntry',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().userId == request.auth.uid &&
+                       isValidLeaderboardEntry(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(entryId) &&
+                       isValidLeaderboardEntry(incoming()) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().boardKey == existing().boardKey &&
+                       incoming().gameMode == existing().gameMode &&
+                       incoming().trackKey == existing().trackKey &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'driverName', 'carType', 'primaryColorArgb', 'accentColorArgb',
+                         'totalLaps', 'bestRaceTimeMs', 'bestLapTimeMs', 'bestScore',
+                         'hasGhost', 'ghostId', 'publicEntry', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && isValidId(entryId) && existing().userId == request.auth.uid;
+    }
+
+    // --- 3. Ghost Car Trajectory Runs (/ghostRuns/{ghostId}) ---
+    match /ghostRuns/{ghostId} {
+      allow get: if isSignedIn() && isValidId(ghostId) && (existing().publicGhost == true || existing().userId == request.auth.uid);
+      allow list: if isSignedIn() && existing().publicGhost == true;
+
+      allow create: if isSignedIn() &&
+                       isValidId(ghostId) &&
+                       incoming().keys().hasAll([
+                         'userId', 'driverName', 'carType', 'primaryColorArgb', 'accentColorArgb',
+                         'boardKey', 'trackId', 'totalLaps', 'finishTimeMs', 'bestLapMs',
+                         'framesData', 'publicGhost', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'driverName', 'carType', 'primaryColorArgb', 'accentColorArgb',
+                         'boardKey', 'trackId', 'totalLaps', 'finishTimeMs', 'bestLapMs',
+                         'framesData', 'publicGhost', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().userId == request.auth.uid &&
+                       isValidGhostRun(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(ghostId) &&
+                       isValidGhostRun(incoming()) &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().boardKey == existing().boardKey &&
+                       incoming().trackId == existing().trackId &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'driverName', 'carType', 'primaryColorArgb', 'accentColorArgb',
+                         'totalLaps', 'finishTimeMs', 'bestLapMs', 'framesData',
+                         'publicGhost', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && isValidId(ghostId) && existing().userId == request.auth.uid;
+    }
+  }
+}

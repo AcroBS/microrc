@@ -1,0 +1,493 @@
+{
+  "entities": {
+    "OnlineRoom": {
+      "title": "OnlineRoom",
+      "description": "Web-based multiplayer RC racing room supporting 2-4 players, optional password hash protection, lobby configuration, and real-time race telemetry.",
+      "type": "object",
+      "properties": {
+        "hostUid": {
+          "type": "string",
+          "description": "Authenticated UID of the room host."
+        },
+        "hostName": {
+          "type": "string",
+          "description": "Display callsign of the host driver."
+        },
+        "roomName": {
+          "type": "string",
+          "description": "Human-readable online room title."
+        },
+        "roomCode": {
+          "type": "string",
+          "description": "Short uppercase alphanumeric invite code."
+        },
+        "discoverable": {
+          "type": "boolean",
+          "description": "True when the room appears in the online lobby browser."
+        },
+        "passwordProtected": {
+          "type": "boolean",
+          "description": "True when joining requires matching passwordHash."
+        },
+        "passwordSalt": {
+          "type": "string",
+          "description": "Random hex salt used to compute passwordHash."
+        },
+        "passwordHash": {
+          "type": "string",
+          "description": "SHA-256 hex digest of salt:password, or empty string when public."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["OPEN", "RACING", "FINISHED"],
+          "description": "Lifecycle phase of the online room."
+        },
+        "gameMode": {
+          "type": "string",
+          "enum": ["RACE", "ARENA", "STUNTS", "HYBRID"],
+          "description": "Selected gameplay mode."
+        },
+        "trackId": {
+          "type": "string",
+          "description": "Selected track, arena, or stunt identifier."
+        },
+        "playerCount": {
+          "type": "integer",
+          "description": "Current number of racers in the room (1..4)."
+        },
+        "maxPlayers": {
+          "type": "integer",
+          "description": "Maximum allowed players in the room (2..4)."
+        },
+        "memberUids": {
+          "type": "array",
+          "description": "Bounded list of up to 4 member UIDs."
+        },
+        "lobbyJson": {
+          "type": "string",
+          "description": "Serialized LobbyStatePayload snapshot."
+        },
+        "raceStartJson": {
+          "type": "string",
+          "description": "Serialized race start metadata when transitioning to RACING."
+        },
+        "telemetrySeq": {
+          "type": "integer",
+          "description": "Monotonically increasing telemetry frame sequence number."
+        },
+        "telemetryLine": {
+          "type": "string",
+          "description": "Compact encoded RaceSnapshot frame from RaceTelemetryCodec."
+        },
+        "rematchJson": {
+          "type": "string",
+          "description": "Serialized RematchCountdownState payload."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp written via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp written via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "hostUid",
+        "hostName",
+        "roomName",
+        "roomCode",
+        "discoverable",
+        "passwordProtected",
+        "passwordSalt",
+        "passwordHash",
+        "status",
+        "gameMode",
+        "trackId",
+        "playerCount",
+        "maxPlayers",
+        "memberUids",
+        "lobbyJson",
+        "raceStartJson",
+        "telemetrySeq",
+        "telemetryLine",
+        "rematchJson",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "OnlineRoomPlayer": {
+      "title": "OnlineRoomPlayer",
+      "description": "Per-player membership, car customization, ready status, and password verification token inside an online room.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "description": "Parent onlineRoom document ID."
+        },
+        "userId": {
+          "type": "string",
+          "description": "Authenticated UID of the joining player."
+        },
+        "name": {
+          "type": "string",
+          "description": "Driver callsign."
+        },
+        "carType": {
+          "type": "string",
+          "description": "Selected RcCarType enum name."
+        },
+        "primaryColorArgb": {
+          "type": "integer",
+          "description": "Primary car body ARGB color."
+        },
+        "accentColorArgb": {
+          "type": "integer",
+          "description": "Accent car trim ARGB color."
+        },
+        "ready": {
+          "type": "boolean",
+          "description": "Whether the player is ready to start."
+        },
+        "host": {
+          "type": "boolean",
+          "description": "Whether this player is the room host."
+        },
+        "rematchVote": {
+          "type": "string",
+          "description": "Voted rematch track/arena/stunt option ID."
+        },
+        "joinToken": {
+          "type": "string",
+          "description": "SHA-256 password hash proof required when room is passwordProtected."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Join timestamp written via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Update timestamp written via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "roomId",
+        "userId",
+        "name",
+        "carType",
+        "primaryColorArgb",
+        "accentColorArgb",
+        "ready",
+        "host",
+        "rematchVote",
+        "joinToken",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "OnlineRoomInput": {
+      "title": "OnlineRoomInput",
+      "description": "Real-time steering, throttle, power-up, and mine control input stream from a connected client to the room host.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "description": "Parent onlineRoom document ID."
+        },
+        "userId": {
+          "type": "string",
+          "description": "Authenticated UID of the driver."
+        },
+        "seq": {
+          "type": "integer",
+          "description": "Input packet sequence counter."
+        },
+        "throttle": {
+          "type": "number",
+          "description": "Throttle value in [-1.0, 1.0]."
+        },
+        "steer": {
+          "type": "number",
+          "description": "Steering value in [-1.0, 1.0]."
+        },
+        "powerUpSeq": {
+          "type": "integer",
+          "description": "Monotonic counter incremented each time power-up is triggered."
+        },
+        "mineDropSeq": {
+          "type": "integer",
+          "description": "Monotonic counter incremented each time mine drop is triggered."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp written via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Update timestamp written via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "roomId",
+        "userId",
+        "seq",
+        "throttle",
+        "steer",
+        "powerUpSeq",
+        "mineDropSeq",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "OnlineRoomChat": {
+      "title": "OnlineRoomChat",
+      "description": "Immutable chat message posted inside an online room lobby.",
+      "type": "object",
+      "properties": {
+        "roomId": {
+          "type": "string",
+          "description": "Parent onlineRoom document ID."
+        },
+        "senderUid": {
+          "type": "string",
+          "description": "Authenticated UID of message author."
+        },
+        "senderName": {
+          "type": "string",
+          "description": "Display name of message author."
+        },
+        "text": {
+          "type": "string",
+          "description": "Message body (1..140 chars)."
+        },
+        "systemMessage": {
+          "type": "boolean",
+          "description": "Whether this is a system status notice."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Message timestamp written via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "roomId",
+        "senderUid",
+        "senderName",
+        "text",
+        "systemMessage",
+        "createdAt"
+      ]
+    },
+    "LeaderboardEntry": {
+      "title": "LeaderboardEntry",
+      "description": "Player personal-best race time, lap time, or stunt score for a given track/mode leaderboard.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated UID of the driver."
+        },
+        "driverName": {
+          "type": "string",
+          "description": "Driver callsign."
+        },
+        "carType": {
+          "type": "string",
+          "description": "RcCarType used for the record."
+        },
+        "primaryColorArgb": {
+          "type": "integer",
+          "description": "Primary car ARGB color."
+        },
+        "accentColorArgb": {
+          "type": "integer",
+          "description": "Accent car ARGB color."
+        },
+        "gameMode": {
+          "type": "string",
+          "enum": ["RACE", "STUNTS", "ARENA"],
+          "description": "Gameplay mode of the record."
+        },
+        "trackKey": {
+          "type": "string",
+          "description": "Track, stunt, or arena key."
+        },
+        "boardKey": {
+          "type": "string",
+          "description": "Composite leaderboard partition key (e.g. RACE_LIVING_ROOM_GP_3L)."
+        },
+        "totalLaps": {
+          "type": "integer",
+          "description": "Lap count for circuit records (1..9)."
+        },
+        "bestRaceTimeMs": {
+          "type": "integer",
+          "description": "Best total finish time in milliseconds."
+        },
+        "bestLapTimeMs": {
+          "type": "integer",
+          "description": "Best single lap time in milliseconds."
+        },
+        "bestScore": {
+          "type": "integer",
+          "description": "Best total score for Stunts or Points modes."
+        },
+        "hasGhost": {
+          "type": "boolean",
+          "description": "True if a recorded ghost car trajectory exists in ghostRuns."
+        },
+        "ghostId": {
+          "type": "string",
+          "description": "Document ID in ghostRuns or empty string."
+        },
+        "publicEntry": {
+          "type": "boolean",
+          "description": "True when visible on shared leaderboards."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp written via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Update timestamp written via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "driverName",
+        "carType",
+        "primaryColorArgb",
+        "accentColorArgb",
+        "gameMode",
+        "trackKey",
+        "boardKey",
+        "totalLaps",
+        "bestRaceTimeMs",
+        "bestLapTimeMs",
+        "bestScore",
+        "hasGhost",
+        "ghostId",
+        "publicEntry",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "GhostRun": {
+      "title": "GhostRun",
+      "description": "Recorded ghost car trajectory frames for virtual asynchronous time-trial challenges against other players.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated UID of the ghost driver."
+        },
+        "driverName": {
+          "type": "string",
+          "description": "Driver callsign displayed over the ghost car."
+        },
+        "carType": {
+          "type": "string",
+          "description": "RcCarType rendered for the ghost car."
+        },
+        "primaryColorArgb": {
+          "type": "integer",
+          "description": "Primary car ARGB color."
+        },
+        "accentColorArgb": {
+          "type": "integer",
+          "description": "Accent car ARGB color."
+        },
+        "boardKey": {
+          "type": "string",
+          "description": "Matching leaderboard partition key."
+        },
+        "trackId": {
+          "type": "string",
+          "description": "TrackId of the recorded run."
+        },
+        "totalLaps": {
+          "type": "integer",
+          "description": "Lap count of the recorded run."
+        },
+        "finishTimeMs": {
+          "type": "integer",
+          "description": "Total finish time in milliseconds."
+        },
+        "bestLapMs": {
+          "type": "integer",
+          "description": "Best lap time in milliseconds."
+        },
+        "framesData": {
+          "type": "string",
+          "description": "Semicolon-delimited keyframe samples tMs,x,y,angleRad,jumpZ."
+        },
+        "publicGhost": {
+          "type": "boolean",
+          "description": "True when challengeable by other authenticated players."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp written via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Update timestamp written via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "driverName",
+        "carType",
+        "primaryColorArgb",
+        "accentColorArgb",
+        "boardKey",
+        "trackId",
+        "totalLaps",
+        "finishTimeMs",
+        "bestLapMs",
+        "framesData",
+        "publicGhost",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/onlineRooms/{roomId}": {
+      "schema": "OnlineRoom",
+      "description": "Active web multiplayer rooms (2-4 players, optional password protection) and host race state."
+    },
+    "/onlineRooms/{roomId}/players/{playerId}": {
+      "schema": "OnlineRoomPlayer",
+      "description": "Joined players inside an online room."
+    },
+    "/onlineRooms/{roomId}/inputs/{playerId}": {
+      "schema": "OnlineRoomInput",
+      "description": "Per-player steering, throttle, and item control inputs inside an online room."
+    },
+    "/onlineRooms/{roomId}/chat/{messageId}": {
+      "schema": "OnlineRoomChat",
+      "description": "Lobby chat messages inside an online room."
+    },
+    "/leaderboardEntries/{entryId}": {
+      "schema": "LeaderboardEntry",
+      "description": "Shared high scores and fastest lap/race times per track and mode."
+    },
+    "/ghostRuns/{ghostId}": {
+      "schema": "GhostRun",
+      "description": "Recorded ghost car runs for virtual head-to-head time-attack challenges."
+    }
+  }
+}

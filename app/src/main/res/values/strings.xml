@@ -7,4 +7,9 @@
     <string name="garage_title">RC Garage</string>
     <string name="lobby_title">Race Paddock</string>
     <string name="results_title">Checkered Flag</string>
+    <string name="online_play_title">Online Web Play</string>
+    <string name="online_play_subtitle">2–4 Player Rooms &amp; Private Groups</string>
+    <string name="pure_solo_title">Solo Time Trial</string>
+    <string name="pure_solo_subtitle">Pure Driving (0 Bots) &amp; Ghost</string>
+    <string name="leaderboards_title">Leaderboards &amp; Ghosts</string>
 </resources>

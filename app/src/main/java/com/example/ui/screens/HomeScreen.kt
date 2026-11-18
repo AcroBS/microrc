@@ -33,14 +33,18 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Wifi
@@ -83,6 +87,9 @@ fun HomeScreen(
     onHostRace: () -> Unit,
     onJoinRace: () -> Unit,
     onSoloRace: () -> Unit,
+    onPureSoloRace: () -> Unit = {},
+    onOpenOnlinePlay: () -> Unit = {},
+    onOpenLeaderboards: () -> Unit = {},
     onOpenHybridSetup: () -> Unit = {},
     onOpenGarage: () -> Unit,
     onOpenTrackEditor: () -> Unit,
@@ -163,7 +170,7 @@ fun HomeScreen(
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Text(
-                                    text = "2-4 PLAYER OFFLINE WI-FI P2P",
+                                    text = "2-4P ONLINE WEB & WI-FI P2P",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
@@ -345,7 +352,46 @@ fun HomeScreen(
                     }
                 }
 
-                // Primary Multiplayer Actions
+                // Full Online Web Play CTA (Lobby + Password-Protected Groups 2-4P)
+                Button(
+                    onClick = onOpenOnlinePlay,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    ),
+                    shape = RoundedCornerShape(20.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(68.dp)
+                        .testTag("online_play_button")
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(24.dp))
+                            Column {
+                                Text("ONLINE WEB PLAY (2–4P)", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    "Central lobby, room codes & password groups",
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        }
+                        Icon(
+                            Icons.Default.Lock,
+                            contentDescription = "Supports Password Groups",
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                // Local Wi-Fi P2P Multiplayer Actions
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -366,7 +412,7 @@ fun HomeScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text("HOST RACE", style = MaterialTheme.typography.labelLarge)
-                            Text("Setup & Lobby", style = MaterialTheme.typography.labelSmall)
+                            Text("Wi-Fi Lobby", style = MaterialTheme.typography.labelSmall)
                         }
                     }
 
@@ -388,6 +434,42 @@ fun HomeScreen(
                             Text("JOIN RACE", style = MaterialTheme.typography.labelLarge)
                             Text("Scan Wi-Fi", style = MaterialTheme.typography.labelSmall)
                         }
+                    }
+                }
+
+                // Pure Solo Time Trial (0 Bots) + Leaderboards & Ghost Challenges
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    FilledTonalButton(
+                        onClick = onPureSoloRace,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(54.dp)
+                            .testTag("pure_solo_button")
+                    ) {
+                        Icon(Icons.Default.Timer, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Solo Time Trial", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                    }
+
+                    FilledTonalButton(
+                        onClick = onOpenLeaderboards,
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(54.dp)
+                            .testTag("leaderboards_button")
+                    ) {
+                        Icon(Icons.Default.EmojiEvents, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Records & Ghosts", style = MaterialTheme.typography.labelLarge, maxLines = 1)
                     }
                 }
 

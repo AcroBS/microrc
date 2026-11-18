@@ -15,6 +15,7 @@ import com.example.model.CarSpeedPreset
 import com.example.model.ControlMode
 import com.example.model.CustomTrackData
 import com.example.model.GameMode
+import com.example.model.LocalLeaderboardRecord
 import com.example.model.PlayerProfile
 import com.example.model.RaceRulesSettings
 import com.example.model.RcCarType
@@ -52,6 +53,9 @@ class PreferencesRepository(context: Context) {
     private val customTrackListAdapter = moshi.adapter<List<CustomTrackData>>(
         Types.newParameterizedType(List::class.java, CustomTrackData::class.java)
     )
+    private val localLeaderboardListAdapter = moshi.adapter<List<LocalLeaderboardRecord>>(
+        Types.newParameterizedType(List::class.java, LocalLeaderboardRecord::class.java)
+    )
 
     private object Keys {
         val PLAYER_ID = stringPreferencesKey("player_id")
@@ -83,6 +87,7 @@ class PreferencesRepository(context: Context) {
         val AUDIO_SFX_ENABLED = booleanPreferencesKey("audio_sfx_enabled")
         val AUDIO_HAPTICS_ENABLED = booleanPreferencesKey("audio_haptics_enabled")
         val CUSTOM_TRACKS_JSON = stringPreferencesKey("custom_tracks_json")
+        val LOCAL_LEADERBOARD_JSON = stringPreferencesKey("local_leaderboard_json")
     }
 
     val profileFlow: Flow<PlayerProfile> = dataStore.data.map { prefs ->
@@ -157,6 +162,15 @@ class PreferencesRepository(context: Context) {
             emptyList()
         } else {
             runCatching { customTrackListAdapter.fromJson(raw) }.getOrNull().orEmpty()
+        }
+    }
+
+    val localLeaderboardFlow: Flow<List<LocalLeaderboardRecord>> = dataStore.data.map { prefs ->
+        val raw = prefs[Keys.LOCAL_LEADERBOARD_JSON]
+        if (raw.isNullOrBlank()) {
+            emptyList()
+        } else {
+            runCatching { localLeaderboardListAdapter.fromJson(raw) }.getOrNull().orEmpty()
         }
     }
 
@@ -254,6 +268,84 @@ class PreferencesRepository(context: Context) {
                 .filterNot { it.id == trackId }
             prefs[Keys.CUSTOM_TRACKS_JSON] = customTrackListAdapter.toJson(current)
         }
+    }
+
+    suspend fun recordSoloRun(
+        profile: PlayerProfile,
+        boardKey: String,
+        gameMode: GameMode,
+        trackKey: String,
+        totalLaps: Int,
+        finishTimeMs: Long,
+        bestLapMs: Long,
+        bestScore: Int,
+        encodedGhostFrames: String
+    ): Boolean {
+        var improvedPrimary = false
+        dataStore.edit { prefs ->
+            val current = prefs[Keys.LOCAL_LEADERBOARD_JSON]
+                ?.let { runCatching { localLeaderboardListAdapter.fromJson(it) }.getOrNull() }
+                .orEmpty()
+                .toMutableList()
+
+            val existingIdx = current.indexOfFirst { it.boardKey == boardKey }
+            val existing = current.getOrNull(existingIdx)
+            val isStunts = gameMode == GameMode.STUNTS
+
+            improvedPrimary = if (existing == null) {
+                true
+            } else if (isStunts) {
+                bestScore > existing.bestScore
+            } else {
+                finishTimeMs > 0L && (existing.bestRaceTimeMs <= 0L || finishTimeMs < existing.bestRaceTimeMs)
+            }
+
+            val improvedLap = existing != null && bestLapMs > 0L &&
+                (existing.bestLapTimeMs <= 0L || bestLapMs < existing.bestLapTimeMs)
+
+            if (improvedPrimary || improvedLap) {
+                val mergedRaceMs = when {
+                    existing == null -> finishTimeMs.coerceAtLeast(0L)
+                    finishTimeMs <= 0L -> existing.bestRaceTimeMs
+                    existing.bestRaceTimeMs <= 0L -> finishTimeMs
+                    else -> minOf(existing.bestRaceTimeMs, finishTimeMs)
+                }
+                val mergedLapMs = when {
+                    existing == null -> bestLapMs.coerceAtLeast(0L)
+                    bestLapMs <= 0L -> existing.bestLapTimeMs
+                    existing.bestLapTimeMs <= 0L -> bestLapMs
+                    else -> minOf(existing.bestLapTimeMs, bestLapMs)
+                }
+                val mergedScore = maxOf(existing?.bestScore ?: 0, bestScore)
+                val mergedGhost = if (improvedPrimary && encodedGhostFrames.isNotBlank()) {
+                    encodedGhostFrames
+                } else {
+                    existing?.ghostFramesData.orEmpty()
+                }
+                val updated = LocalLeaderboardRecord(
+                    boardKey = boardKey,
+                    gameMode = gameMode.name,
+                    trackKey = trackKey,
+                    totalLaps = totalLaps,
+                    driverName = profile.name,
+                    carType = profile.carType.name,
+                    primaryColorArgb = profile.primaryColorArgb,
+                    accentColorArgb = profile.accentColorArgb,
+                    bestRaceTimeMs = mergedRaceMs,
+                    bestLapTimeMs = mergedLapMs,
+                    bestScore = mergedScore,
+                    recordedAtMs = System.currentTimeMillis(),
+                    ghostFramesData = mergedGhost
+                )
+                if (existingIdx >= 0) {
+                    current[existingIdx] = updated
+                } else {
+                    current.add(0, updated)
+                }
+                prefs[Keys.LOCAL_LEADERBOARD_JSON] = localLeaderboardListAdapter.toJson(current.take(40))
+            }
+        }
+        return improvedPrimary
     }
 
     private fun generateStableId(): String =

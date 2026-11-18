@@ -37,8 +37,12 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.FlightTakeoff
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Remove
@@ -78,6 +82,7 @@ import com.example.model.ArenaShape
 import com.example.model.CarSpeedPreset
 import com.example.model.CustomTrackData
 import com.example.model.GameMode
+import com.example.model.GhostRunPlayback
 import com.example.model.LobbyStatePayload
 import com.example.model.RaceRulesSettings
 import com.example.model.RcCarType
@@ -87,6 +92,7 @@ import com.example.model.WinCondition
 import com.example.network.SessionRole
 import com.example.ui.components.drawRcCar
 import com.example.ui.components.drawTrackMiniMap
+import com.example.ui.theme.ElectricCyan
 import com.example.ui.theme.GoldTrophy
 
 @Composable
@@ -95,6 +101,10 @@ fun LobbyScreen(
     localPlayerId: String,
     lobby: LobbyStatePayload?,
     customTracks: List<CustomTrackData>,
+    onlineRoomCode: String? = null,
+    onlinePasswordProtected: Boolean = false,
+    maxPlayers: Int = 4,
+    activeChallengeGhost: GhostRunPlayback? = null,
     onSelectTrack: (TrackId) -> Unit,
     onSelectArenaShape: (ArenaShape) -> Unit = {},
     onSelectStuntVariant: (StuntVariant) -> Unit = {},
@@ -109,6 +119,9 @@ fun LobbyScreen(
     onSelectLaps: (Int) -> Unit,
     onAddBot: () -> Unit,
     onRemoveBot: () -> Unit,
+    onClearBots: () -> Unit = {},
+    onClearGhost: () -> Unit = {},
+    onOpenLeaderboards: () -> Unit = {},
     onToggleReady: () -> Unit,
     onSendChat: (String) -> Unit,
     onStartRace: () -> Unit,
@@ -117,7 +130,7 @@ fun LobbyScreen(
 ) {
     BackHandler { onLeaveLobby() }
 
-    val isHostOrSolo = role == SessionRole.Host || role == SessionRole.Solo
+    val isHostOrSolo = role.isHostLike
     var chatDraft by remember { mutableStateOf("") }
     val chatListState = rememberLazyListState()
 
@@ -171,15 +184,41 @@ fun LobbyScreen(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    if (role != SessionRole.Solo && lobby != null) {
+                    if (role.isOnline) {
+                        val codeLabel = (onlineRoomCode?.takeIf { it.isNotBlank() } ?: lobby?.hostIp.orEmpty())
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            if (onlinePasswordProtected) {
+                                Icon(
+                                    Icons.Default.Lock,
+                                    contentDescription = "Password Protected",
+                                    tint = GoldTrophy,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
+                            Text(
+                                text = "Online Room Code: #$codeLabel" +
+                                    if (onlinePasswordProtected) " • Private" else "",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.testTag("lobby_online_code_label")
+                            )
+                        }
+                    } else if (role != SessionRole.Solo && lobby != null) {
                         Text(
                             text = "Host IP: ${lobby.hostIp}:${lobby.tcpPort}",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.secondary
                         )
                     } else {
+                        val pureSolo = lobby?.players?.none { it.isBot } == true
                         Text(
                             text = when {
+                                pureSolo && activeChallengeGhost != null ->
+                                    "Ghost Challenge vs ${activeChallengeGhost.driverName}"
+                                pureSolo -> "Pure Solo Driving (0 AI Bots • Ghost Recording)"
                                 isHybridMode -> "Offline Hybrid Tour vs AI"
                                 isStuntsMode -> "Offline Stunt Gauntlet vs AI"
                                 isArenaMode -> "Offline Arena vs AI"
@@ -264,6 +303,103 @@ fun LobbyScreen(
                         }
                         if (activeRules.showPlayerNames) {
                             item { LobbyRuleBadge("NAME TAGS", MaterialTheme.colorScheme.tertiary, onOpenSettings) }
+                        }
+                    }
+                }
+
+                // Solo Ghost Challenge Banner or Pick Rival Ghost CTA
+                if (role == SessionRole.Solo && !isArenaMode && !isStuntsMode && !isHybridMode) {
+                    if (activeChallengeGhost != null) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                            shape = RoundedCornerShape(16.dp),
+                            border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.7f)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("lobby_ghost_banner")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Icon(
+                                        Icons.Default.DirectionsCar,
+                                        contentDescription = null,
+                                        tint = ElectricCyan,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Column {
+                                        Text(
+                                            text = "GHOST CAR: ${activeChallengeGhost.driverName}",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "Target: ${formatRaceTime(activeChallengeGhost.finishTimeMs)} (${activeChallengeGhost.totalLaps}L)",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f)
+                                        )
+                                    }
+                                }
+                                IconButton(
+                                    onClick = onClearGhost,
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .testTag("clear_ghost_button")
+                                ) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "Clear Ghost Car",
+                                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
+                            }
+                        }
+                    } else if (lobby?.players?.none { it.isBot } == true) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainer,
+                            shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable(onClick = onOpenLeaderboards)
+                                .testTag("lobby_pick_ghost_button")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.EmojiEvents,
+                                        contentDescription = null,
+                                        tint = GoldTrophy,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = "Want a virtual rival? Load a Ghost Car from Leaderboards",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -808,21 +944,33 @@ fun LobbyScreen(
                     }
                 }
 
-                // Players Roster (2-4 players)
+                // Players Roster (1-4 players)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     val count = lobby?.players?.size ?: 0
+                    val cap = maxPlayers.coerceIn(2, 4)
                     Text(
-                        text = "RACERS ($count/4)",
+                        text = "RACERS ($count/$cap)",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     if (isHostOrSolo) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             val hasBot = lobby?.players?.any { it.isBot } == true
+                            if (hasBot && role == SessionRole.Solo) {
+                                OutlinedButton(
+                                    onClick = onClearBots,
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                    modifier = Modifier
+                                        .height(36.dp)
+                                        .testTag("clear_bots_button")
+                                ) {
+                                    Text("0 Bots", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
                             if (hasBot) {
                                 OutlinedButton(
                                     onClick = onRemoveBot,
@@ -834,7 +982,7 @@ fun LobbyScreen(
                                     Text("Bot", style = MaterialTheme.typography.labelSmall)
                                 }
                             }
-                            if (count < 4) {
+                            if (count < cap) {
                                 OutlinedButton(
                                     onClick = onAddBot,
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),

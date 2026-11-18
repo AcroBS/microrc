@@ -59,14 +59,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.model.ArenaShape
 import com.example.model.GameMode
+import com.example.model.GhostRunPlayback
 import com.example.model.LobbyStatePayload
 import com.example.model.RaceSnapshot
 import com.example.model.RematchCountdownState
 import com.example.model.TrackId
 import com.example.model.WinCondition
 import com.example.network.SessionRole
+import com.example.ui.theme.AcidLime
 import com.example.ui.theme.BronzeMedal
+import com.example.ui.theme.ElectricCyan
 import com.example.ui.theme.GoldTrophy
+import com.example.ui.theme.SignalOrange
 import com.example.ui.theme.SilverMedal
 
 @Composable
@@ -76,12 +80,15 @@ fun ResultsScreen(
     results: RaceSnapshot?,
     lobby: LobbyStatePayload?,
     rematchState: RematchCountdownState? = null,
+    isNewPersonalBest: Boolean = false,
+    challengeGhost: GhostRunPlayback? = null,
+    onOpenLeaderboards: (() -> Unit)? = null,
     onVoteRematch: (String) -> Unit = {},
     onLaunchRematchNow: () -> Unit = {},
     onReturnToLobby: () -> Unit,
     onExitHome: () -> Unit
 ) {
-    val isHostOrSolo = role == SessionRole.Host || role == SessionRole.Solo
+    val isHostOrSolo = role.isHostLike
     BackHandler {
         if (isHostOrSolo) onReturnToLobby() else onExitHome()
     }
@@ -194,6 +201,54 @@ fun ResultsScreen(
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.secondary
                         )
+                    }
+                }
+
+                // Personal Best & Ghost Challenge Summary Banner (Solo Mode)
+                val myRacer = sortedRacers.find { it.playerId == localPlayerId } ?: sortedRacers.firstOrNull()
+                if (role == SessionRole.Solo && (isNewPersonalBest || challengeGhost != null)) {
+                    val myFinish = myRacer?.finishTimeMs ?: 0L
+                    val ghostDelta = if (challengeGhost != null && myFinish > 0L) {
+                        myFinish - challengeGhost.finishTimeMs
+                    } else {
+                        null
+                    }
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f),
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(
+                            1.5.dp,
+                            if (isNewPersonalBest || (ghostDelta != null && ghostDelta <= 0L)) AcidLime else ElectricCyan
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("results_pb_banner")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            if (isNewPersonalBest) {
+                                Text(
+                                    text = "NEW PERSONAL BEST & GHOST RECORD SAVED!",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = AcidLime
+                                )
+                            }
+                            if (challengeGhost != null && ghostDelta != null) {
+                                val beatGhost = ghostDelta <= 0L
+                                val secDiff = String.format(java.util.Locale.US, "%.2fs", kotlin.math.abs(ghostDelta) / 1000f)
+                                Text(
+                                    text = if (beatGhost) {
+                                        "BEAT ${challengeGhost.driverName.uppercase()}'S GHOST BY $secDiff!"
+                                    } else {
+                                        "+$secDiff BEHIND ${challengeGhost.driverName.uppercase()}'S GHOST (${formatRaceTime(challengeGhost.finishTimeMs)})"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (beatGhost) AcidLime else SignalOrange
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -580,6 +635,22 @@ fun ResultsScreen(
                                 color = MaterialTheme.colorScheme.secondary
                             )
                         }
+                    }
+                }
+
+                if (role == SessionRole.Solo && onOpenLeaderboards != null) {
+                    OutlinedButton(
+                        onClick = onOpenLeaderboards,
+                        border = BorderStroke(1.dp, GoldTrophy.copy(alpha = 0.7f)),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp)
+                            .testTag("results_leaderboard_button")
+                    ) {
+                        Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = GoldTrophy)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Leaderboards & Ghost Challenges", color = GoldTrophy)
                     }
                 }
             }

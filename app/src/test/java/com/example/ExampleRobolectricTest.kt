@@ -431,5 +431,70 @@ class ExampleRobolectricTest {
         }
         composeTestRule.waitForIdle()
     }
+
+    @Test
+    fun homeScreen_onlinePlayShowsGoogleSignInGateWhenSignedOutAndReturnsToHome() {
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("online_play_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("pure_solo_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("leaderboards_button").performScrollTo().assertIsDisplayed()
+
+        // Tapping Online Web Play while signed out opens the Google Sign-In gate
+        composeTestRule.onNodeWithTag("online_play_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("google_sign_in_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("auth_back_button").performScrollTo().assertIsDisplayed()
+
+        // Backing out returns cleanly to Home
+        composeTestRule.onNodeWithTag("auth_back_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("online_play_button").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun pureSoloAndLeaderboards_openZeroBotSoloLobbyAndRecordsScreen() {
+        composeTestRule.waitForIdle()
+
+        // 1. Open Leaderboards & Ghosts screen from Home
+        composeTestRule.onNodeWithTag("leaderboards_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("leaderboard_mode_RACE").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("leaderboard_mode_STUNTS").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("leaderboard_start_solo_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("leaderboard_back_button").performClick()
+        composeTestRule.waitForIdle()
+
+        // 2. Launch Pure Solo Time Trial (0 AI Bots) from Home
+        composeTestRule.onNodeWithTag("pure_solo_button").performScrollTo().performClick()
+        composeTestRule.waitUntil(timeoutMillis = 5_000L) {
+            runCatching {
+                composeTestRule.onNodeWithTag("start_race_button").assertIsDisplayed()
+                true
+            }.getOrDefault(false)
+        }
+
+        // Verify 1/4 racers (0 bots) and Ghost Car picker shortcut in Solo Lobby
+        composeTestRule.onNodeWithText("RACERS (1/4)").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("lobby_pick_ghost_button").performScrollTo().assertIsDisplayed()
+
+        // Start pure solo drive and verify track HUD renders cleanly
+        composeTestRule.mainClock.autoAdvance = false
+        try {
+            composeTestRule.onNodeWithTag("start_race_button").performClick()
+            repeat(12) {
+                composeTestRule.mainClock.advanceTimeBy(50L)
+                Thread.sleep(15L)
+            }
+            composeTestRule.onNodeWithTag("use_powerup_button").assertIsDisplayed()
+            composeTestRule.onNodeWithTag("race_pause_button").performClick()
+            composeTestRule.mainClock.advanceTimeBy(100L)
+            composeTestRule.onNodeWithText("Exit Race").performClick()
+            composeTestRule.mainClock.advanceTimeBy(150L)
+        } finally {
+            composeTestRule.mainClock.autoAdvance = true
+        }
+        composeTestRule.waitForIdle()
+    }
 }
+
 

@@ -627,7 +627,7 @@ class RacePhysicsEngine(
             }
         }
 
-        if (fieldPickups.size < MAX_FIELD_PICKUPS) {
+        if (racers.size > 1 && fieldPickups.size < MAX_FIELD_PICKUPS) {
             nextFieldPickupSpawnMs -= dtMs
             if (nextFieldPickupSpawnMs <= 0L) {
                 nextFieldPickupSpawnMs = random.nextLong(5800L, 9400L)
@@ -1769,8 +1769,13 @@ class RacePhysicsEngine(
             val box = itemBoxes[i]
             if (box.available && TrackCatalog.distance(racer.x, racer.y, box.x, box.y) <= 44f) {
                 itemBoxes[i] = box.copy(available = false, respawnMs = 5500L)
-                val pool = if (racer.rank >= 3) {
-                    listOf(
+                val pool = when {
+                    racers.size <= 1 -> listOf(
+                        PowerUpType.TURBO_NITRO,
+                        PowerUpType.OVERDRIVE_GRIP,
+                        PowerUpType.SHIELD
+                    )
+                    racer.rank >= 3 -> listOf(
                         PowerUpType.TURBO_NITRO,
                         PowerUpType.HOMING_ROCKET,
                         PowerUpType.EMP_ZAP,
@@ -1779,8 +1784,7 @@ class RacePhysicsEngine(
                         PowerUpType.OVERDRIVE_GRIP,
                         PowerUpType.SHIELD
                     )
-                } else {
-                    PowerUpType.entries
+                    else -> PowerUpType.entries
                 }
                 val picked = pool[random.nextInt(pool.size)]
                 racer.heldPowerUp = picked
