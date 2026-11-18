@@ -21,21 +21,22 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.Source
 import com.google.firebase.firestore.snapshots
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 
-class OnlineRaceRepository(
+open class OnlineRaceRepository(
     private val db: FirebaseFirestore,
     private val auth: FirebaseAuth = Firebase.auth
 ) {
     constructor(context: Context) : this(
         db = FirebaseFirestore.getInstance(
-            context.applicationContext.getString(R.string.firestore_database_id)
+            FirestoreDatabaseResolver.resolveDatabaseId(context)
         ),
         auth = Firebase.auth
     )
@@ -45,11 +46,7 @@ class OnlineRaceRepository(
             ?: throw IllegalStateException("User must be signed in before accessing cloud features.")
 
     private fun rethrowIfRealCancellation(e: Throwable) {
-        if (e is CancellationException &&
-            generateSequence(e.cause) { it.cause }.none { it is FirebaseFirestoreException }
-        ) {
-            throw e
-        }
+        rethrowIfScopeCancellation(e)
     }
 
     // ========================================================================
@@ -76,7 +73,7 @@ class OnlineRaceRepository(
             }
     }
 
-    suspend fun findRoomByCode(rawRoomCode: String): Result<OnlineRoomDoc> {
+    open suspend fun findRoomByCode(rawRoomCode: String): Result<OnlineRoomDoc> {
         return try {
             requireUserId()
             val cleanCode = rawRoomCode.trim().uppercase()
@@ -85,30 +82,35 @@ class OnlineRaceRepository(
                 return Result.failure(IllegalArgumentException("Enter a valid 6-character room code."))
             }
 
-            val directRoomId = "room_$cleanCode"
-            val directSnap = db.collection("onlineRooms").document(directRoomId).get().await()
-            val directDoc = directSnap.toObject(
-                OnlineRoomDoc::class.java,
-                DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-            )
-            if (directDoc != null) {
-                return Result.success(directDoc)
-            }
+            withFirestoreTimeout(8_000L, "online lobby server") {
+                val directRoomId = "room_$cleanCode"
+                val directSnap = db.collection("onlineRooms")
+                    .document(directRoomId)
+                    .get(Source.SERVER)
+                    .await()
+                val directDoc = directSnap.toObject(
+                    OnlineRoomDoc::class.java,
+                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                )
+                if (directDoc != null) {
+                    return@withFirestoreTimeout Result.success(directDoc)
+                }
 
-            val querySnap = db.collection("onlineRooms")
-                .whereEqualTo("discoverable", true)
-                .whereEqualTo("roomCode", cleanCode)
-                .limit(1)
-                .get()
-                .await()
-            val found = querySnap.documents.firstOrNull()?.toObject(
-                OnlineRoomDoc::class.java,
-                DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-            )
-            if (found != null) {
-                Result.success(found)
-            } else {
-                Result.failure(IllegalArgumentException("No active online room found for code $cleanCode."))
+                val querySnap = db.collection("onlineRooms")
+                    .whereEqualTo("discoverable", true)
+                    .whereEqualTo("roomCode", cleanCode)
+                    .limit(1)
+                    .get(Source.SERVER)
+                    .await()
+                val found = querySnap.documents.firstOrNull()?.toObject(
+                    OnlineRoomDoc::class.java,
+                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                )
+                if (found != null) {
+                    Result.success(found)
+                } else {
+                    Result.failure(IllegalArgumentException("No active online room found for code $cleanCode."))
+                }
             }
         } catch (e: Exception) {
             rethrowIfRealCancellation(e)
@@ -117,7 +119,7 @@ class OnlineRaceRepository(
         }
     }
 
-    suspend fun createOnlineRoom(
+    open suspend fun createOnlineRoom(
         profile: PlayerProfile,
         roomName: String,
         maxPlayers: Int,
@@ -138,67 +140,90 @@ class OnlineRaceRepository(
             val salt = if (hasPassword) OnlinePasswordHasher.generateSalt() else ""
             val hash = if (hasPassword) OnlinePasswordHasher.hashPassword(salt, trimmedPassword) else ""
 
-            val roomCode = OnlinePasswordHasher.generateRoomCode(6)
-            val roomId = "room_$roomCode"
+            var roomCode = OnlinePasswordHasher.generateRoomCode(6)
+            var roomId = "room_$roomCode"
             targetRoomPath = "onlineRooms/$roomId"
 
+            // Fast server reachability & collision check before queueing writes
+            val existingRoomSnap = withFirestoreTimeout(8_000L, "online lobby server") {
+                db.collection("onlineRooms").document(roomId).get(Source.SERVER).await()
+            }
+            if (existingRoomSnap.exists()) {
+                roomCode = OnlinePasswordHasher.generateRoomCode(6)
+                roomId = "room_$roomCode"
+                targetRoomPath = "onlineRooms/$roomId"
+            }
+
+            val safeTrackId = trackId.take(64).ifEmpty { "LIVING_ROOM_GP" }
             val safeLobbyJson = initialLobbyJson.take(29_500).let {
                 if (it.length < 2) "{}" else it
             }
 
-            val roomData = mapOf(
-                "hostUid" to uid,
-                "hostName" to cleanHostName,
-                "roomName" to cleanName,
-                "roomCode" to roomCode,
-                "discoverable" to discoverable,
-                "passwordProtected" to hasPassword,
-                "passwordSalt" to salt,
-                "passwordHash" to hash,
-                "status" to "OPEN",
-                "gameMode" to gameMode.name,
-                "trackId" to trackId.take(64).ifEmpty { "LIVING_ROOM_GP" },
-                "playerCount" to 1L,
-                "maxPlayers" to clampedMax,
-                "memberUids" to listOf(uid),
-                "lobbyJson" to safeLobbyJson,
-                "raceStartJson" to "",
-                "telemetrySeq" to 0L,
-                "telemetryLine" to "",
-                "rematchJson" to "",
-                "createdAt" to FieldValue.serverTimestamp(),
-                "updatedAt" to FieldValue.serverTimestamp()
-            )
-            db.collection("onlineRooms").document(roomId).set(roomData).await()
+            withFirestoreTimeout(10_000L, "online lobby server") {
+                val roomData = mapOf(
+                    "hostUid" to uid,
+                    "hostName" to cleanHostName,
+                    "roomName" to cleanName,
+                    "roomCode" to roomCode,
+                    "discoverable" to discoverable,
+                    "passwordProtected" to hasPassword,
+                    "passwordSalt" to salt,
+                    "passwordHash" to hash,
+                    "status" to "OPEN",
+                    "gameMode" to gameMode.name,
+                    "trackId" to safeTrackId,
+                    "playerCount" to 1L,
+                    "maxPlayers" to clampedMax,
+                    "memberUids" to listOf(uid),
+                    "lobbyJson" to safeLobbyJson,
+                    "raceStartJson" to "",
+                    "telemetrySeq" to 0L,
+                    "telemetryLine" to "",
+                    "rematchJson" to "",
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+                db.collection("onlineRooms").document(roomId).set(roomData).await()
 
-            val hostPlayerPath = "onlineRooms/$roomId/players/$uid"
-            targetRoomPath = hostPlayerPath
-            val hostPlayerData = mapOf(
-                "roomId" to roomId,
-                "userId" to uid,
-                "name" to cleanHostName,
-                "carType" to profile.carType.name,
-                "primaryColorArgb" to profile.primaryColorArgb,
-                "accentColorArgb" to profile.accentColorArgb,
-                "ready" to true,
-                "host" to true,
-                "rematchVote" to "",
-                "joinToken" to hash,
-                "createdAt" to FieldValue.serverTimestamp(),
-                "updatedAt" to FieldValue.serverTimestamp()
-            )
-            db.collection("onlineRooms").document(roomId)
-                .collection("players").document(uid)
-                .set(hostPlayerData)
-                .await()
+                targetRoomPath = "onlineRooms/$roomId/players/$uid"
+                val hostPlayerData = mapOf(
+                    "roomId" to roomId,
+                    "userId" to uid,
+                    "name" to cleanHostName,
+                    "carType" to profile.carType.name,
+                    "primaryColorArgb" to profile.primaryColorArgb,
+                    "accentColorArgb" to profile.accentColorArgb,
+                    "ready" to true,
+                    "host" to true,
+                    "rematchVote" to "",
+                    "joinToken" to hash,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+                db.collection("onlineRooms").document(roomId)
+                    .collection("players").document(uid)
+                    .set(hostPlayerData)
+                    .await()
 
-            ensureInputDocInitialized(roomId, uid)
+                targetRoomPath = "onlineRooms/$roomId/inputs/$uid"
+                val hostInputData = mapOf(
+                    "roomId" to roomId,
+                    "userId" to uid,
+                    "seq" to 0L,
+                    "throttle" to 0.0,
+                    "steer" to 0.0,
+                    "powerUpSeq" to 0L,
+                    "mineDropSeq" to 0L,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+                db.collection("onlineRooms").document(roomId)
+                    .collection("inputs").document(uid)
+                    .set(hostInputData)
+                    .await()
+            }
 
-            val snap = db.collection("onlineRooms").document(roomId).get().await()
-            val createdDoc = snap.toObject(
-                OnlineRoomDoc::class.java,
-                DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-            ) ?: OnlineRoomDoc(
+            val createdDoc = OnlineRoomDoc(
                 id = roomId,
                 hostUid = uid,
                 hostName = cleanHostName,
@@ -210,7 +235,7 @@ class OnlineRaceRepository(
                 passwordHash = hash,
                 status = "OPEN",
                 gameMode = gameMode.name,
-                trackId = trackId,
+                trackId = safeTrackId,
                 playerCount = 1L,
                 maxPlayers = clampedMax,
                 memberUids = listOf(uid),
@@ -224,7 +249,7 @@ class OnlineRaceRepository(
         }
     }
 
-    suspend fun joinOnlineRoom(
+    open suspend fun joinOnlineRoom(
         roomId: String,
         profile: PlayerProfile,
         rawPassword: String,
@@ -233,79 +258,91 @@ class OnlineRaceRepository(
         var activePath = "onlineRooms/$roomId"
         return try {
             val uid = requireUserId()
-            val roomSnap = db.collection("onlineRooms").document(roomId).get().await()
-            val room = roomSnap.toObject(
-                OnlineRoomDoc::class.java,
-                DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-            ) ?: return Result.failure(IllegalArgumentException("Room no longer exists."))
+            withFirestoreTimeout(10_000L, "online lobby server") {
+                val roomSnap = db.collection("onlineRooms")
+                    .document(roomId)
+                    .get(Source.SERVER)
+                    .await()
+                val room = roomSnap.toObject(
+                    OnlineRoomDoc::class.java,
+                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                ) ?: return@withFirestoreTimeout Result.failure(IllegalArgumentException("Room no longer exists."))
 
-            val isAlreadyMember = uid in room.memberUids
-            if (!isAlreadyMember) {
-                if (room.status != "OPEN") {
-                    return Result.failure(IllegalStateException("Race is already in progress."))
+                val isAlreadyMember = uid in room.memberUids
+                if (!isAlreadyMember) {
+                    if (room.status != "OPEN") {
+                        return@withFirestoreTimeout Result.failure(IllegalStateException("Race is already in progress."))
+                    }
+                    if (room.playerCount >= room.maxPlayers) {
+                        return@withFirestoreTimeout Result.failure(
+                            IllegalStateException("Room is full (${room.playerCount}/${room.maxPlayers}).")
+                        )
+                    }
                 }
-                if (room.playerCount >= room.maxPlayers) {
-                    return Result.failure(IllegalStateException("Room is full (${room.playerCount}/${room.maxPlayers})."))
-                }
-            }
 
-            val computedJoinToken = if (room.passwordProtected) {
-                val cleanToken = preAuthorizedJoinToken.trim()
-                if (cleanToken.isNotEmpty() && cleanToken == room.passwordHash) {
-                    cleanToken
+                val computedJoinToken = if (room.passwordProtected) {
+                    val cleanToken = preAuthorizedJoinToken.trim()
+                    if (cleanToken.isNotEmpty() && cleanToken == room.passwordHash) {
+                        cleanToken
+                    } else {
+                        val trimmed = rawPassword.trim()
+                        if (trimmed.isEmpty()) {
+                            return@withFirestoreTimeout Result.failure(
+                                IllegalArgumentException("Password required to join this group.")
+                            )
+                        }
+                        val candidateHash = OnlinePasswordHasher.hashPassword(room.passwordSalt, trimmed)
+                        if (candidateHash != room.passwordHash) {
+                            return@withFirestoreTimeout Result.failure(
+                                IllegalArgumentException("Incorrect room password.")
+                            )
+                        }
+                        candidateHash
+                    }
                 } else {
-                    val trimmed = rawPassword.trim()
-                    if (trimmed.isEmpty()) {
-                        return Result.failure(IllegalArgumentException("Password required to join this group."))
-                    }
-                    val candidateHash = OnlinePasswordHasher.hashPassword(room.passwordSalt, trimmed)
-                    if (candidateHash != room.passwordHash) {
-                        return Result.failure(IllegalArgumentException("Incorrect room password."))
-                    }
-                    candidateHash
+                    ""
                 }
-            } else {
-                ""
-            }
 
-            val cleanName = profile.name.trim().take(24).ifEmpty { "Driver" }
-            val playerRef = db.collection("onlineRooms").document(roomId)
-                .collection("players").document(uid)
-            activePath = playerRef.path
-            val existingPlayer = playerRef.get().await()
-            if (existingPlayer.exists()) {
-                playerRef.update(
-                    mapOf(
-                        "name" to cleanName,
-                        "carType" to profile.carType.name,
-                        "primaryColorArgb" to profile.primaryColorArgb,
-                        "accentColorArgb" to profile.accentColorArgb,
-                        "ready" to (room.hostUid == uid),
-                        "rematchVote" to "",
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                ).await()
-            } else {
-                playerRef.set(
-                    mapOf(
-                        "roomId" to roomId,
-                        "userId" to uid,
-                        "name" to cleanName,
-                        "carType" to profile.carType.name,
-                        "primaryColorArgb" to profile.primaryColorArgb,
-                        "accentColorArgb" to profile.accentColorArgb,
-                        "ready" to false,
-                        "host" to false,
-                        "rematchVote" to "",
-                        "joinToken" to computedJoinToken,
-                        "createdAt" to FieldValue.serverTimestamp(),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                ).await()
-            }
+                val cleanName = profile.name.trim().take(24).ifEmpty { "Driver" }
+                val playerRef = db.collection("onlineRooms").document(roomId)
+                    .collection("players").document(uid)
+                activePath = playerRef.path
+                val existingPlayer = playerRef.get(Source.SERVER).await()
+                if (existingPlayer.exists()) {
+                    playerRef.update(
+                        mapOf(
+                            "name" to cleanName,
+                            "carType" to profile.carType.name,
+                            "primaryColorArgb" to profile.primaryColorArgb,
+                            "accentColorArgb" to profile.accentColorArgb,
+                            "ready" to (room.hostUid == uid),
+                            "rematchVote" to "",
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                } else {
+                    playerRef.set(
+                        mapOf(
+                            "roomId" to roomId,
+                            "userId" to uid,
+                            "name" to cleanName,
+                            "carType" to profile.carType.name,
+                            "primaryColorArgb" to profile.primaryColorArgb,
+                            "accentColorArgb" to profile.accentColorArgb,
+                            "ready" to false,
+                            "host" to false,
+                            "rematchVote" to "",
+                            "joinToken" to computedJoinToken,
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                }
 
-            ensureInputDocInitialized(roomId, uid)
-            Result.success(room)
+                activePath = "onlineRooms/$roomId/inputs/$uid"
+                ensureInputDocInitialized(roomId, uid)
+                Result.success(room)
+            }
         } catch (e: Exception) {
             rethrowIfRealCancellation(e)
             handleFirestoreError(e, OperationType.WRITE, activePath)
@@ -316,7 +353,7 @@ class OnlineRaceRepository(
     private suspend fun ensureInputDocInitialized(roomId: String, uid: String) {
         val inputRef = db.collection("onlineRooms").document(roomId)
             .collection("inputs").document(uid)
-        val snap = inputRef.get().await()
+        val snap = inputRef.get(Source.SERVER).await()
         if (!snap.exists()) {
             inputRef.set(
                 mapOf(
@@ -334,7 +371,7 @@ class OnlineRaceRepository(
         }
     }
 
-    fun observeRoom(roomId: String): Flow<OnlineRoomDoc?> {
+    open fun observeRoom(roomId: String): Flow<OnlineRoomDoc?> {
         requireUserId()
         val path = "onlineRooms/$roomId"
         return db.collection("onlineRooms").document(roomId)
@@ -352,7 +389,7 @@ class OnlineRaceRepository(
             }
     }
 
-    fun observeRoomPlayers(roomId: String): Flow<List<OnlineRoomPlayerDoc>> {
+    open fun observeRoomPlayers(roomId: String): Flow<List<OnlineRoomPlayerDoc>> {
         requireUserId()
         val path = "onlineRooms/$roomId/players"
         return db.collection("onlineRooms").document(roomId)
@@ -377,7 +414,7 @@ class OnlineRaceRepository(
             }
     }
 
-    fun observeRoomInputs(roomId: String): Flow<List<OnlineRoomInputDoc>> {
+    open fun observeRoomInputs(roomId: String): Flow<List<OnlineRoomInputDoc>> {
         requireUserId()
         val path = "onlineRooms/$roomId/inputs"
         return db.collection("onlineRooms").document(roomId)
@@ -399,7 +436,7 @@ class OnlineRaceRepository(
             }
     }
 
-    fun observeRoomChat(roomId: String): Flow<List<OnlineRoomChatDoc>> {
+    open fun observeRoomChat(roomId: String): Flow<List<OnlineRoomChatDoc>> {
         requireUserId()
         val path = "onlineRooms/$roomId/chat"
         return db.collection("onlineRooms").document(roomId)
@@ -422,7 +459,7 @@ class OnlineRaceRepository(
             }
     }
 
-    suspend fun updateHostRoomFields(roomId: String, fields: Map<String, Any>): Result<Unit> {
+    open suspend fun updateHostRoomFields(roomId: String, fields: Map<String, Any>): Result<Unit> {
         val path = "onlineRooms/$roomId"
         return try {
             requireUserId()
@@ -436,7 +473,9 @@ class OnlineRaceRepository(
                 remove("passwordHash")
                 put("updatedAt", FieldValue.serverTimestamp())
             }
-            db.collection("onlineRooms").document(roomId).update(payload).await()
+            withFirestoreTimeout(6_000L, "online lobby server") {
+                db.collection("onlineRooms").document(roomId).update(payload).await()
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             rethrowIfRealCancellation(e)
@@ -445,10 +484,9 @@ class OnlineRaceRepository(
         }
     }
 
-    suspend fun updatePlayerFields(roomId: String, fields: Map<String, Any>): Result<Unit> {
+    open suspend fun updatePlayerFields(roomId: String, fields: Map<String, Any>): Result<Unit> {
         return try {
             val uid = requireUserId()
-            val path = "onlineRooms/$roomId/players/$uid"
             val payload = fields.toMutableMap().apply {
                 remove("id")
                 remove("createdAt")
@@ -458,10 +496,12 @@ class OnlineRaceRepository(
                 remove("joinToken")
                 put("updatedAt", FieldValue.serverTimestamp())
             }
-            db.collection("onlineRooms").document(roomId)
-                .collection("players").document(uid)
-                .update(payload)
-                .await()
+            withFirestoreTimeout(6_000L, "online lobby server") {
+                db.collection("onlineRooms").document(roomId)
+                    .collection("players").document(uid)
+                    .update(payload)
+                    .await()
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             rethrowIfRealCancellation(e)
@@ -471,7 +511,7 @@ class OnlineRaceRepository(
         }
     }
 
-    suspend fun pushDriverInput(
+    open suspend fun pushDriverInput(
         roomId: String,
         seq: Long,
         throttle: Float,
@@ -485,34 +525,36 @@ class OnlineRaceRepository(
                 .collection("inputs").document(uid)
             val clampedThrottle = throttle.coerceIn(-1f, 1f).toDouble()
             val clampedSteer = steer.coerceIn(-1f, 1f).toDouble()
-            try {
-                ref.update(
-                    mapOf(
-                        "seq" to seq,
-                        "throttle" to clampedThrottle,
-                        "steer" to clampedSteer,
-                        "powerUpSeq" to powerUpSeq,
-                        "mineDropSeq" to mineDropSeq,
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                ).await()
-            } catch (notFound: FirebaseFirestoreException) {
-                if (notFound.code == FirebaseFirestoreException.Code.NOT_FOUND) {
-                    ref.set(
+            withFirestoreTimeout(4_000L, "race telemetry server") {
+                try {
+                    ref.update(
                         mapOf(
-                            "roomId" to roomId,
-                            "userId" to uid,
                             "seq" to seq,
                             "throttle" to clampedThrottle,
                             "steer" to clampedSteer,
                             "powerUpSeq" to powerUpSeq,
                             "mineDropSeq" to mineDropSeq,
-                            "createdAt" to FieldValue.serverTimestamp(),
                             "updatedAt" to FieldValue.serverTimestamp()
                         )
                     ).await()
-                } else {
-                    throw notFound
+                } catch (notFound: FirebaseFirestoreException) {
+                    if (notFound.code == FirebaseFirestoreException.Code.NOT_FOUND) {
+                        ref.set(
+                            mapOf(
+                                "roomId" to roomId,
+                                "userId" to uid,
+                                "seq" to seq,
+                                "throttle" to clampedThrottle,
+                                "steer" to clampedSteer,
+                                "powerUpSeq" to powerUpSeq,
+                                "mineDropSeq" to mineDropSeq,
+                                "createdAt" to FieldValue.serverTimestamp(),
+                                "updatedAt" to FieldValue.serverTimestamp()
+                            )
+                        ).await()
+                    } else {
+                        throw notFound
+                    }
                 }
             }
             Result.success(Unit)
@@ -524,7 +566,7 @@ class OnlineRaceRepository(
         }
     }
 
-    suspend fun sendRoomChat(
+    open suspend fun sendRoomChat(
         roomId: String,
         senderName: String,
         text: String,
@@ -537,18 +579,20 @@ class OnlineRaceRepository(
             val cleanText = text.trim().take(140)
             if (cleanText.isEmpty()) return Result.success(Unit)
             val cleanSender = senderName.trim().take(24).ifEmpty { "Driver" }
-            db.collection("onlineRooms").document(roomId)
-                .collection("chat").document(msgId)
-                .set(
-                    mapOf(
-                        "roomId" to roomId,
-                        "senderUid" to uid,
-                        "senderName" to cleanSender,
-                        "text" to cleanText,
-                        "systemMessage" to systemMessage,
-                        "createdAt" to FieldValue.serverTimestamp()
-                    )
-                ).await()
+            withFirestoreTimeout(6_000L, "lobby chat server") {
+                db.collection("onlineRooms").document(roomId)
+                    .collection("chat").document(msgId)
+                    .set(
+                        mapOf(
+                            "roomId" to roomId,
+                            "senderUid" to uid,
+                            "senderName" to cleanSender,
+                            "text" to cleanText,
+                            "systemMessage" to systemMessage,
+                            "createdAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             rethrowIfRealCancellation(e)
@@ -557,14 +601,26 @@ class OnlineRaceRepository(
         }
     }
 
-    suspend fun leaveOnlineRoom(roomId: String, isHost: Boolean): Result<Unit> {
+    open suspend fun leaveOnlineRoom(roomId: String, isHost: Boolean): Result<Unit> {
         return try {
             val uid = auth.currentUser?.uid ?: return Result.success(Unit)
             val roomRef = db.collection("onlineRooms").document(roomId)
-            runCatching { roomRef.collection("inputs").document(uid).delete().await() }
-            runCatching { roomRef.collection("players").document(uid).delete().await() }
+            runCatching {
+                withTimeoutOrNull(3_000L) {
+                    roomRef.collection("inputs").document(uid).delete().await()
+                }
+            }
+            runCatching {
+                withTimeoutOrNull(3_000L) {
+                    roomRef.collection("players").document(uid).delete().await()
+                }
+            }
             if (isHost) {
-                runCatching { roomRef.delete().await() }
+                runCatching {
+                    withTimeoutOrNull(3_000L) {
+                        roomRef.delete().await()
+                    }
+                }
             }
             Result.success(Unit)
         } catch (e: Exception) {
@@ -769,11 +825,13 @@ class OnlineRaceRepository(
         }
     }
 
-    suspend fun fetchGhostRunPlayback(ghostId: String): Result<GhostRunPlayback> {
+    open suspend fun fetchGhostRunPlayback(ghostId: String): Result<GhostRunPlayback> {
         val path = "ghostRuns/$ghostId"
         return try {
             requireUserId()
-            val snap = db.collection("ghostRuns").document(ghostId).get().await()
+            val snap = withFirestoreTimeout(8_000L, "ghost leaderboard server") {
+                db.collection("ghostRuns").document(ghostId).get().await()
+            }
             val doc = snap.toObject(
                 GhostRunDoc::class.java,
                 DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
@@ -804,35 +862,41 @@ class OnlineRaceRepository(
         }
     }
 
-    suspend fun deleteAllUserRaceAndLeaderboardData(): Result<Unit> {
+    open suspend fun deleteAllUserRaceAndLeaderboardData(): Result<Unit> {
         val uid = auth.currentUser?.uid ?: return Result.success(Unit)
         return try {
             runCatching {
-                val entries = db.collection("leaderboardEntries")
-                    .whereEqualTo("publicEntry", true)
-                    .whereEqualTo("userId", uid)
-                    .get()
-                    .await()
-                entries.documents.forEach { doc -> doc.reference.delete().await() }
+                withTimeoutOrNull(5_000L) {
+                    val entries = db.collection("leaderboardEntries")
+                        .whereEqualTo("publicEntry", true)
+                        .whereEqualTo("userId", uid)
+                        .get()
+                        .await()
+                    entries.documents.forEach { doc -> doc.reference.delete().await() }
+                }
             }
             runCatching {
-                val ghosts = db.collection("ghostRuns")
-                    .whereEqualTo("publicGhost", true)
-                    .whereEqualTo("userId", uid)
-                    .get()
-                    .await()
-                ghosts.documents.forEach { doc -> doc.reference.delete().await() }
+                withTimeoutOrNull(5_000L) {
+                    val ghosts = db.collection("ghostRuns")
+                        .whereEqualTo("publicGhost", true)
+                        .whereEqualTo("userId", uid)
+                        .get()
+                        .await()
+                    ghosts.documents.forEach { doc -> doc.reference.delete().await() }
+                }
             }
             runCatching {
-                val hostedRooms = db.collection("onlineRooms")
-                    .whereEqualTo("discoverable", true)
-                    .whereEqualTo("hostUid", uid)
-                    .get()
-                    .await()
-                hostedRooms.documents.forEach { doc ->
-                    runCatching { doc.reference.collection("inputs").document(uid).delete().await() }
-                    runCatching { doc.reference.collection("players").document(uid).delete().await() }
-                    runCatching { doc.reference.delete().await() }
+                withTimeoutOrNull(5_000L) {
+                    val hostedRooms = db.collection("onlineRooms")
+                        .whereEqualTo("discoverable", true)
+                        .whereEqualTo("hostUid", uid)
+                        .get()
+                        .await()
+                    hostedRooms.documents.forEach { doc ->
+                        runCatching { doc.reference.collection("inputs").document(uid).delete().await() }
+                        runCatching { doc.reference.collection("players").document(uid).delete().await() }
+                        runCatching { doc.reference.delete().await() }
+                    }
                 }
             }
             Result.success(Unit)

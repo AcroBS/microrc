@@ -141,7 +141,17 @@ test("Online rooms: host create, filtered browser query, password verification, 
   const bro2Db = testEnv.authenticatedContext(BRO2_UID).firestore();
   const outsiderDb = testEnv.authenticatedContext(OUTSIDER_UID).firestore();
 
+  // Pre-creation room, player, and input get() checks (resource == null) must succeed
+  await assertSucceeds(hostDb.collection("onlineRooms").doc("room_1").get());
   await assertSucceeds(hostDb.collection("onlineRooms").doc("room_1").set(makeRoomPayload()));
+  await assertSucceeds(
+    hostDb
+      .collection("onlineRooms")
+      .doc("room_1")
+      .collection("players")
+      .doc(HOST_UID)
+      .get()
+  );
   await assertSucceeds(
     hostDb
       .collection("onlineRooms")
@@ -150,9 +160,46 @@ test("Online rooms: host create, filtered browser query, password verification, 
       .doc(HOST_UID)
       .set(makePlayerPayload("room_1", HOST_UID, { host: true, ready: true }))
   );
+  await assertSucceeds(
+    hostDb
+      .collection("onlineRooms")
+      .doc("room_1")
+      .collection("inputs")
+      .doc(HOST_UID)
+      .get()
+  );
+  const inputTs = new Date(Date.now() - 1200);
+  await assertSucceeds(
+    hostDb
+      .collection("onlineRooms")
+      .doc("room_1")
+      .collection("inputs")
+      .doc(HOST_UID)
+      .set({
+        roomId: "room_1",
+        userId: HOST_UID,
+        seq: 0,
+        throttle: 0.0,
+        steer: 0.0,
+        powerUpSeq: 0,
+        mineDropSeq: 0,
+        createdAt: inputTs,
+        updatedAt: inputTs,
+      })
+  );
 
   await assertSucceeds(bro2Db.collection("onlineRooms").where("discoverable", "==", true).get());
   await assertFails(bro2Db.collection("onlineRooms").get());
+
+  // Joiner pre-creation player get() check must succeed before joining
+  await assertSucceeds(
+    bro2Db
+      .collection("onlineRooms")
+      .doc("room_1")
+      .collection("players")
+      .doc(BRO2_UID)
+      .get()
+  );
 
   await assertFails(
     bro2Db

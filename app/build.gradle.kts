@@ -81,6 +81,7 @@ android {
     buildConfigField("String", "CI_FIREBASE_STORAGE_BUCKET", ciEnvLiteral("FIREBASE_STORAGE_BUCKET"))
     buildConfigField("String", "CI_FIREBASE_GCM_SENDER_ID", ciEnvLiteral("FIREBASE_GCM_SENDER_ID"))
     buildConfigField("String", "CI_FIREBASE_WEB_CLIENT_ID", ciEnvLiteral("FIREBASE_WEB_CLIENT_ID"))
+    buildConfigField("String", "CI_FIRESTORE_DATABASE_ID", ciEnvLiteral("FIRESTORE_DATABASE_ID"))
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,

@@ -138,11 +138,14 @@ jobs:
           FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
           FIREBASE_GCM_SENDER_ID: ${{ secrets.FIREBASE_GCM_SENDER_ID }}
           FIREBASE_WEB_CLIENT_ID: ${{ secrets.FIREBASE_WEB_CLIENT_ID }}
+          FIRESTORE_DB_SECRET: ${{ secrets.FIRESTORE_DATABASE_ID }}
+          FIRESTORE_DB_VAR: ${{ vars.FIRESTORE_DATABASE_ID }}
         run: |
           FIREBASE_STATUS="MISSING"
           EXPECTED_PKG="com.aistudio.microrc.k7m9xp"
           export GOOGLE_SERVICES_JSON="${GOOGLE_SERVICES_JSON_SECRET:-${GOOGLE_SERVICES_JSON_VAR:-}}"
           export GOOGLE_SERVICES_JSON_BASE64="${GOOGLE_SERVICES_JSON_B64_SECRET:-${GOOGLE_SERVICES_JSON_B64_VAR:-}}"
+          export FIRESTORE_DATABASE_ID="${FIRESTORE_DB_SECRET:-${FIRESTORE_DB_VAR:-}}"
 
           if [ ! -s app/google-services.json ] && [ -n "${GOOGLE_SERVICES_JSON:-}" ]; then
             python3 - <<'PYEOF' || rm -f app/google-services.json
@@ -167,8 +170,10 @@ jobs:
             printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | tr -d '[:space:]' | base64 -d > app/google-services.json 2>/dev/null || rm -f app/google-services.json
           fi
 
+          DETECTED_PROJECT_ID="${FIREBASE_PROJECT_ID:-}"
           # Validate JSON & verify package_name matches applicationId (or extract to GITHUB_ENV fallback)
           if [ -s app/google-services.json ]; then
+            DETECTED_PROJECT_ID="$(python3 -c 'import json; print(((json.load(open("app/google-services.json")).get("project_info") or {}).get("project_id") or "").strip())' 2>/dev/null || true)"
             GS_CHECK="$(python3 - <<'PYEOF'
           import json, os
           expected_pkg = "com.aistudio.microrc.k7m9xp"
@@ -242,6 +247,25 @@ jobs:
             esac
           fi
 
+          # Align Firestore database ID for custom Firebase projects (defaults to '(default)')
+          ACTIVE_FIRESTORE_DB="ai-studio-android-microrc-315a4780-b35f-4d6b-8583-99fb992be8f7"
+          if [ -n "${FIRESTORE_DATABASE_ID:-}" ]; then
+            ACTIVE_FIRESTORE_DB="$(printf '%s' "$FIRESTORE_DATABASE_ID" | tr -d '\r\n')"
+          elif [ -n "${DETECTED_PROJECT_ID:-}" ] && [ "$DETECTED_PROJECT_ID" != "gen-lang-client-0040246566" ]; then
+            ACTIVE_FIRESTORE_DB="(default)"
+          fi
+          if [ "$ACTIVE_FIRESTORE_DB" != "ai-studio-android-microrc-315a4780-b35f-4d6b-8583-99fb992be8f7" ]; then
+            cat > app/src/main/res/values/firebase_applet_config.xml <<XMLEOF
+          <?xml version="1.0" encoding="utf-8" standalone="no"?>
+          <resources>
+              <string name="firestore_database_id" translatable="false">${ACTIVE_FIRESTORE_DB}</string>
+          </resources>
+          XMLEOF
+            sed -i 's/^[[:space:]]\{10\}//' app/src/main/res/values/firebase_applet_config.xml
+            printf 'FIRESTORE_DATABASE_ID=%s\n' "$ACTIVE_FIRESTORE_DB" >> "$GITHUB_ENV"
+            echo "Configured Firestore database ID '${ACTIVE_FIRESTORE_DB}' for project '${DETECTED_PROJECT_ID}'."
+          fi
+
           # Export optional FIREBASE_* secrets to GITHUB_ENV (single-line sanitized)
           for key in FIREBASE_PROJECT_ID FIREBASE_APP_ID FIREBASE_API_KEY FIREBASE_STORAGE_BUCKET FIREBASE_GCM_SENDER_ID FIREBASE_WEB_CLIENT_ID; do
             val="$(printf '%s' "${!key:-}" | tr -d '\r\n')"
@@ -270,9 +294,11 @@ jobs:
           {
             echo "### Build & Google Sign-In Check"
             echo "- **Google Sign-In Config**: \`${FIREBASE_STATUS}\`"
+            echo "- **Cloud Project**: \`${DETECTED_PROJECT_ID:-unset}\` (Firestore DB: \`${ACTIVE_FIRESTORE_DB}\`)"
             echo "- **APK Signing SHA-1**: \`${ACTIVE_APK_SHA1:-unknown}\`"
             echo "- **APK Signing SHA-256**: \`${ACTIVE_APK_SHA256:-unknown}\`"
             echo "- **Cert Match**: ${SHA_MATCH_NOTE}"
+            echo "- **Cloud Database Check**: Ensure **Firestore Database** (\`(default)\`) is created in your project and \`firestore.rules\` is published."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Gradle 9.3.1

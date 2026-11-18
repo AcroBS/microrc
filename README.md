@@ -12,7 +12,9 @@ Every commit pushed to this repository triggers the **Build Android APK** workfl
 
 ## Maintainer CI & Google Play Console Deployment
 
-- **Online Google Sign-In (`GOOGLE_SERVICES_JSON`):** Set `GOOGLE_SERVICES_JSON` in GitHub **Settings → Secrets and variables → Actions** (supported under either **Secrets** or **Variables**). Make sure the APK/Play App Signing `SHA-1` & `SHA-256` certificates are registered for `com.aistudio.microrc.k7m9xp` in your cloud project's Android app settings.
+- **Online Google Sign-In & Cloud Lobbies (`GOOGLE_SERVICES_JSON`):** Set `GOOGLE_SERVICES_JSON` in GitHub **Settings → Secrets and variables → Actions** (supported under either **Secrets** or **Variables**). In that same cloud project:
+  1. Register the APK/Play App Signing `SHA-1` & `SHA-256` certificates for `com.aistudio.microrc.k7m9xp`.
+  2. Create a **Firestore Database** (`(default)` database) and publish the repository's [`firestore.rules`](./firestore.rules) under **Firestore Database → Rules** so online lobbies, friends, and leaderboards work immediately.
 - **Google Play Developer Console (`.aab` Release Bundle):**
   1. Generate an upload keystore with alias `upload`:
      ```bash

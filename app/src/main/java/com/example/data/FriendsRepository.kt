@@ -16,8 +16,8 @@ import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
+import com.google.firebase.firestore.Source
 import com.google.firebase.firestore.snapshots
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import java.util.UUID
 
@@ -35,7 +36,7 @@ class FriendsRepository(
 ) {
     constructor(context: Context) : this(
         db = FirebaseFirestore.getInstance(
-            context.applicationContext.getString(R.string.firestore_database_id)
+            FirestoreDatabaseResolver.resolveDatabaseId(context)
         ),
         auth = Firebase.auth
     )
@@ -45,11 +46,7 @@ class FriendsRepository(
             ?: throw IllegalStateException("Sign in with Google to use Friends & Session Invites.")
 
     private fun rethrowIfRealCancellation(e: Throwable) {
-        if (e is CancellationException &&
-            generateSequence(e.cause) { it.cause }.none { it is FirebaseFirestoreException }
-        ) {
-            throw e
-        }
+        rethrowIfScopeCancellation(e)
     }
 
     // ========================================================================
@@ -79,47 +76,49 @@ class FriendsRepository(
             val roomCode = if (online && activeRoom != null) activeRoom.roomCode.take(12) else ""
             val roomName = if (online && activeRoom != null) activeRoom.roomName.take(40) else ""
 
-            val docRef = db.collection("driverProfiles").document(uid)
-            val snap = docRef.get().await()
-            if (snap.exists()) {
-                docRef.update(
-                    mapOf(
-                        "driverName" to cleanName,
-                        "searchName" to searchName,
-                        "carType" to profile.carType.name,
-                        "primaryColorArgb" to profile.primaryColorArgb,
-                        "accentColorArgb" to profile.accentColorArgb,
-                        "online" to online,
-                        "activityStatus" to safeStatus,
-                        "activeRoomId" to roomId,
-                        "activeRoomCode" to roomCode,
-                        "activeRoomName" to roomName,
-                        "publicProfile" to true,
-                        "lastSeenAt" to FieldValue.serverTimestamp(),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                ).await()
-            } else {
-                docRef.set(
-                    mapOf(
-                        "userId" to uid,
-                        "driverName" to cleanName,
-                        "searchName" to searchName,
-                        "friendCode" to friendCode,
-                        "carType" to profile.carType.name,
-                        "primaryColorArgb" to profile.primaryColorArgb,
-                        "accentColorArgb" to profile.accentColorArgb,
-                        "online" to online,
-                        "activityStatus" to safeStatus,
-                        "activeRoomId" to roomId,
-                        "activeRoomCode" to roomCode,
-                        "activeRoomName" to roomName,
-                        "publicProfile" to true,
-                        "lastSeenAt" to FieldValue.serverTimestamp(),
-                        "createdAt" to FieldValue.serverTimestamp(),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                ).await()
+            withFirestoreTimeout(8_000L, "friends status server") {
+                val docRef = db.collection("driverProfiles").document(uid)
+                val snap = docRef.get(Source.SERVER).await()
+                if (snap.exists()) {
+                    docRef.update(
+                        mapOf(
+                            "driverName" to cleanName,
+                            "searchName" to searchName,
+                            "carType" to profile.carType.name,
+                            "primaryColorArgb" to profile.primaryColorArgb,
+                            "accentColorArgb" to profile.accentColorArgb,
+                            "online" to online,
+                            "activityStatus" to safeStatus,
+                            "activeRoomId" to roomId,
+                            "activeRoomCode" to roomCode,
+                            "activeRoomName" to roomName,
+                            "publicProfile" to true,
+                            "lastSeenAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                } else {
+                    docRef.set(
+                        mapOf(
+                            "userId" to uid,
+                            "driverName" to cleanName,
+                            "searchName" to searchName,
+                            "friendCode" to friendCode,
+                            "carType" to profile.carType.name,
+                            "primaryColorArgb" to profile.primaryColorArgb,
+                            "accentColorArgb" to profile.accentColorArgb,
+                            "online" to online,
+                            "activityStatus" to safeStatus,
+                            "activeRoomId" to roomId,
+                            "activeRoomCode" to roomCode,
+                            "activeRoomName" to roomName,
+                            "publicProfile" to true,
+                            "lastSeenAt" to FieldValue.serverTimestamp(),
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                }
             }
             Result.success(Unit)
         } catch (e: Exception) {
@@ -134,24 +133,26 @@ class FriendsRepository(
         val path = "driverProfiles/$uid"
         return withContext(NonCancellable) {
             try {
-                val docRef = db.collection("driverProfiles").document(uid)
-                val snap = docRef.get().await()
-                if (snap.exists()) {
-                    val payload = mutableMapOf<String, Any>(
-                        "online" to false,
-                        "activityStatus" to "OFFLINE",
-                        "activeRoomId" to "",
-                        "activeRoomCode" to "",
-                        "activeRoomName" to "",
-                        "lastSeenAt" to FieldValue.serverTimestamp(),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                    if (profile != null) {
-                        val cleanName = profile.name.trim().take(24).ifEmpty { "Driver" }
-                        payload["driverName"] = cleanName
-                        payload["searchName"] = cleanName.lowercase(Locale.US).take(24).ifEmpty { "driver" }
+                withTimeoutOrNull(3_000L) {
+                    val docRef = db.collection("driverProfiles").document(uid)
+                    val snap = docRef.get(Source.SERVER).await()
+                    if (snap.exists()) {
+                        val payload = mutableMapOf<String, Any>(
+                            "online" to false,
+                            "activityStatus" to "OFFLINE",
+                            "activeRoomId" to "",
+                            "activeRoomCode" to "",
+                            "activeRoomName" to "",
+                            "lastSeenAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                        if (profile != null) {
+                            val cleanName = profile.name.trim().take(24).ifEmpty { "Driver" }
+                            payload["driverName"] = cleanName
+                            payload["searchName"] = cleanName.lowercase(Locale.US).take(24).ifEmpty { "driver" }
+                        }
+                        docRef.update(payload).await()
                     }
-                    docRef.update(payload).await()
                 }
                 Result.success(Unit)
             } catch (e: Exception) {
@@ -170,11 +171,13 @@ class FriendsRepository(
             val normalizedCode = DriverFriendCode.normalizeCode(trimmed)
             val normalizedSearch = trimmed.lowercase(Locale.US)
 
-            val snap = db.collection("driverProfiles")
-                .whereEqualTo("publicProfile", true)
-                .limit(60)
-                .get()
-                .await()
+            val snap = withFirestoreTimeout(8_000L, "driver directory") {
+                db.collection("driverProfiles")
+                    .whereEqualTo("publicProfile", true)
+                    .limit(60)
+                    .get(Source.SERVER)
+                    .await()
+            }
 
             val matches = snap.documents.mapNotNull { doc ->
                 doc.toObject(
@@ -280,10 +283,12 @@ class FriendsRepository(
             )
 
             // Check existing friendships for this pair
-            val existingSnap = db.collection("friendships")
-                .whereArrayContains("memberUids", uid)
-                .get()
-                .await()
+            val existingSnap = withFirestoreTimeout(8_000L, "friends server") {
+                db.collection("friendships")
+                    .whereArrayContains("memberUids", uid)
+                    .get(Source.SERVER)
+                    .await()
+            }
             val alreadyLinked = existingSnap.documents.mapNotNull {
                 it.toObject(FriendshipDoc::class.java, DocumentSnapshot.ServerTimestampBehavior.ESTIMATE)
             }.firstOrNull { target.userId in it.memberUids }
@@ -306,21 +311,23 @@ class FriendsRepository(
             val targetCleanName = target.driverName.trim().take(24).ifEmpty { "Driver" }
             val targetCode = target.friendCode.trim().take(12).ifEmpty { DriverFriendCode.fromUid(target.userId) }
 
-            db.collection("friendships").document(friendshipId)
-                .set(
-                    mapOf(
-                        "memberUids" to listOf(uid, target.userId),
-                        "requesterUid" to uid,
-                        "requesterName" to myCleanName,
-                        "requesterFriendCode" to myCode,
-                        "receiverUid" to target.userId,
-                        "receiverName" to targetCleanName,
-                        "receiverFriendCode" to targetCode,
-                        "status" to "PENDING",
-                        "createdAt" to FieldValue.serverTimestamp(),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                ).await()
+            withFirestoreTimeout(8_000L, "friends server") {
+                db.collection("friendships").document(friendshipId)
+                    .set(
+                        mapOf(
+                            "memberUids" to listOf(uid, target.userId),
+                            "requesterUid" to uid,
+                            "requesterName" to myCleanName,
+                            "requesterFriendCode" to myCode,
+                            "receiverUid" to target.userId,
+                            "receiverName" to targetCleanName,
+                            "receiverFriendCode" to targetCode,
+                            "status" to "PENDING",
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             rethrowIfRealCancellation(e)
@@ -343,12 +350,14 @@ class FriendsRepository(
                 return Result.failure(IllegalArgumentException("That is your own Friend Code! Share it with a friend."))
             }
 
-            val snap = db.collection("driverProfiles")
-                .whereEqualTo("publicProfile", true)
-                .whereEqualTo("friendCode", cleanCode)
-                .limit(1)
-                .get()
-                .await()
+            val snap = withFirestoreTimeout(8_000L, "friends server") {
+                db.collection("driverProfiles")
+                    .whereEqualTo("publicProfile", true)
+                    .whereEqualTo("friendCode", cleanCode)
+                    .limit(1)
+                    .get(Source.SERVER)
+                    .await()
+            }
             val target = snap.documents.firstOrNull()?.toObject(
                 DriverProfileDoc::class.java,
                 DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
@@ -375,7 +384,9 @@ class FriendsRepository(
             if (targetUid.isBlank() || targetUid == uid) {
                 return Result.failure(IllegalArgumentException("Invalid player selected."))
             }
-            val snap = db.collection("driverProfiles").document(targetUid).get().await()
+            val snap = withFirestoreTimeout(8_000L, "friends server") {
+                db.collection("driverProfiles").document(targetUid).get(Source.SERVER).await()
+            }
             val doc = snap.toObject(
                 DriverProfileDoc::class.java,
                 DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
@@ -398,14 +409,16 @@ class FriendsRepository(
         return try {
             requireUserId()
             val cleanName = receiverDisplayName.trim().take(24).ifEmpty { "Driver" }
-            db.collection("friendships").document(friendshipId)
-                .update(
-                    mapOf(
-                        "status" to "ACCEPTED",
-                        "receiverName" to cleanName,
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                ).await()
+            withFirestoreTimeout(8_000L, "friends server") {
+                db.collection("friendships").document(friendshipId)
+                    .update(
+                        mapOf(
+                            "status" to "ACCEPTED",
+                            "receiverName" to cleanName,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             rethrowIfRealCancellation(e)
@@ -418,7 +431,9 @@ class FriendsRepository(
         val path = "friendships/$friendshipId"
         return try {
             requireUserId()
-            db.collection("friendships").document(friendshipId).delete().await()
+            withFirestoreTimeout(8_000L, "friends server") {
+                db.collection("friendships").document(friendshipId).delete().await()
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             rethrowIfRealCancellation(e)
@@ -450,25 +465,27 @@ class FriendsRepository(
                 .getOrDefault(GameMode.RACE.name)
             val token = if (room.passwordProtected) room.passwordHash.take(64) else ""
 
-            db.collection("sessionInvites").document(inviteId)
-                .set(
-                    mapOf(
-                        "senderUid" to uid,
-                        "senderName" to cleanSender,
-                        "senderCarType" to senderProfile.carType.name,
-                        "senderColorArgb" to senderProfile.primaryColorArgb,
-                        "recipientUid" to recipientUid,
-                        "recipientName" to cleanRecipient,
-                        "roomId" to room.id.take(128),
-                        "roomCode" to room.roomCode.take(12),
-                        "roomName" to room.roomName.take(40).ifEmpty { "Online Paddock" },
-                        "gameMode" to validMode,
-                        "joinToken" to token,
-                        "status" to "PENDING",
-                        "createdAt" to FieldValue.serverTimestamp(),
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                ).await()
+            withFirestoreTimeout(8_000L, "session invite server") {
+                db.collection("sessionInvites").document(inviteId)
+                    .set(
+                        mapOf(
+                            "senderUid" to uid,
+                            "senderName" to cleanSender,
+                            "senderCarType" to senderProfile.carType.name,
+                            "senderColorArgb" to senderProfile.primaryColorArgb,
+                            "recipientUid" to recipientUid,
+                            "recipientName" to cleanRecipient,
+                            "roomId" to room.id.take(128),
+                            "roomCode" to room.roomCode.take(12),
+                            "roomName" to room.roomName.take(40).ifEmpty { "Online Paddock" },
+                            "gameMode" to validMode,
+                            "joinToken" to token,
+                            "status" to "PENDING",
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             rethrowIfRealCancellation(e)
@@ -505,13 +522,15 @@ class FriendsRepository(
         val path = "sessionInvites/$inviteId"
         return try {
             requireUserId()
-            db.collection("sessionInvites").document(inviteId)
-                .update(
-                    mapOf(
-                        "status" to if (accepted) "ACCEPTED" else "DECLINED",
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                ).await()
+            withFirestoreTimeout(6_000L, "session invite server") {
+                db.collection("sessionInvites").document(inviteId)
+                    .update(
+                        mapOf(
+                            "status" to if (accepted) "ACCEPTED" else "DECLINED",
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             rethrowIfRealCancellation(e)
@@ -525,28 +544,36 @@ class FriendsRepository(
         return withContext(NonCancellable) {
             try {
                 runCatching {
-                    val friendships = db.collection("friendships")
-                        .whereArrayContains("memberUids", uid)
-                        .get()
-                        .await()
-                    friendships.documents.forEach { doc -> doc.reference.delete().await() }
+                    withTimeoutOrNull(4_000L) {
+                        val friendships = db.collection("friendships")
+                            .whereArrayContains("memberUids", uid)
+                            .get()
+                            .await()
+                        friendships.documents.forEach { doc -> doc.reference.delete().await() }
+                    }
                 }
                 runCatching {
-                    val sentInvites = db.collection("sessionInvites")
-                        .whereEqualTo("senderUid", uid)
-                        .get()
-                        .await()
-                    sentInvites.documents.forEach { doc -> doc.reference.delete().await() }
+                    withTimeoutOrNull(4_000L) {
+                        val sentInvites = db.collection("sessionInvites")
+                            .whereEqualTo("senderUid", uid)
+                            .get()
+                            .await()
+                        sentInvites.documents.forEach { doc -> doc.reference.delete().await() }
+                    }
                 }
                 runCatching {
-                    val receivedInvites = db.collection("sessionInvites")
-                        .whereEqualTo("recipientUid", uid)
-                        .get()
-                        .await()
-                    receivedInvites.documents.forEach { doc -> doc.reference.delete().await() }
+                    withTimeoutOrNull(4_000L) {
+                        val receivedInvites = db.collection("sessionInvites")
+                            .whereEqualTo("recipientUid", uid)
+                            .get()
+                            .await()
+                        receivedInvites.documents.forEach { doc -> doc.reference.delete().await() }
+                    }
                 }
                 runCatching {
-                    db.collection("driverProfiles").document(uid).delete().await()
+                    withTimeoutOrNull(4_000L) {
+                        db.collection("driverProfiles").document(uid).delete().await()
+                    }
                 }
                 Result.success(Unit)
             } catch (e: Exception) {

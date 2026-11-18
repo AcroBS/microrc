@@ -12,6 +12,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
 import com.example.sensors.TiltSteeringController
+import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -497,6 +498,186 @@ class ExampleRobolectricTest {
             composeTestRule.mainClock.autoAdvance = true
         }
         composeTestRule.waitForIdle()
+    }
+
+    @Test
+    fun onlineLobbyCreation_resolvesCustomProjectDefaultDbAndNeverStaysStuckOnTimeout() {
+        val appContext = ApplicationProvider.getApplicationContext<Context>()
+        val aiStudioDb = "ai-studio-android-microrc-315a4780-b35f-4d6b-8583-99fb992be8f7"
+
+        // 1. AI Studio project preserves its provisioned named database ID
+        assertEquals(
+            aiStudioDb,
+            com.example.data.FirestoreDatabaseResolver.resolveDatabaseId(
+                configuredResourceId = aiStudioDb,
+                activeProjectId = "gen-lang-client-0040246566"
+            )
+        )
+
+        // 2. External GitHub GOOGLE_SERVICES_JSON project automatically resolves to '(default)'
+        assertEquals(
+            "(default)",
+            com.example.data.FirestoreDatabaseResolver.resolveDatabaseId(
+                configuredResourceId = aiStudioDb,
+                activeProjectId = "custom-github-microrc-project"
+            )
+        )
+
+        // 3. Explicit CI database override is honored when provided
+        assertEquals(
+            "custom-named-db",
+            com.example.data.FirestoreDatabaseResolver.resolveDatabaseId(
+                configuredResourceId = aiStudioDb,
+                activeProjectId = "custom-github-microrc-project",
+                ciDatabaseOverride = "custom-named-db"
+            )
+        )
+
+        // 4. Verify FirebaseFirestore.getInstance("(default)") succeeds cleanly on Android SDK
+        com.example.ui.auth.GoogleAuthManager.ensureFirebaseInitialized(appContext)
+        val realFirestore = com.google.firebase.firestore.FirebaseFirestore.getInstance("(default)")
+        org.junit.Assert.assertNotNull(realFirestore)
+
+        val scope = kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default
+        )
+        try {
+            // 5. Simulate server timeout -> isBusy MUST reset to false and errorBanner MUST populate!
+            val timeoutRepo = object : com.example.data.OnlineRaceRepository(db = realFirestore) {
+                override suspend fun createOnlineRoom(
+                    profile: com.example.model.PlayerProfile,
+                    roomName: String,
+                    maxPlayers: Int,
+                    discoverable: Boolean,
+                    rawPassword: String,
+                    gameMode: com.example.model.GameMode,
+                    trackId: String,
+                    initialLobbyJson: String
+                ): Result<com.example.model.OnlineRoomDoc> {
+                    return try {
+                        com.example.data.withFirestoreTimeout(40L, "online lobby server") {
+                            kotlinx.coroutines.delay(500L)
+                            throw IllegalStateException("Should have timed out")
+                        }
+                    } catch (e: Exception) {
+                        com.example.data.rethrowIfScopeCancellation(e)
+                        Result.failure(e)
+                    }
+                }
+            }
+
+            val timeoutManager = com.example.network.OnlineRaceSessionManager(
+                repository = timeoutRepo,
+                currentUserId = "uid_host_test",
+                scope = scope
+            )
+            timeoutManager.hostOnlineRoom(
+                profile = com.example.model.PlayerProfile(playerId = "uid_host_test", name = "Alex"),
+                roomName = "Alex's Group",
+                maxPlayers = 4,
+                discoverable = true,
+                rawPassword = "",
+                initialRules = com.example.model.RaceRulesSettings()
+            )
+
+            val timeoutDeadline = System.currentTimeMillis() + 2_000L
+            while (timeoutManager.isBusy.value && System.currentTimeMillis() < timeoutDeadline) {
+                Thread.sleep(20L)
+            }
+            org.junit.Assert.assertFalse(
+                "isBusy must reset to false instead of hanging on Connecting to Server...",
+                timeoutManager.isBusy.value
+            )
+            org.junit.Assert.assertTrue(
+                "Friendly connection error banner must be displayed on timeout",
+                timeoutManager.errorBanner.value?.contains("internet connection", ignoreCase = true) == true
+            )
+
+            // 6. Simulate healthy room creation where welcome chat is slow -> enters Lobby immediately!
+            val fastLobbyEvents = java.util.concurrent.CopyOnWriteArrayList<com.example.network.RaceNavEvent>()
+            val healthyRepo = object : com.example.data.OnlineRaceRepository(db = realFirestore) {
+                override suspend fun createOnlineRoom(
+                    profile: com.example.model.PlayerProfile,
+                    roomName: String,
+                    maxPlayers: Int,
+                    discoverable: Boolean,
+                    rawPassword: String,
+                    gameMode: com.example.model.GameMode,
+                    trackId: String,
+                    initialLobbyJson: String
+                ): Result<com.example.model.OnlineRoomDoc> {
+                    return Result.success(
+                        com.example.model.OnlineRoomDoc(
+                            id = "room_FAST99",
+                            hostUid = "uid_host_test",
+                            hostName = "Alex",
+                            roomName = roomName,
+                            roomCode = "FAST99",
+                            discoverable = true,
+                            status = "OPEN",
+                            gameMode = gameMode.name,
+                            trackId = trackId,
+                            playerCount = 1L,
+                            maxPlayers = 4L,
+                            memberUids = listOf("uid_host_test"),
+                            lobbyJson = initialLobbyJson
+                        )
+                    )
+                }
+
+                override suspend fun sendRoomChat(
+                    roomId: String,
+                    senderName: String,
+                    text: String,
+                    systemMessage: Boolean
+                ): Result<Unit> {
+                    kotlinx.coroutines.delay(2_000L)
+                    return Result.success(Unit)
+                }
+
+                override fun observeRoom(roomId: String) = kotlinx.coroutines.flow.emptyFlow<com.example.model.OnlineRoomDoc?>()
+                override fun observeRoomPlayers(roomId: String) = kotlinx.coroutines.flow.emptyFlow<List<com.example.model.OnlineRoomPlayerDoc>>()
+                override fun observeRoomInputs(roomId: String) = kotlinx.coroutines.flow.emptyFlow<List<com.example.model.OnlineRoomInputDoc>>()
+                override fun observeRoomChat(roomId: String) = kotlinx.coroutines.flow.emptyFlow<List<com.example.model.OnlineRoomChatDoc>>()
+            }
+
+            val healthyManager = com.example.network.OnlineRaceSessionManager(
+                repository = healthyRepo,
+                currentUserId = "uid_host_test",
+                scope = scope
+            )
+            val collectorJob = scope.launch {
+                healthyManager.navEvents.collect { fastLobbyEvents.add(it) }
+            }
+            Thread.sleep(30L)
+
+            healthyManager.hostOnlineRoom(
+                profile = com.example.model.PlayerProfile(playerId = "uid_host_test", name = "Alex"),
+                roomName = "Alex's Group",
+                maxPlayers = 4,
+                discoverable = true,
+                rawPassword = "",
+                initialRules = com.example.model.RaceRulesSettings()
+            )
+
+            val enterDeadline = System.currentTimeMillis() + 800L
+            while (fastLobbyEvents.none { it is com.example.network.RaceNavEvent.EnterLobby } &&
+                System.currentTimeMillis() < enterDeadline
+            ) {
+                Thread.sleep(15L)
+            }
+            collectorJob.cancel()
+
+            org.junit.Assert.assertFalse(healthyManager.isBusy.value)
+            org.junit.Assert.assertTrue(
+                "Must emit EnterLobby immediately without waiting on slow welcome chat",
+                fastLobbyEvents.any { it is com.example.network.RaceNavEvent.EnterLobby }
+            )
+            assertEquals("FAST99", healthyManager.activeRoom.value?.roomCode)
+            assertEquals(1, healthyManager.lobbyState.value?.players?.size)
+        } finally {
+            scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+        }
     }
 }
 

@@ -2,6 +2,8 @@ package com.example.network
 
 import com.example.data.OnlineRaceRepository
 import com.example.data.TrackCatalog
+import com.example.data.formatUserFacingOnlineError
+import com.example.data.rethrowIfScopeCancellation
 import com.example.engine.RacePhysicsEngine
 import com.example.model.ArenaShape
 import com.example.model.ChatMessage
@@ -217,63 +219,92 @@ class OnlineRaceSessionManager(
         _errorBanner.value = null
 
         scope.launch {
-            leaveCurrentRoomInternal()
-            configureInitialMode(initialRules, null)
-            maxRoomPlayers = maxPlayers.coerceIn(2, 4)
-            roomDisplayName = roomName.trim().take(40).ifEmpty { "${profile.name.take(14)}'s Paddock" }
+            try {
+                leaveCurrentRoomInternal()
+                configureInitialMode(initialRules, null)
+                maxRoomPlayers = maxPlayers.coerceIn(2, 4)
+                roomDisplayName = roomName.trim().take(40).ifEmpty { "${profile.name.take(14)}'s Paddock" }
 
-            val initialHostPlayer = LobbyPlayer(
-                id = currentUserId,
-                name = profile.name.trim().take(24).ifEmpty { "Host" },
-                isHost = true,
-                isBot = false,
-                isReady = true,
-                carType = profile.carType.name,
-                primaryColorArgb = profile.primaryColorArgb,
-                accentColorArgb = profile.accentColorArgb
-            )
-            val seedPayload = buildHostLobbyPayload(
-                roomCode = "ONLINE",
-                playersOverride = listOf(initialHostPlayer)
-            )
-            val lobbyJson = lobbyAdapter.toJson(seedPayload)
-
-            val res = repository.createOnlineRoom(
-                profile = profile,
-                roomName = roomDisplayName,
-                maxPlayers = maxRoomPlayers,
-                discoverable = discoverable,
-                rawPassword = rawPassword,
-                gameMode = initialRules.gameModeEnum,
-                trackId = seedPayload.trackId,
-                initialLobbyJson = lobbyJson
-            )
-            _isBusy.value = false
-
-            res.onSuccess { createdRoom ->
-                activeRoomId = createdRoom.id
-                roomCodeDisplay = createdRoom.roomCode
-                _activeRoom.value = createdRoom
-                _role.value = SessionRole.OnlineHost
-                inRace = false
-                botPlayers.clear()
-                sessionPointsByPlayer.clear()
-                winsByPlayer.clear()
-                synchronized(latestChatHistory) {
-                    latestChatHistory.clear()
-                }
-                startHostObservers(createdRoom.id)
-                val pwNote = if (createdRoom.passwordProtected) "Password-protected" else "Open"
-                repository.sendRoomChat(
-                    roomId = createdRoom.id,
-                    senderName = "Race Control",
-                    text = "$pwNote room ${createdRoom.roomCode} live! Share code ${createdRoom.roomCode} with up to ${createdRoom.maxPlayers} players.",
-                    systemMessage = true
+                val cleanHostName = profile.name.trim().take(24).ifEmpty { "Host" }
+                val initialHostPlayer = LobbyPlayer(
+                    id = currentUserId,
+                    name = cleanHostName,
+                    isHost = true,
+                    isBot = false,
+                    isReady = true,
+                    carType = profile.carType.name,
+                    primaryColorArgb = profile.primaryColorArgb,
+                    accentColorArgb = profile.accentColorArgb
                 )
-                onCreated?.invoke(createdRoom)
-                _navEvents.tryEmit(RaceNavEvent.EnterLobby)
-            }.onFailure { err ->
-                _errorBanner.value = err.localizedMessage ?: "Failed to create online room."
+                val seedPayload = buildHostLobbyPayload(
+                    roomCode = "ONLINE",
+                    playersOverride = listOf(initialHostPlayer)
+                )
+                val lobbyJson = lobbyAdapter.toJson(seedPayload)
+
+                val res = repository.createOnlineRoom(
+                    profile = profile,
+                    roomName = roomDisplayName,
+                    maxPlayers = maxRoomPlayers,
+                    discoverable = discoverable,
+                    rawPassword = rawPassword,
+                    gameMode = initialRules.gameModeEnum,
+                    trackId = seedPayload.trackId,
+                    initialLobbyJson = lobbyJson
+                )
+                _isBusy.value = false
+
+                res.onSuccess { createdRoom ->
+                    activeRoomId = createdRoom.id
+                    roomCodeDisplay = createdRoom.roomCode
+                    _activeRoom.value = createdRoom
+                    _role.value = SessionRole.OnlineHost
+                    inRace = false
+                    botPlayers.clear()
+                    sessionPointsByPlayer.clear()
+                    winsByPlayer.clear()
+                    latestHumanPlayers.clear()
+                    latestHumanPlayers[currentUserId] = OnlineRoomPlayerDoc(
+                        id = currentUserId,
+                        roomId = createdRoom.id,
+                        userId = currentUserId,
+                        name = cleanHostName,
+                        carType = profile.carType.name,
+                        primaryColorArgb = profile.primaryColorArgb,
+                        accentColorArgb = profile.accentColorArgb,
+                        ready = true,
+                        host = true,
+                        rematchVote = "",
+                        joinToken = createdRoom.passwordHash
+                    )
+                    synchronized(latestChatHistory) {
+                        latestChatHistory.clear()
+                    }
+                    _lobbyState.value = buildHostLobbyPayload(
+                        roomCode = createdRoom.roomCode,
+                        playersOverride = listOf(initialHostPlayer)
+                    )
+                    startHostObservers(createdRoom.id)
+                    onCreated?.invoke(createdRoom)
+                    _navEvents.tryEmit(RaceNavEvent.EnterLobby)
+
+                    val pwNote = if (createdRoom.passwordProtected) "Password-protected" else "Open"
+                    scope.launch {
+                        repository.sendRoomChat(
+                            roomId = createdRoom.id,
+                            senderName = "Race Control",
+                            text = "$pwNote room ${createdRoom.roomCode} live! Share code ${createdRoom.roomCode} with up to ${createdRoom.maxPlayers} players.",
+                            systemMessage = true
+                        )
+                    }
+                }.onFailure { err ->
+                    _errorBanner.value = formatUserFacingOnlineError(err, "Failed to create online lobby.")
+                }
+            } catch (e: Exception) {
+                rethrowIfScopeCancellation(e)
+                _errorBanner.value = formatUserFacingOnlineError(e, "Failed to create online lobby.")
+            } finally {
+                _isBusy.value = false
             }
         }
     }
@@ -289,41 +320,18 @@ class OnlineRaceSessionManager(
         _errorBanner.value = null
 
         scope.launch {
-            leaveCurrentRoomInternal()
-            val res = repository.joinOnlineRoom(
-                roomId = roomId,
-                profile = profile,
-                rawPassword = rawPassword,
-                preAuthorizedJoinToken = preAuthorizedJoinToken
-            )
-            _isBusy.value = false
-
-            res.onSuccess { joinedRoom ->
-                activeRoomId = joinedRoom.id
-                roomDisplayName = joinedRoom.roomName
-                roomCodeDisplay = joinedRoom.roomCode
-                _activeRoom.value = joinedRoom
-                val amHost = joinedRoom.hostUid == currentUserId
-                _role.value = if (amHost) SessionRole.OnlineHost else SessionRole.OnlineClient
-                clientAppliedMatchSeq.set(0L)
-                clientAppliedTelemetrySeq.set(-1L)
-                clientFinishEmitted.set(false)
-
-                if (amHost) {
-                    configureInitialMode(currentRules, null)
-                    startHostObservers(joinedRoom.id)
-                } else {
-                    startClientObservers(joinedRoom.id)
-                }
-                repository.sendRoomChat(
-                    roomId = joinedRoom.id,
-                    senderName = "Race Control",
-                    text = "${profile.name.take(18)} joined the online paddock!",
-                    systemMessage = true
+            try {
+                performJoinOnlineRoom(
+                    roomId = roomId,
+                    profile = profile,
+                    rawPassword = rawPassword,
+                    preAuthorizedJoinToken = preAuthorizedJoinToken
                 )
-                _navEvents.tryEmit(RaceNavEvent.EnterLobby)
-            }.onFailure { err ->
-                _errorBanner.value = err.localizedMessage ?: "Unable to join online room."
+            } catch (e: Exception) {
+                rethrowIfScopeCancellation(e)
+                _errorBanner.value = formatUserFacingOnlineError(e, "Unable to join online lobby.")
+            } finally {
+                _isBusy.value = false
             }
         }
     }
@@ -340,9 +348,12 @@ class OnlineRaceSessionManager(
         _errorBanner.value = null
 
         scope.launch {
-            val foundRes = repository.findRoomByCode(rawCode)
-            _isBusy.value = false
-            foundRes.onSuccess { room ->
+            try {
+                val foundRes = repository.findRoomByCode(rawCode)
+                val room = foundRes.getOrElse { err ->
+                    _errorBanner.value = formatUserFacingOnlineError(err, "Room code not found.")
+                    return@launch
+                }
                 val cleanToken = preAuthorizedJoinToken.trim()
                 val tokenValid = cleanToken.isNotEmpty() && cleanToken == room.passwordHash
                 if (room.passwordProtected &&
@@ -350,18 +361,71 @@ class OnlineRaceSessionManager(
                     !tokenValid &&
                     room.hostUid != currentUserId
                 ) {
+                    _isBusy.value = false
                     onPasswordRequired(room)
                 } else {
-                    joinOnlineRoom(
+                    performJoinOnlineRoom(
                         roomId = room.id,
                         profile = profile,
                         rawPassword = rawPassword,
                         preAuthorizedJoinToken = cleanToken
                     )
                 }
-            }.onFailure { err ->
-                _errorBanner.value = err.localizedMessage ?: "Room code not found."
+            } catch (e: Exception) {
+                rethrowIfScopeCancellation(e)
+                _errorBanner.value = formatUserFacingOnlineError(e, "Room code not found.")
+            } finally {
+                _isBusy.value = false
             }
+        }
+    }
+
+    private suspend fun performJoinOnlineRoom(
+        roomId: String,
+        profile: PlayerProfile,
+        rawPassword: String,
+        preAuthorizedJoinToken: String
+    ) {
+        leaveCurrentRoomInternal()
+        val res = repository.joinOnlineRoom(
+            roomId = roomId,
+            profile = profile,
+            rawPassword = rawPassword,
+            preAuthorizedJoinToken = preAuthorizedJoinToken
+        )
+        _isBusy.value = false
+
+        res.onSuccess { joinedRoom ->
+            activeRoomId = joinedRoom.id
+            roomDisplayName = joinedRoom.roomName
+            roomCodeDisplay = joinedRoom.roomCode
+            _activeRoom.value = joinedRoom
+            val amHost = joinedRoom.hostUid == currentUserId
+            _role.value = if (amHost) SessionRole.OnlineHost else SessionRole.OnlineClient
+            clientAppliedMatchSeq.set(0L)
+            clientAppliedTelemetrySeq.set(-1L)
+            clientFinishEmitted.set(false)
+
+            if (amHost) {
+                configureInitialMode(currentRules, null)
+                _lobbyState.value = buildHostLobbyPayload(roomCode = joinedRoom.roomCode)
+                startHostObservers(joinedRoom.id)
+            } else {
+                applyClientRoomSnapshot(joinedRoom)
+                startClientObservers(joinedRoom.id)
+            }
+            _navEvents.tryEmit(RaceNavEvent.EnterLobby)
+
+            scope.launch {
+                repository.sendRoomChat(
+                    roomId = joinedRoom.id,
+                    senderName = "Race Control",
+                    text = "${profile.name.take(18)} joined the online paddock!",
+                    systemMessage = true
+                )
+            }
+        }.onFailure { err ->
+            _errorBanner.value = formatUserFacingOnlineError(err, "Unable to join online lobby.")
         }
     }
 
