@@ -112,12 +112,12 @@ jobs:
 
           echo "Active APK signing certificate fingerprints:"
           CERT_INFO="$(keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey 2>/dev/null || true)"
-          ACTIVE_SHA1="$(printf '%s\n' "$CERT_INFO" | grep -E "SHA1:|SHA-1:" | head -n 1 | sed -E 's/.*SHA-?1:[[:space:]]*//' | tr -d '[:space:]')"
-          ACTIVE_SHA256="$(printf '%s\n' "$CERT_INFO" | grep -E "SHA256:|SHA-256:" | head -n 1 | sed -E 's/.*SHA-?256:[[:space:]]*//' | tr -d '[:space:]')"
+          ACTIVE_SHA1="$(printf '%s\n' "$CERT_INFO" | grep -E "SHA1:|SHA-1:" | head -n 1 | sed -E 's/.*SHA-?1:[[:space:]]*//' | tr -d '[:space:]' || true)"
+          ACTIVE_SHA256="$(printf '%s\n' "$CERT_INFO" | grep -E "SHA256:|SHA-256:" | head -n 1 | sed -E 's/.*SHA-?256:[[:space:]]*//' | tr -d '[:space:]' || true)"
           echo "  SHA1:   ${ACTIVE_SHA1:-unknown}"
           echo "  SHA256: ${ACTIVE_SHA256:-unknown}"
-          echo "ACTIVE_APK_SHA1=${ACTIVE_SHA1}" >> "$GITHUB_ENV"
-          echo "ACTIVE_APK_SHA256=${ACTIVE_SHA256}" >> "$GITHUB_ENV"
+          echo "ACTIVE_APK_SHA1=${ACTIVE_APK_SHA1:-$ACTIVE_SHA1}" >> "$GITHUB_ENV"
+          echo "ACTIVE_APK_SHA256=${ACTIVE_APK_SHA256:-$ACTIVE_SHA256}" >> "$GITHUB_ENV"
 
           if [ ! -f .env ] && [ -f .env.example ]; then
             cp .env.example .env
@@ -138,49 +138,109 @@ jobs:
           FIREBASE_WEB_CLIENT_ID: ${{ secrets.FIREBASE_WEB_CLIENT_ID }}
         run: |
           FIREBASE_STATUS="MISSING"
-          validate_gs_json() {
-            if [ -s app/google-services.json ] && python3 -m json.tool app/google-services.json >/dev/null 2>&1; then
-              return 0
-            fi
-            rm -f app/google-services.json
-            return 1
-          }
+          EXPECTED_PKG="com.aistudio.microrc.k7m9xp"
 
-          if [ -s app/google-services.json ] && validate_gs_json; then
-            FIREBASE_STATUS="REPO_FILE"
-            echo "Using app/google-services.json present in repository."
-          elif [ -n "${GOOGLE_SERVICES_JSON:-}" ]; then
-            python3 - <<'PYEOF'
+          if [ ! -s app/google-services.json ] && [ -n "${GOOGLE_SERVICES_JSON:-}" ]; then
+            python3 - <<'PYEOF' || rm -f app/google-services.json
           import base64, json, os, re
-          raw = os.environ.get("GOOGLE_SERVICES_JSON", "").strip()
-          # Strip optional markdown code fences or surrounding quotes if pasted on mobile
-          raw = re.sub(r"^```(?:json)?\s*", "", raw)
-          raw = re.sub(r"\s*```$", "", raw).strip()
-          if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
-              raw = raw[1:-1].strip()
-          if raw.startswith("{"):
-              parsed = json.loads(raw)
-          else:
-              decoded = base64.b64decode("".join(raw.split())).decode("utf-8")
-              parsed = json.loads(decoded)
-          with open("app/google-services.json", "w", encoding="utf-8") as f:
-              json.dump(parsed, f, indent=2)
+          try:
+              raw = os.environ.get("GOOGLE_SERVICES_JSON", "").strip()
+              raw = re.sub(r"^```(?:json)?\s*", "", raw)
+              raw = re.sub(r"\s*```$", "", raw).strip()
+              if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
+                  raw = raw[1:-1].strip()
+              if raw.startswith("{"):
+                  parsed = json.loads(raw)
+              else:
+                  decoded = base64.b64decode("".join(raw.split())).decode("utf-8")
+                  parsed = json.loads(decoded)
+              with open("app/google-services.json", "w", encoding="utf-8") as f:
+                  json.dump(parsed, f, indent=2)
+          except Exception as exc:
+              print(f"::warning::Could not parse GOOGLE_SERVICES_JSON secret ({exc}); falling back to runtime/env config.")
           PYEOF
-            if validate_gs_json; then
-              FIREBASE_STATUS="SECRET_GOOGLE_SERVICES_JSON"
-              echo "Restored valid app/google-services.json from GOOGLE_SERVICES_JSON secret."
-            fi
-          elif [ -n "${GOOGLE_SERVICES_JSON_BASE64:-}" ]; then
-            printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | tr -d '[:space:]' | base64 -d > app/google-services.json || rm -f app/google-services.json
-            if validate_gs_json; then
-              FIREBASE_STATUS="SECRET_BASE64"
-              echo "Restored app/google-services.json from GOOGLE_SERVICES_JSON_BASE64 secret."
-            fi
+          elif [ ! -s app/google-services.json ] && [ -n "${GOOGLE_SERVICES_JSON_BASE64:-}" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | tr -d '[:space:]' | base64 -d > app/google-services.json 2>/dev/null || rm -f app/google-services.json
           fi
 
-          # Export optional FIREBASE_* secrets to GITHUB_ENV for BuildConfig fallback
+          # Validate JSON & verify package_name matches applicationId (or extract to GITHUB_ENV fallback)
+          if [ -s app/google-services.json ]; then
+            GS_CHECK="$(python3 - <<'PYEOF'
+          import json, os
+          expected_pkg = "com.aistudio.microrc.k7m9xp"
+          try:
+              with open("app/google-services.json", "r", encoding="utf-8") as f:
+                  root = json.load(f)
+              clients = root.get("client") or []
+              has_match = any(
+                  (c.get("client_info") or {}).get("android_client_info", {}).get("package_name") == expected_pkg
+                  for c in clients if isinstance(c, dict)
+              )
+              if has_match:
+                  print("VALID_MATCH")
+              elif clients:
+                  c0 = clients[0]
+                  pinfo = root.get("project_info") or {}
+                  api_keys = c0.get("api_key") or []
+                  api_key = next((k.get("current_key", "") for k in api_keys if isinstance(k, dict) and k.get("current_key")), "")
+                  web_id = ""
+                  for oauth in (c0.get("oauth_client") or []):
+                      if isinstance(oauth, dict) and oauth.get("client_type") == 3 and oauth.get("client_id"):
+                          web_id = oauth["client_id"]
+                          break
+                  if not web_id:
+                      other = (((c0.get("services") or {}).get("appinvite_service") or {}).get("other_platform_oauth_client") or [])
+                      for oauth in other:
+                          if isinstance(oauth, dict) and oauth.get("client_type") == 3 and oauth.get("client_id"):
+                              web_id = oauth["client_id"]
+                              break
+                  gh_env = os.environ.get("GITHUB_ENV", "")
+                  if gh_env:
+                      pairs = {
+                          "FIREBASE_PROJECT_ID": pinfo.get("project_id", ""),
+                          "FIREBASE_STORAGE_BUCKET": pinfo.get("storage_bucket", ""),
+                          "FIREBASE_GCM_SENDER_ID": pinfo.get("project_number", ""),
+                          "FIREBASE_APP_ID": (c0.get("client_info") or {}).get("mobilesdk_app_id", ""),
+                          "FIREBASE_API_KEY": api_key,
+                          "FIREBASE_WEB_CLIENT_ID": web_id,
+                      }
+                      with open(gh_env, "a", encoding="utf-8") as ef:
+                          for k, v in pairs.items():
+                              clean_v = str(v).strip().replace("\r", "").replace("\n", "")
+                              if clean_v:
+                                  ef.write(f"{k}={clean_v}\n")
+                  os.remove("app/google-services.json")
+                  print("EXTRACTED_PACKAGE_MISMATCH")
+              else:
+                  os.remove("app/google-services.json")
+                  print("INVALID")
+          except Exception as exc:
+              try:
+                  os.remove("app/google-services.json")
+              except OSError:
+                  pass
+              print(f"INVALID:{exc}")
+          PYEOF
+            )"
+            case "$GS_CHECK" in
+              VALID_MATCH)
+                FIREBASE_STATUS="GOOGLE_SERVICES_JSON_OK"
+                echo "Verified valid app/google-services.json for ${EXPECTED_PKG}."
+                ;;
+              EXTRACTED_PACKAGE_MISMATCH)
+                FIREBASE_STATUS="EXTRACTED_TO_BUILDCONFIG"
+                echo "::warning::google-services.json did not contain package ${EXPECTED_PKG}; extracted Firebase credentials into CI BuildConfig fallback so the APK still builds cleanly."
+                ;;
+              *)
+                rm -f app/google-services.json
+                echo "::warning::Invalid google-services.json (${GS_CHECK}); removed so APK build can proceed."
+                ;;
+            esac
+          fi
+
+          # Export optional FIREBASE_* secrets to GITHUB_ENV (single-line sanitized)
           for key in FIREBASE_PROJECT_ID FIREBASE_APP_ID FIREBASE_API_KEY FIREBASE_STORAGE_BUCKET FIREBASE_GCM_SENDER_ID FIREBASE_WEB_CLIENT_ID; do
-            val="${!key:-}"
+            val="$(printf '%s' "${!key:-}" | tr -d '\r\n')"
             if [ -n "$val" ]; then
               printf '%s=%s\n' "$key" "$val" >> "$GITHUB_ENV"
             fi
@@ -195,7 +255,7 @@ jobs:
 
           SHA_MATCH_NOTE="N/A (no google-services.json)"
           if [ -s app/google-services.json ]; then
-            EXPECTED_HASH="$(echo "${ACTIVE_APK_SHA1:-}" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+            EXPECTED_HASH="$(printf '%s' "${ACTIVE_APK_SHA1:-}" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
             if [ -n "$EXPECTED_HASH" ] && grep -qi "$EXPECTED_HASH" app/google-services.json; then
               SHA_MATCH_NOTE="Matched in google-services.json"
               echo "Verified APK SHA-1 (${ACTIVE_APK_SHA1}) is registered in app/google-services.json."

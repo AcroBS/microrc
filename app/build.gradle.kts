@@ -1,4 +1,5 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import groovy.json.JsonSlurper
 
 plugins {
   alias(libs.plugins.android.application)
@@ -16,17 +17,62 @@ android {
     applicationId = "com.aistudio.microrc.k7m9xp"
     minSdk = 24
     targetSdk = 36
-    versionCode = System.getenv("CI_VERSION_CODE")?.toIntOrNull() ?: 1
-    versionName = System.getenv("CI_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "1.0"
+    versionCode = providers.environmentVariable("CI_VERSION_CODE").orNull?.toIntOrNull() ?: 1
+    versionName =
+      providers.environmentVariable("CI_VERSION_NAME").orNull?.takeIf { it.isNotBlank() } ?: "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-    if (!file("google-services.json").exists()) {
+
+    val gsContent =
+      providers.fileContents(layout.projectDirectory.file("google-services.json")).asText.orNull
+    val gsExists = !gsContent.isNullOrBlank()
+    val gsDefinesWebClientId =
+      gsExists &&
+        runCatching {
+            val root = JsonSlurper().parseText(gsContent!!) as? Map<*, *>
+            val clients = root?.get("client") as? List<*> ?: emptyList<Any?>()
+            val matchingClient =
+              clients.filterIsInstance<Map<*, *>>().firstOrNull { client ->
+                val clientInfo = client["client_info"] as? Map<*, *>
+                val androidInfo = clientInfo?.get("android_client_info") as? Map<*, *>
+                androidInfo?.get("package_name") == "com.aistudio.microrc.k7m9xp"
+              }
+            val oauthClients = matchingClient?.get("oauth_client") as? List<*> ?: emptyList<Any?>()
+            oauthClients.filterIsInstance<Map<*, *>>().any { oauth ->
+              (oauth["client_type"] as? Number)?.toInt() == 3 &&
+                (oauth["client_id"] as? String)?.isNotBlank() == true
+            }
+          }
+          .getOrDefault(false)
+    if (!gsDefinesWebClientId) {
+      if (!gsExists) {
+        file("build/generated/res/processDebugGoogleServices").deleteRecursively()
+        file("build/generated/res/processReleaseGoogleServices").deleteRecursively()
+      }
       resValue("string", "default_web_client_id", "")
     }
+
+    val appletConfigContent =
+      providers
+        .fileContents(layout.projectDirectory.file("src/main/res/values/firebase_applet_config.xml"))
+        .asText
+        .orNull
+    val hasFirestoreDbRes = appletConfigContent?.contains("name=\"firestore_database_id\"") == true
+    if (!hasFirestoreDbRes) {
+      resValue(
+        "string",
+        "firestore_database_id",
+        "ai-studio-android-microrc-315a4780-b35f-4d6b-8583-99fb992be8f7"
+      )
+    }
+
     fun ciEnvLiteral(key: String): String {
-      val v = System.getenv(key)?.trim().orEmpty()
-        .replace("\\", "\\\\")
-        .replace("\"", "\\\"")
+      val v =
+        providers.environmentVariable(key).orNull
+          ?.trim()
+          .orEmpty()
+          .replace("\\", "\\\\")
+          .replace("\"", "\\\"")
       return "\"$v\""
     }
     buildConfigField("String", "CI_FIREBASE_PROJECT_ID", ciEnvLiteral("FIREBASE_PROJECT_ID"))
@@ -77,6 +123,7 @@ android {
   buildFeatures {
     compose = true
     buildConfig = true
+    resValues = true
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }
   dependenciesInfo {
@@ -94,6 +141,11 @@ secrets {
 }
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
+
+if (providers.fileContents(layout.projectDirectory.file("google-services.json")).asText.orNull.isNullOrBlank()) {
+  tasks.matching { it.name.startsWith("process") && it.name.endsWith("GoogleServices") }
+    .configureEach { enabled = false }
+}
 
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
