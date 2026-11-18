@@ -209,7 +209,8 @@ class OnlineRaceSessionManager(
         maxPlayers: Int,
         discoverable: Boolean,
         rawPassword: String,
-        initialRules: RaceRulesSettings
+        initialRules: RaceRulesSettings,
+        onCreated: ((OnlineRoomDoc) -> Unit)? = null
     ) {
         if (_isBusy.value) return
         _isBusy.value = true
@@ -269,6 +270,7 @@ class OnlineRaceSessionManager(
                     text = "$pwNote room ${createdRoom.roomCode} live! Share code ${createdRoom.roomCode} with up to ${createdRoom.maxPlayers} players.",
                     systemMessage = true
                 )
+                onCreated?.invoke(createdRoom)
                 _navEvents.tryEmit(RaceNavEvent.EnterLobby)
             }.onFailure { err ->
                 _errorBanner.value = err.localizedMessage ?: "Failed to create online room."
@@ -279,7 +281,8 @@ class OnlineRaceSessionManager(
     fun joinOnlineRoom(
         roomId: String,
         profile: PlayerProfile,
-        rawPassword: String
+        rawPassword: String,
+        preAuthorizedJoinToken: String = ""
     ) {
         if (_isBusy.value) return
         _isBusy.value = true
@@ -287,7 +290,12 @@ class OnlineRaceSessionManager(
 
         scope.launch {
             leaveCurrentRoomInternal()
-            val res = repository.joinOnlineRoom(roomId = roomId, profile = profile, rawPassword = rawPassword)
+            val res = repository.joinOnlineRoom(
+                roomId = roomId,
+                profile = profile,
+                rawPassword = rawPassword,
+                preAuthorizedJoinToken = preAuthorizedJoinToken
+            )
             _isBusy.value = false
 
             res.onSuccess { joinedRoom ->
@@ -324,6 +332,7 @@ class OnlineRaceSessionManager(
         rawCode: String,
         profile: PlayerProfile,
         rawPassword: String,
+        preAuthorizedJoinToken: String = "",
         onPasswordRequired: (OnlineRoomDoc) -> Unit
     ) {
         if (_isBusy.value) return
@@ -334,10 +343,21 @@ class OnlineRaceSessionManager(
             val foundRes = repository.findRoomByCode(rawCode)
             _isBusy.value = false
             foundRes.onSuccess { room ->
-                if (room.passwordProtected && rawPassword.trim().isEmpty() && room.hostUid != currentUserId) {
+                val cleanToken = preAuthorizedJoinToken.trim()
+                val tokenValid = cleanToken.isNotEmpty() && cleanToken == room.passwordHash
+                if (room.passwordProtected &&
+                    rawPassword.trim().isEmpty() &&
+                    !tokenValid &&
+                    room.hostUid != currentUserId
+                ) {
                     onPasswordRequired(room)
                 } else {
-                    joinOnlineRoom(room.id, profile, rawPassword)
+                    joinOnlineRoom(
+                        roomId = room.id,
+                        profile = profile,
+                        rawPassword = rawPassword,
+                        preAuthorizedJoinToken = cleanToken
+                    )
                 }
             }.onFailure { err ->
                 _errorBanner.value = err.localizedMessage ?: "Room code not found."

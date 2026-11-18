@@ -462,6 +462,244 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "DriverProfile": {
+      "title": "DriverProfile",
+      "description": "Public non-PII racer profile, friend code, and real-time online presence status.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Authenticated UID of the driver."
+        },
+        "driverName": {
+          "type": "string",
+          "description": "Driver callsign (1..24 chars)."
+        },
+        "searchName": {
+          "type": "string",
+          "description": "Lowercase normalized callsign for friend search."
+        },
+        "friendCode": {
+          "type": "string",
+          "description": "Deterministic uppercase alphanumeric friend code (6..12 chars)."
+        },
+        "carType": {
+          "type": "string",
+          "description": "Equipped RcCarType name."
+        },
+        "primaryColorArgb": {
+          "type": "integer",
+          "description": "Primary car ARGB color."
+        },
+        "accentColorArgb": {
+          "type": "integer",
+          "description": "Accent car ARGB color."
+        },
+        "online": {
+          "type": "boolean",
+          "description": "True when the app is active in foreground."
+        },
+        "activityStatus": {
+          "type": "string",
+          "enum": ["ONLINE", "IN_LOBBY", "RACING", "OFFLINE"],
+          "description": "Current multiplayer activity status."
+        },
+        "activeRoomId": {
+          "type": "string",
+          "description": "Current online room document ID if joinable, else empty string."
+        },
+        "activeRoomCode": {
+          "type": "string",
+          "description": "Current 6-char room code if in an open lobby, else empty string."
+        },
+        "activeRoomName": {
+          "type": "string",
+          "description": "Current lobby display name if in a lobby, else empty string."
+        },
+        "publicProfile": {
+          "type": "boolean",
+          "description": "True so friends and friend searches can query non-PII presence."
+        },
+        "lastSeenAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Heartbeat timestamp written via FieldValue.serverTimestamp()."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp written via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Update timestamp written via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "userId",
+        "driverName",
+        "searchName",
+        "friendCode",
+        "carType",
+        "primaryColorArgb",
+        "accentColorArgb",
+        "online",
+        "activityStatus",
+        "activeRoomId",
+        "activeRoomCode",
+        "activeRoomName",
+        "publicProfile",
+        "lastSeenAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Friendship": {
+      "title": "Friendship",
+      "description": "Bidirectional friend request and accepted friendship record between two authenticated drivers.",
+      "type": "object",
+      "properties": {
+        "memberUids": {
+          "type": "array",
+          "description": "Bounded 2-element array containing requesterUid and receiverUid."
+        },
+        "requesterUid": {
+          "type": "string",
+          "description": "UID of the driver who initiated the friend request."
+        },
+        "requesterName": {
+          "type": "string",
+          "description": "Callsign of the requester."
+        },
+        "requesterFriendCode": {
+          "type": "string",
+          "description": "Friend code of the requester."
+        },
+        "receiverUid": {
+          "type": "string",
+          "description": "UID of the driver receiving the friend request."
+        },
+        "receiverName": {
+          "type": "string",
+          "description": "Callsign of the receiver."
+        },
+        "receiverFriendCode": {
+          "type": "string",
+          "description": "Friend code of the receiver."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["PENDING", "ACCEPTED"],
+          "description": "Friendship lifecycle status."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp written via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Update timestamp written via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "memberUids",
+        "requesterUid",
+        "requesterName",
+        "requesterFriendCode",
+        "receiverUid",
+        "receiverName",
+        "receiverFriendCode",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SessionInvite": {
+      "title": "SessionInvite",
+      "description": "Real-time game lobby session invitation sent to a friend to join an active online room.",
+      "type": "object",
+      "properties": {
+        "senderUid": {
+          "type": "string",
+          "description": "UID of the inviting driver."
+        },
+        "senderName": {
+          "type": "string",
+          "description": "Callsign of the inviting driver."
+        },
+        "senderCarType": {
+          "type": "string",
+          "description": "Car type of the inviting driver."
+        },
+        "senderColorArgb": {
+          "type": "integer",
+          "description": "Primary ARGB color of the inviting driver."
+        },
+        "recipientUid": {
+          "type": "string",
+          "description": "UID of the invited friend."
+        },
+        "recipientName": {
+          "type": "string",
+          "description": "Callsign of the invited friend."
+        },
+        "roomId": {
+          "type": "string",
+          "description": "Target onlineRoom document ID."
+        },
+        "roomCode": {
+          "type": "string",
+          "description": "Target 6-char room code."
+        },
+        "roomName": {
+          "type": "string",
+          "description": "Target lobby title."
+        },
+        "gameMode": {
+          "type": "string",
+          "enum": ["RACE", "ARENA", "STUNTS", "HYBRID"],
+          "description": "Game mode of the invited lobby."
+        },
+        "joinToken": {
+          "type": "string",
+          "description": "Pre-authorized room password hash token for seamless 1-tap friend join."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["PENDING", "ACCEPTED", "DECLINED", "EXPIRED"],
+          "description": "Invitation response state."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp written via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Update timestamp written via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "senderUid",
+        "senderName",
+        "senderCarType",
+        "senderColorArgb",
+        "recipientUid",
+        "recipientName",
+        "roomId",
+        "roomCode",
+        "roomName",
+        "gameMode",
+        "joinToken",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -488,6 +726,18 @@
     "/ghostRuns/{ghostId}": {
       "schema": "GhostRun",
       "description": "Recorded ghost car runs for virtual head-to-head time-attack challenges."
+    },
+    "/driverProfiles/{userId}": {
+      "schema": "DriverProfile",
+      "description": "Non-PII driver directory and real-time online presence status."
+    },
+    "/friendships/{friendshipId}": {
+      "schema": "Friendship",
+      "description": "Friend connections and pending friend requests scoped to the two participating UIDs."
+    },
+    "/sessionInvites/{inviteId}": {
+      "schema": "SessionInvite",
+      "description": "Real-time lobby join notifications delivered to invited friends."
     }
   }
 }

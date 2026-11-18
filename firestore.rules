@@ -135,6 +135,62 @@ service cloud.firestore {
              isValidTimestampBound(data.updatedAt);
     }
 
+    function isValidDriverProfile(data) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 &&
+             data.driverName is string && data.driverName.size() >= 1 && data.driverName.size() <= 24 &&
+             data.searchName is string && data.searchName.size() >= 1 && data.searchName.size() <= 24 &&
+             data.friendCode is string && data.friendCode.size() >= 4 && data.friendCode.size() <= 12 &&
+             data.friendCode.matches('^[A-Z0-9]+$') &&
+             data.carType is string && data.carType.size() >= 1 && data.carType.size() <= 32 &&
+             data.primaryColorArgb is int &&
+             data.accentColorArgb is int &&
+             data.online is bool &&
+             data.activityStatus is string && data.activityStatus in ['ONLINE', 'IN_LOBBY', 'RACING', 'OFFLINE'] &&
+             data.activeRoomId is string && data.activeRoomId.size() <= 128 &&
+             data.activeRoomCode is string && data.activeRoomCode.size() <= 12 &&
+             data.activeRoomName is string && data.activeRoomName.size() <= 40 &&
+             data.publicProfile is bool &&
+             isValidTimestampBound(data.lastSeenAt) &&
+             isValidTimestampBound(data.createdAt) &&
+             isValidTimestampBound(data.updatedAt);
+    }
+
+    function isValidFriendship(data) {
+      return data.memberUids is list && data.memberUids.size() == 2 &&
+             data.memberUids[0] is string && data.memberUids[0].size() >= 1 && data.memberUids[0].size() <= 128 &&
+             data.memberUids[1] is string && data.memberUids[1].size() >= 1 && data.memberUids[1].size() <= 128 &&
+             data.requesterUid is string && data.requesterUid.size() >= 1 && data.requesterUid.size() <= 128 &&
+             data.receiverUid is string && data.receiverUid.size() >= 1 && data.receiverUid.size() <= 128 &&
+             data.requesterUid != data.receiverUid &&
+             data.requesterUid in data.memberUids &&
+             data.receiverUid in data.memberUids &&
+             data.requesterName is string && data.requesterName.size() >= 1 && data.requesterName.size() <= 24 &&
+             data.requesterFriendCode is string && data.requesterFriendCode.size() >= 4 && data.requesterFriendCode.size() <= 12 &&
+             data.receiverName is string && data.receiverName.size() >= 1 && data.receiverName.size() <= 24 &&
+             data.receiverFriendCode is string && data.receiverFriendCode.size() >= 4 && data.receiverFriendCode.size() <= 12 &&
+             data.status is string && data.status in ['PENDING', 'ACCEPTED'] &&
+             isValidTimestampBound(data.createdAt) &&
+             isValidTimestampBound(data.updatedAt);
+    }
+
+    function isValidSessionInvite(data) {
+      return data.senderUid is string && data.senderUid.size() >= 1 && data.senderUid.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 24 &&
+             data.senderCarType is string && data.senderCarType.size() >= 1 && data.senderCarType.size() <= 32 &&
+             data.senderColorArgb is int &&
+             data.recipientUid is string && data.recipientUid.size() >= 1 && data.recipientUid.size() <= 128 &&
+             data.senderUid != data.recipientUid &&
+             data.recipientName is string && data.recipientName.size() >= 1 && data.recipientName.size() <= 24 &&
+             data.roomId is string && data.roomId.size() >= 1 && data.roomId.size() <= 128 &&
+             data.roomCode is string && data.roomCode.size() >= 4 && data.roomCode.size() <= 12 &&
+             data.roomName is string && data.roomName.size() >= 1 && data.roomName.size() <= 40 &&
+             data.gameMode is string && data.gameMode in ['RACE', 'ARENA', 'STUNTS', 'HYBRID'] &&
+             data.joinToken is string && data.joinToken.size() <= 64 &&
+             data.status is string && data.status in ['PENDING', 'ACCEPTED', 'DECLINED', 'EXPIRED'] &&
+             isValidTimestampBound(data.createdAt) &&
+             isValidTimestampBound(data.updatedAt);
+    }
+
     // --- 1. Online Multiplayer Rooms (/onlineRooms/{roomId}) ---
     match /onlineRooms/{roomId} {
       allow get: if isSignedIn() && isValidId(roomId);
@@ -329,7 +385,7 @@ service cloud.firestore {
 
     // --- 2. Leaderboards (/leaderboardEntries/{entryId}) ---
     match /leaderboardEntries/{entryId} {
-      allow get: if isSignedIn() && isValidId(entryId) && (existing().publicEntry == true || existing().userId == request.auth.uid);
+      allow get: if isSignedIn() && isValidId(entryId) && (resource == null || existing().publicEntry == true || existing().userId == request.auth.uid);
       allow list: if isSignedIn() && existing().publicEntry == true;
 
       allow create: if isSignedIn() &&
@@ -369,7 +425,7 @@ service cloud.firestore {
 
     // --- 3. Ghost Car Trajectory Runs (/ghostRuns/{ghostId}) ---
     match /ghostRuns/{ghostId} {
-      allow get: if isSignedIn() && isValidId(ghostId) && (existing().publicGhost == true || existing().userId == request.auth.uid);
+      allow get: if isSignedIn() && isValidId(ghostId) && (resource == null || existing().publicGhost == true || existing().userId == request.auth.uid);
       allow list: if isSignedIn() && existing().publicGhost == true;
 
       allow create: if isSignedIn() &&
@@ -402,6 +458,168 @@ service cloud.firestore {
                        ]);
 
       allow delete: if isSignedIn() && isValidId(ghostId) && existing().userId == request.auth.uid;
+    }
+
+    // --- 4. Driver Directory & Real-Time Online Presence (/driverProfiles/{userId}) ---
+    match /driverProfiles/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || (resource != null && existing().publicProfile == true));
+      allow list: if isSignedIn() && existing().publicProfile == true;
+
+      allow create: if isSignedIn() &&
+                       isValidId(userId) &&
+                       request.auth.uid == userId &&
+                       incoming().keys().hasAll([
+                         'userId', 'driverName', 'searchName', 'friendCode', 'carType',
+                         'primaryColorArgb', 'accentColorArgb', 'online', 'activityStatus',
+                         'activeRoomId', 'activeRoomCode', 'activeRoomName', 'publicProfile',
+                         'lastSeenAt', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'userId', 'driverName', 'searchName', 'friendCode', 'carType',
+                         'primaryColorArgb', 'accentColorArgb', 'online', 'activityStatus',
+                         'activeRoomId', 'activeRoomCode', 'activeRoomName', 'publicProfile',
+                         'lastSeenAt', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().userId == request.auth.uid &&
+                       isValidDriverProfile(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(userId) &&
+                       isValidDriverProfile(incoming()) &&
+                       request.auth.uid == userId &&
+                       existing().userId == request.auth.uid &&
+                       incoming().userId == existing().userId &&
+                       incoming().friendCode == existing().friendCode &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'driverName', 'searchName', 'carType', 'primaryColorArgb',
+                         'accentColorArgb', 'online', 'activityStatus', 'activeRoomId',
+                         'activeRoomCode', 'activeRoomName', 'publicProfile',
+                         'lastSeenAt', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+    }
+
+    // --- 5. Friendships & Pending Requests (/friendships/{friendshipId}) ---
+    match /friendships/{friendshipId} {
+      allow get: if isSignedIn() && isValidId(friendshipId) && request.auth.uid in existing().memberUids;
+      allow list: if isSignedIn() && request.auth.uid in existing().memberUids;
+
+      allow create: if isSignedIn() &&
+                       isValidId(friendshipId) &&
+                       incoming().keys().hasAll([
+                         'memberUids', 'requesterUid', 'requesterName', 'requesterFriendCode',
+                         'receiverUid', 'receiverName', 'receiverFriendCode', 'status',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'memberUids', 'requesterUid', 'requesterName', 'requesterFriendCode',
+                         'receiverUid', 'receiverName', 'receiverFriendCode', 'status',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().requesterUid == request.auth.uid &&
+                       incoming().status == 'PENDING' &&
+                       isValidFriendship(incoming()) &&
+                       exists(/databases/$(database)/documents/driverProfiles/$(incoming().receiverUid));
+
+      allow update: if isSignedIn() &&
+                       isValidId(friendshipId) &&
+                       isValidFriendship(incoming()) &&
+                       incoming().memberUids == existing().memberUids &&
+                       incoming().requesterUid == existing().requesterUid &&
+                       incoming().receiverUid == existing().receiverUid &&
+                       incoming().requesterFriendCode == existing().requesterFriendCode &&
+                       incoming().receiverFriendCode == existing().receiverFriendCode &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         // Action 1: Receiver accepts pending friend request
+                         (
+                           existing().status == 'PENDING' &&
+                           existing().receiverUid == request.auth.uid &&
+                           incoming().status == 'ACCEPTED' &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'receiverName', 'updatedAt'])
+                         ) ||
+                         // Action 2: Accepted requester refreshes display callsign
+                         (
+                           existing().status == 'ACCEPTED' &&
+                           incoming().status == 'ACCEPTED' &&
+                           existing().requesterUid == request.auth.uid &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['requesterName', 'updatedAt'])
+                         ) ||
+                         // Action 3: Accepted receiver refreshes display callsign
+                         (
+                           existing().status == 'ACCEPTED' &&
+                           incoming().status == 'ACCEPTED' &&
+                           existing().receiverUid == request.auth.uid &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['receiverName', 'updatedAt'])
+                         )
+                       );
+
+      allow delete: if isSignedIn() && isValidId(friendshipId) && request.auth.uid in existing().memberUids;
+    }
+
+    // --- 6. Friend Session Invites / Notifications (/sessionInvites/{inviteId}) ---
+    match /sessionInvites/{inviteId} {
+      allow get: if isSignedIn() &&
+                    isValidId(inviteId) &&
+                    (existing().recipientUid == request.auth.uid || existing().senderUid == request.auth.uid);
+
+      allow list: if isSignedIn() &&
+                     (existing().recipientUid == request.auth.uid || existing().senderUid == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+                       isValidId(inviteId) &&
+                       incoming().keys().hasAll([
+                         'senderUid', 'senderName', 'senderCarType', 'senderColorArgb',
+                         'recipientUid', 'recipientName', 'roomId', 'roomCode', 'roomName',
+                         'gameMode', 'joinToken', 'status', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'senderUid', 'senderName', 'senderCarType', 'senderColorArgb',
+                         'recipientUid', 'recipientName', 'roomId', 'roomCode', 'roomName',
+                         'gameMode', 'joinToken', 'status', 'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().senderUid == request.auth.uid &&
+                       incoming().status == 'PENDING' &&
+                       isValidSessionInvite(incoming()) &&
+                       exists(/databases/$(database)/documents/onlineRooms/$(incoming().roomId)) &&
+                       exists(/databases/$(database)/documents/onlineRooms/$(incoming().roomId)/players/$(request.auth.uid));
+
+      allow update: if isSignedIn() &&
+                       isValidId(inviteId) &&
+                       isValidSessionInvite(incoming()) &&
+                       existing().status == 'PENDING' &&
+                       incoming().senderUid == existing().senderUid &&
+                       incoming().senderName == existing().senderName &&
+                       incoming().senderCarType == existing().senderCarType &&
+                       incoming().senderColorArgb == existing().senderColorArgb &&
+                       incoming().recipientUid == existing().recipientUid &&
+                       incoming().recipientName == existing().recipientName &&
+                       incoming().roomId == existing().roomId &&
+                       incoming().roomCode == existing().roomCode &&
+                       incoming().roomName == existing().roomName &&
+                       incoming().gameMode == existing().gameMode &&
+                       incoming().joinToken == existing().joinToken &&
+                       incoming().createdAt == existing().createdAt &&
+                       (
+                         // Action 1: Recipient accepts or declines session invite
+                         (
+                           existing().recipientUid == request.auth.uid &&
+                           incoming().status in ['ACCEPTED', 'DECLINED'] &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+                         ) ||
+                         // Action 2: Sender cancels/expires session invite
+                         (
+                           existing().senderUid == request.auth.uid &&
+                           incoming().status == 'EXPIRED' &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+                         )
+                       );
+
+      allow delete: if isSignedIn() &&
+                       isValidId(inviteId) &&
+                       (existing().recipientUid == request.auth.uid || existing().senderUid == request.auth.uid);
     }
   }
 }

@@ -12,4 +12,12 @@
     <string name="pure_solo_title">Solo Time Trial</string>
     <string name="pure_solo_subtitle">Pure Driving (0 Bots) &amp; Ghost</string>
     <string name="leaderboards_title">Leaderboards &amp; Ghosts</string>
+    <string name="friends_title">Friends &amp; Crew</string>
+    <string name="friends_subtitle">Live online status &amp; race invites</string>
+    <string name="share_invite_link">Share Invite Link</string>
+    <string name="share_whatsapp">Share via WhatsApp</string>
+    <string name="copy_invite_link">Copy Invite Link</string>
+    <string name="notify_friends_title">Notify Friends to Join</string>
+    <string name="session_invite_channel_name">Race Session Invites</string>
+    <string name="session_invite_channel_desc">Alerts when a friend invites you to join an online MicroRC lobby</string>
 </resources>

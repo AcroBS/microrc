@@ -20,6 +20,21 @@ android {
     versionName = System.getenv("CI_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    if (!file("google-services.json").exists()) {
+      resValue("string", "default_web_client_id", "")
+    }
+    fun ciEnvLiteral(key: String): String {
+      val v = System.getenv(key)?.trim().orEmpty()
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+      return "\"$v\""
+    }
+    buildConfigField("String", "CI_FIREBASE_PROJECT_ID", ciEnvLiteral("FIREBASE_PROJECT_ID"))
+    buildConfigField("String", "CI_FIREBASE_APP_ID", ciEnvLiteral("FIREBASE_APP_ID"))
+    buildConfigField("String", "CI_FIREBASE_API_KEY", ciEnvLiteral("FIREBASE_API_KEY"))
+    buildConfigField("String", "CI_FIREBASE_STORAGE_BUCKET", ciEnvLiteral("FIREBASE_STORAGE_BUCKET"))
+    buildConfigField("String", "CI_FIREBASE_GCM_SENDER_ID", ciEnvLiteral("FIREBASE_GCM_SENDER_ID"))
+    buildConfigField("String", "CI_FIREBASE_WEB_CLIENT_ID", ciEnvLiteral("FIREBASE_WEB_CLIENT_ID"))
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,

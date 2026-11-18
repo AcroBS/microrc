@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
@@ -89,6 +90,9 @@ fun HomeScreen(
     onSoloRace: () -> Unit,
     onPureSoloRace: () -> Unit = {},
     onOpenOnlinePlay: () -> Unit = {},
+    onOpenFriends: () -> Unit = {},
+    onlineFriendsCount: Int = 0,
+    pendingRequestsCount: Int = 0,
     onOpenLeaderboards: () -> Unit = {},
     onOpenHybridSetup: () -> Unit = {},
     onOpenGarage: () -> Unit,
@@ -388,6 +392,70 @@ fun HomeScreen(
                             contentDescription = "Supports Password Groups",
                             modifier = Modifier.size(18.dp)
                         )
+                    }
+                }
+
+                // Friends List, Live Online Status & Session Invites CTA
+                FilledTonalButton(
+                    onClick = onOpenFriends,
+                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(58.dp)
+                        .testTag("home_friends_button")
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.People, contentDescription = null, modifier = Modifier.size(22.dp))
+                            Column {
+                                Text("FRIENDS & SESSION INVITES", style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    text = when {
+                                        onlineFriendsCount > 0 ->
+                                            "$onlineFriendsCount friend${if (onlineFriendsCount == 1) "" else "s"} online • Notify to race together"
+                                        pendingRequestsCount > 0 ->
+                                            "$pendingRequestsCount friend request${if (pendingRequestsCount == 1) "" else "s"} waiting"
+                                        else -> "Live online status, friend codes & join alerts"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        if (onlineFriendsCount > 0 || pendingRequestsCount > 0) {
+                            Surface(
+                                color = if (onlineFriendsCount > 0) {
+                                    Color(0xFF00E676).copy(alpha = 0.2f)
+                                } else {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                },
+                                shape = RoundedCornerShape(50)
+                            ) {
+                                Text(
+                                    text = if (onlineFriendsCount > 0) {
+                                        "$onlineFriendsCount ONLINE"
+                                    } else {
+                                        "$pendingRequestsCount NEW"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (onlineFriendsCount > 0) {
+                                        Color(0xFF00E676)
+                                    } else {
+                                        MaterialTheme.colorScheme.onPrimaryContainer
+                                    },
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
                     }
                 }
 

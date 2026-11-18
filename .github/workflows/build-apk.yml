@@ -65,8 +65,6 @@ jobs:
           fi
 
           # 2. Otherwise restore the persistent CI keystore from orphan branch 'ci-keystore'
-          #    First try GitHub Contents API via gh (immune to shallow/refspec checkout settings),
-          #    then fall back to git fetch.
           if [ ! -s debug.keystore ] && [ -n "${GH_TOKEN:-}" ]; then
             if gh api "repos/${GITHUB_REPOSITORY}/contents/debug.keystore.base64?ref=ci-keystore" --jq '.content' 2>/dev/null \
               | tr -d '[:space:]' | base64 -d > debug.keystore 2>/dev/null; then
@@ -90,7 +88,6 @@ jobs:
           fi
 
           # 4. Very first CI run fallback: generate once and persist to 'ci-keystore' branch
-          #    so all future GitHub Release APKs share the exact same signing certificate for Obtainium.
           if [ ! -s debug.keystore ]; then
             echo "No existing persistent keystore found; generating new persistent CI keystore..."
             keytool -genkeypair -v -keystore debug.keystore \
@@ -113,8 +110,14 @@ jobs:
             fi
           fi
 
-          echo "Active APK signing certificate fingerprint:"
-          keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey | grep -E "SHA256:" || true
+          echo "Active APK signing certificate fingerprints:"
+          CERT_INFO="$(keytool -list -v -keystore debug.keystore -storepass android -alias androiddebugkey 2>/dev/null || true)"
+          ACTIVE_SHA1="$(printf '%s\n' "$CERT_INFO" | grep -E "SHA1:|SHA-1:" | head -n 1 | sed -E 's/.*SHA-?1:[[:space:]]*//' | tr -d '[:space:]')"
+          ACTIVE_SHA256="$(printf '%s\n' "$CERT_INFO" | grep -E "SHA256:|SHA-256:" | head -n 1 | sed -E 's/.*SHA-?256:[[:space:]]*//' | tr -d '[:space:]')"
+          echo "  SHA1:   ${ACTIVE_SHA1:-unknown}"
+          echo "  SHA256: ${ACTIVE_SHA256:-unknown}"
+          echo "ACTIVE_APK_SHA1=${ACTIVE_SHA1}" >> "$GITHUB_ENV"
+          echo "ACTIVE_APK_SHA256=${ACTIVE_SHA256}" >> "$GITHUB_ENV"
 
           if [ ! -f .env ] && [ -f .env.example ]; then
             cp .env.example .env
@@ -122,6 +125,93 @@ jobs:
           if [ -f gradlew ]; then
             chmod +x gradlew
           fi
+
+      - name: Restore Firebase google-services.json & BuildConfig secrets
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+          GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
+          FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+          FIREBASE_API_KEY: ${{ secrets.FIREBASE_API_KEY }}
+          FIREBASE_STORAGE_BUCKET: ${{ secrets.FIREBASE_STORAGE_BUCKET }}
+          FIREBASE_GCM_SENDER_ID: ${{ secrets.FIREBASE_GCM_SENDER_ID }}
+          FIREBASE_WEB_CLIENT_ID: ${{ secrets.FIREBASE_WEB_CLIENT_ID }}
+        run: |
+          FIREBASE_STATUS="MISSING"
+          validate_gs_json() {
+            if [ -s app/google-services.json ] && python3 -m json.tool app/google-services.json >/dev/null 2>&1; then
+              return 0
+            fi
+            rm -f app/google-services.json
+            return 1
+          }
+
+          if [ -s app/google-services.json ] && validate_gs_json; then
+            FIREBASE_STATUS="REPO_FILE"
+            echo "Using app/google-services.json present in repository."
+          elif [ -n "${GOOGLE_SERVICES_JSON:-}" ]; then
+            python3 - <<'PYEOF'
+          import base64, json, os, re
+          raw = os.environ.get("GOOGLE_SERVICES_JSON", "").strip()
+          # Strip optional markdown code fences or surrounding quotes if pasted on mobile
+          raw = re.sub(r"^```(?:json)?\s*", "", raw)
+          raw = re.sub(r"\s*```$", "", raw).strip()
+          if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
+              raw = raw[1:-1].strip()
+          if raw.startswith("{"):
+              parsed = json.loads(raw)
+          else:
+              decoded = base64.b64decode("".join(raw.split())).decode("utf-8")
+              parsed = json.loads(decoded)
+          with open("app/google-services.json", "w", encoding="utf-8") as f:
+              json.dump(parsed, f, indent=2)
+          PYEOF
+            if validate_gs_json; then
+              FIREBASE_STATUS="SECRET_GOOGLE_SERVICES_JSON"
+              echo "Restored valid app/google-services.json from GOOGLE_SERVICES_JSON secret."
+            fi
+          elif [ -n "${GOOGLE_SERVICES_JSON_BASE64:-}" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON_BASE64" | tr -d '[:space:]' | base64 -d > app/google-services.json || rm -f app/google-services.json
+            if validate_gs_json; then
+              FIREBASE_STATUS="SECRET_BASE64"
+              echo "Restored app/google-services.json from GOOGLE_SERVICES_JSON_BASE64 secret."
+            fi
+          fi
+
+          # Export optional FIREBASE_* secrets to GITHUB_ENV for BuildConfig fallback
+          for key in FIREBASE_PROJECT_ID FIREBASE_APP_ID FIREBASE_API_KEY FIREBASE_STORAGE_BUCKET FIREBASE_GCM_SENDER_ID FIREBASE_WEB_CLIENT_ID; do
+            val="${!key:-}"
+            if [ -n "$val" ]; then
+              printf '%s=%s\n' "$key" "$val" >> "$GITHUB_ENV"
+            fi
+          done
+
+          if [ "$FIREBASE_STATUS" = "MISSING" ] && [ -n "${FIREBASE_PROJECT_ID:-}" ] && [ -n "${FIREBASE_APP_ID:-}" ] && [ -n "${FIREBASE_API_KEY:-}" ]; then
+            FIREBASE_STATUS="ENV_BUILDCONFIG"
+            echo "Configured Firebase fallback via FIREBASE_* secrets in GITHUB_ENV."
+          elif [ "$FIREBASE_STATUS" = "MISSING" ]; then
+            echo "::warning::app/google-services.json was not found! Add repository secret GOOGLE_SERVICES_JSON (or paste google-services.json once inside MicroRC -> Online Web Play) to enable Google Sign-In."
+          fi
+
+          SHA_MATCH_NOTE="N/A (no google-services.json)"
+          if [ -s app/google-services.json ]; then
+            EXPECTED_HASH="$(echo "${ACTIVE_APK_SHA1:-}" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+            if [ -n "$EXPECTED_HASH" ] && grep -qi "$EXPECTED_HASH" app/google-services.json; then
+              SHA_MATCH_NOTE="Matched in google-services.json"
+              echo "Verified APK SHA-1 (${ACTIVE_APK_SHA1}) is registered in app/google-services.json."
+            else
+              SHA_MATCH_NOTE="Add SHA-1 ${ACTIVE_APK_SHA1} in Firebase Console -> Project Settings (or set secret SIGNING_KEYSTORE_BASE64)"
+              echo "::warning::Active APK SHA-1 (${ACTIVE_APK_SHA1}) is not listed in app/google-services.json. Register SHA-1 ${ACTIVE_APK_SHA1} (and SHA-256 ${ACTIVE_APK_SHA256}) in Firebase Console or set SIGNING_KEYSTORE_BASE64."
+            fi
+          fi
+
+          {
+            echo "### Firebase & Online Play Build Check"
+            echo "- **Firebase Config**: \`${FIREBASE_STATUS}\`"
+            echo "- **APK Signing SHA-1**: \`${ACTIVE_APK_SHA1:-unknown}\`"
+            echo "- **APK Signing SHA-256**: \`${ACTIVE_APK_SHA256:-unknown}\`"
+            echo "- **Google Sign-In Cert Match**: ${SHA_MATCH_NOTE}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Setup Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4

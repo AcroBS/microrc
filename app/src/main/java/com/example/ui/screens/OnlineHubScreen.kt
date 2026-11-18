@@ -29,14 +29,19 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -62,6 +67,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -71,6 +78,7 @@ import com.example.model.OnlineRoomDoc
 import com.example.model.PlayerProfile
 import com.example.model.RaceRulesSettings
 import com.example.ui.theme.GoldTrophy
+import com.example.util.InviteLinkHelper
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -81,15 +89,22 @@ fun OnlineHubScreen(
     openRooms: List<OnlineRoomDoc>,
     isBusy: Boolean,
     errorBanner: String?,
+    onlineFriendsCount: Int = 0,
+    pendingRequestsCount: Int = 0,
     onDismissError: () -> Unit,
     onCreateRoom: (roomName: String, maxPlayers: Int, discoverable: Boolean, password: String, rules: RaceRulesSettings) -> Unit,
     onJoinRoom: (roomId: String, password: String) -> Unit,
     onJoinRoomByCode: (code: String, password: String, onPasswordRequired: (OnlineRoomDoc) -> Unit) -> Unit,
+    onJoinRoomWithInviteToken: (code: String, token: String, onPasswordRequired: (OnlineRoomDoc) -> Unit) -> Unit = { code, _, onPw ->
+        onJoinRoomByCode(code, "", onPw)
+    },
+    onOpenFriends: () -> Unit = {},
     onOpenLeaderboards: () -> Unit,
     onSignOut: () -> Unit,
     onBack: () -> Unit
 ) {
     BackHandler { onBack() }
+    val context = LocalContext.current
 
     var roomName by remember(profile.name) { mutableStateOf("${profile.name.take(12)}'s Group") }
     var maxPlayers by remember { mutableIntStateOf(4) }
@@ -99,6 +114,7 @@ fun OnlineHubScreen(
     var unlistedCodeOnly by remember { mutableStateOf(false) }
 
     var joinCodeInput by remember { mutableStateOf("") }
+    var pastedUnlockToken by remember { mutableStateOf("") }
     var passwordPromptRoom by remember { mutableStateOf<OnlineRoomDoc?>(null) }
     var joinPasswordDraft by remember { mutableStateOf("") }
     var localValidationHint by remember { mutableStateOf<String?>(null) }
@@ -221,7 +237,53 @@ fun OnlineHubScreen(
                     }
                 }
 
-                // 1. Join by 6-Character Room Code Card
+                // Quick Friends & Session Invites Banner
+                FilledTonalButton(
+                    onClick = onOpenFriends,
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp)
+                        .testTag("online_hub_friends_button")
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(Icons.Default.People, contentDescription = null, modifier = Modifier.size(20.dp))
+                            Text(
+                                text = "Friends List & Join Alerts",
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.NotificationsActive,
+                                contentDescription = null,
+                                tint = if (onlineFriendsCount > 0) Color(0xFF00E676) else MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = when {
+                                    onlineFriendsCount > 0 -> "$onlineFriendsCount Online"
+                                    pendingRequestsCount > 0 -> "$pendingRequestsCount Request"
+                                    else -> "Open"
+                                },
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    }
+                }
+
+                // 1. Join by 6-Character Room Code or Invite Link Card
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -233,20 +295,54 @@ fun OnlineHubScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Row(
+                            modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Icon(
-                                Icons.Default.Key,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.secondary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Text(
-                                text = "QUICK JOIN BY ROOM CODE",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.secondary
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Key,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = "JOIN BY CODE OR INVITE LINK",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                            }
+                            TextButton(
+                                onClick = {
+                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                    val clipText = cm?.primaryClip
+                                        ?.takeIf { it.itemCount > 0 }
+                                        ?.getItemAt(0)
+                                        ?.coerceToText(context)
+                                        ?.toString()
+                                        .orEmpty()
+                                    val parsed = InviteLinkHelper.parseInviteFromText(clipText)
+                                    if (parsed != null) {
+                                        joinCodeInput = parsed.roomCode
+                                        pastedUnlockToken = parsed.joinToken
+                                        localValidationHint = null
+                                        onJoinRoomWithInviteToken(parsed.roomCode, parsed.joinToken) { lockedRoom ->
+                                            joinPasswordDraft = ""
+                                            passwordPromptRoom = lockedRoom
+                                        }
+                                    } else {
+                                        localValidationHint = "No MicroRC invite link or room code found on clipboard."
+                                    }
+                                },
+                                modifier = Modifier.testTag("paste_invite_link_button")
+                            ) {
+                                Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Paste Invite")
+                            }
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -256,11 +352,18 @@ fun OnlineHubScreen(
                             OutlinedTextField(
                                 value = joinCodeInput,
                                 onValueChange = { raw ->
-                                    joinCodeInput = raw.uppercase()
-                                        .filter { it.isLetterOrDigit() }
-                                        .take(8)
+                                    val parsedLink = if (raw.length > 10) InviteLinkHelper.parseInviteFromText(raw) else null
+                                    if (parsedLink != null) {
+                                        joinCodeInput = parsedLink.roomCode
+                                        pastedUnlockToken = parsedLink.joinToken
+                                    } else {
+                                        pastedUnlockToken = ""
+                                        joinCodeInput = raw.uppercase()
+                                            .filter { it.isLetterOrDigit() }
+                                            .take(12)
+                                    }
                                 },
-                                label = { Text("6-Char Code (e.g. K7M9XP)") },
+                                label = { Text("Room Code or WhatsApp Link") },
                                 singleLine = true,
                                 modifier = Modifier
                                     .weight(1f)
@@ -270,12 +373,19 @@ fun OnlineHubScreen(
                                 onClick = {
                                     val trimmed = joinCodeInput.trim()
                                     if (trimmed.length < 4) {
-                                        localValidationHint = "Enter the 6-character room code shared by the host."
+                                        localValidationHint = "Enter the 6-character room code or paste a WhatsApp invite link."
                                     } else {
                                         localValidationHint = null
-                                        onJoinRoomByCode(trimmed, "") { lockedRoom ->
-                                            joinPasswordDraft = ""
-                                            passwordPromptRoom = lockedRoom
+                                        if (pastedUnlockToken.isNotBlank()) {
+                                            onJoinRoomWithInviteToken(trimmed, pastedUnlockToken) { lockedRoom ->
+                                                joinPasswordDraft = ""
+                                                passwordPromptRoom = lockedRoom
+                                            }
+                                        } else {
+                                            onJoinRoomByCode(trimmed, "") { lockedRoom ->
+                                                joinPasswordDraft = ""
+                                                passwordPromptRoom = lockedRoom
+                                            }
                                         }
                                     }
                                 },

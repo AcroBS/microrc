@@ -227,7 +227,8 @@ class OnlineRaceRepository(
     suspend fun joinOnlineRoom(
         roomId: String,
         profile: PlayerProfile,
-        rawPassword: String
+        rawPassword: String,
+        preAuthorizedJoinToken: String = ""
     ): Result<OnlineRoomDoc> {
         var activePath = "onlineRooms/$roomId"
         return try {
@@ -249,15 +250,20 @@ class OnlineRaceRepository(
             }
 
             val computedJoinToken = if (room.passwordProtected) {
-                val trimmed = rawPassword.trim()
-                if (trimmed.isEmpty()) {
-                    return Result.failure(IllegalArgumentException("Password required to join this group."))
+                val cleanToken = preAuthorizedJoinToken.trim()
+                if (cleanToken.isNotEmpty() && cleanToken == room.passwordHash) {
+                    cleanToken
+                } else {
+                    val trimmed = rawPassword.trim()
+                    if (trimmed.isEmpty()) {
+                        return Result.failure(IllegalArgumentException("Password required to join this group."))
+                    }
+                    val candidateHash = OnlinePasswordHasher.hashPassword(room.passwordSalt, trimmed)
+                    if (candidateHash != room.passwordHash) {
+                        return Result.failure(IllegalArgumentException("Incorrect room password."))
+                    }
+                    candidateHash
                 }
-                val candidateHash = OnlinePasswordHasher.hashPassword(room.passwordSalt, trimmed)
-                if (candidateHash != room.passwordHash) {
-                    return Result.failure(IllegalArgumentException("Incorrect room password."))
-                }
-                candidateHash
             } else {
                 ""
             }

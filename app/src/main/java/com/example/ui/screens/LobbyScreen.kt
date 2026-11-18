@@ -44,8 +44,11 @@ import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.SportsScore
@@ -55,6 +58,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -73,6 +77,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -81,19 +86,23 @@ import com.example.model.ArenaFlagState
 import com.example.model.ArenaShape
 import com.example.model.CarSpeedPreset
 import com.example.model.CustomTrackData
+import com.example.model.FriendUiModel
 import com.example.model.GameMode
 import com.example.model.GhostRunPlayback
 import com.example.model.LobbyStatePayload
+import com.example.model.OnlineRoomDoc
 import com.example.model.RaceRulesSettings
 import com.example.model.RcCarType
 import com.example.model.StuntVariant
 import com.example.model.TrackId
 import com.example.model.WinCondition
 import com.example.network.SessionRole
+import com.example.ui.components.ShareLobbyInviteDialog
 import com.example.ui.components.drawRcCar
 import com.example.ui.components.drawTrackMiniMap
 import com.example.ui.theme.ElectricCyan
 import com.example.ui.theme.GoldTrophy
+import com.example.util.InviteLinkHelper
 
 @Composable
 fun LobbyScreen(
@@ -101,10 +110,19 @@ fun LobbyScreen(
     localPlayerId: String,
     lobby: LobbyStatePayload?,
     customTracks: List<CustomTrackData>,
+    onlineRoom: OnlineRoomDoc? = null,
     onlineRoomCode: String? = null,
     onlinePasswordProtected: Boolean = false,
     maxPlayers: Int = 4,
     activeChallengeGhost: GhostRunPlayback? = null,
+    friends: List<FriendUiModel> = emptyList(),
+    knownFriendUids: Set<String> = emptySet(),
+    socialFeedback: String? = null,
+    onDismissSocialFeedback: () -> Unit = {},
+    onNotifyFriendToJoin: (FriendUiModel) -> Unit = {},
+    onNotifyAllOnlineFriends: (List<FriendUiModel>) -> Unit = {},
+    onAddPlayerAsFriend: (playerUid: String, playerName: String) -> Unit = { _, _ -> },
+    onOpenFriends: () -> Unit = {},
     onSelectTrack: (TrackId) -> Unit,
     onSelectArenaShape: (ArenaShape) -> Unit = {},
     onSelectStuntVariant: (StuntVariant) -> Unit = {},
@@ -129,9 +147,11 @@ fun LobbyScreen(
     onLeaveLobby: () -> Unit
 ) {
     BackHandler { onLeaveLobby() }
+    val context = LocalContext.current
 
     val isHostOrSolo = role.isHostLike
     var chatDraft by remember { mutableStateOf("") }
+    var showShareInviteDialog by remember { mutableStateOf(false) }
     val chatListState = rememberLazyListState()
 
     val chatHistory = lobby?.chatHistory.orEmpty()
@@ -265,6 +285,112 @@ fun LobbyScreen(
                     .padding(horizontal = 14.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                // Online Lobby Session Invite Bar (WhatsApp Link + Notify Friends)
+                val effectiveCode = onlineRoom?.roomCode?.takeIf { it.isNotBlank() }
+                    ?: onlineRoomCode?.takeIf { it.isNotBlank() }
+                if (role.isOnline && effectiveCode != null) {
+                    val onlineFriendCount = remember(friends) { friends.count { it.effectivelyOnline } }
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.55f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    val roomTitle = onlineRoom?.roomName ?: lobby?.lobbyName ?: "Online Paddock"
+                                    val hostLabel = onlineRoom?.hostName ?: "Host"
+                                    val token = if (onlineRoom?.passwordProtected == true) {
+                                        onlineRoom.passwordHash
+                                    } else {
+                                        ""
+                                    }
+                                    val message = InviteLinkHelper.buildShareMessage(
+                                        roomName = roomTitle,
+                                        roomCode = effectiveCode,
+                                        gameMode = selectedMode.name,
+                                        hostName = hostLabel,
+                                        joinToken = token
+                                    )
+                                    InviteLinkHelper.shareViaWhatsApp(context, message)
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF25D366),
+                                    contentColor = Color(0xFF071A0E)
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("lobby_whatsapp_invite_button")
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "WhatsApp Link",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1
+                                )
+                            }
+
+                            FilledTonalButton(
+                                onClick = { showShareInviteDialog = true },
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("lobby_share_invite_button")
+                            ) {
+                                Icon(
+                                    if (onlineFriendCount > 0) Icons.Default.NotificationsActive else Icons.Default.Share,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (onlineFriendCount > 0) {
+                                        "Invite Friends ($onlineFriendCount)"
+                                    } else {
+                                        "Link & Friends"
+                                    },
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+
+                    if (!socialFeedback.isNullOrBlank()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onDismissSocialFeedback() }
+                        ) {
+                            Text(
+                                text = socialFeedback,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+                }
+
                 // Active Match Rules Badges
                 if (activeRules != null) {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1064,6 +1190,20 @@ fun LobbyScreen(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
+                                if (role.isOnline && !player.isBot && player.id != localPlayerId && player.id !in knownFriendUids) {
+                                    IconButton(
+                                        onClick = { onAddPlayerAsFriend(player.id, player.name) },
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .testTag("lobby_add_friend_${player.id}")
+                                    ) {
+                                        Icon(
+                                            Icons.Default.PersonAdd,
+                                            contentDescription = "Add ${player.name} as Friend",
+                                            tint = MaterialTheme.colorScheme.secondary
+                                        )
+                                    }
+                                }
                                 Surface(
                                     color = if (player.isReady) {
                                         MaterialTheme.colorScheme.tertiaryContainer
@@ -1271,6 +1411,27 @@ fun LobbyScreen(
                 }
             }
         }
+    }
+
+    val dialogCode = onlineRoom?.roomCode?.takeIf { it.isNotBlank() }
+        ?: onlineRoomCode?.takeIf { it.isNotBlank() }
+    if (showShareInviteDialog && dialogCode != null) {
+        val myPlayerName = lobby?.players?.find { it.id == localPlayerId }?.name
+            ?: onlineRoom?.hostName
+            ?: "Driver"
+        ShareLobbyInviteDialog(
+            roomName = onlineRoom?.roomName ?: lobby?.lobbyName ?: "Online Paddock",
+            roomCode = dialogCode,
+            gameMode = selectedMode.name,
+            hostName = myPlayerName,
+            passwordProtected = onlineRoom?.passwordProtected == true || onlinePasswordProtected,
+            passwordHash = onlineRoom?.passwordHash.orEmpty(),
+            friends = friends,
+            onNotifyFriend = onNotifyFriendToJoin,
+            onNotifyAllOnline = onNotifyAllOnlineFriends,
+            onOpenFriendsScreen = onOpenFriends,
+            onDismiss = { showShareInviteDialog = false }
+        )
     }
 }
 
