@@ -199,7 +199,7 @@ fun JoinBrowserScreen(
                             )
                             Text("No Races Found Yet", style = MaterialTheme.typography.titleLarge)
                             Text(
-                                text = "Ask 1 friend to tap Host Race on the same Wi-Fi network or mobile Hotspot. Still not showing? Use Direct IP below.",
+                                text = "Host a Wi-Fi lobby on another device, or connect via Direct IP below.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

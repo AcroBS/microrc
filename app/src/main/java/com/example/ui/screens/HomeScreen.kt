@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -13,10 +14,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -31,12 +35,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEvents
-import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Hub
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PhoneAndroid
@@ -46,6 +49,7 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Today
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Wifi
@@ -54,11 +58,17 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -72,6 +82,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
@@ -81,7 +92,15 @@ import com.example.R
 import com.example.model.ControlMode
 import com.example.model.PlayerProfile
 import com.example.ui.components.drawRcCar
+import com.example.ui.theme.adaptiveOnlineColor
 
+private enum class HomeModeScope(val label: String) {
+    ALL("All Modes"),
+    OFFLINE("Offline"),
+    ONLINE("Online")
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     profile: PlayerProfile,
@@ -89,6 +108,11 @@ fun HomeScreen(
     onJoinRace: () -> Unit,
     onSoloRace: () -> Unit,
     onPureSoloRace: () -> Unit = {},
+    onOpenDailyChallenge: () -> Unit = {},
+    dailyChallengeTitle: String = "Daily GP",
+    dailyChallengeSubtitle: String = "Fixed Portals • 1 Nitro/Lap • No Mines",
+    dailyChallengeResetLabel: String = "",
+    dailyBestTimeMs: Long? = null,
     onOpenOnlinePlay: () -> Unit = {},
     onOpenFriends: () -> Unit = {},
     onlineFriendsCount: Int = 0,
@@ -101,6 +125,8 @@ fun HomeScreen(
     onUpdateDriverName: (String) -> Unit
 ) {
     var showNameDialog by remember { mutableStateOf(false) }
+    var modeScope by remember { mutableStateOf(HomeModeScope.ALL) }
+
     val infiniteTransition = rememberInfiniteTransition(label = "carSpin")
     val spinAngle by infiniteTransition.animateFloat(
         initialValue = 0f,
@@ -112,526 +138,379 @@ fun HomeScreen(
         label = "angle"
     )
 
+    val driverBadgeBg = Color(profile.primaryColorArgb)
+    val driverBadgeFg = if (driverBadgeBg.luminance() > 0.45f) Color(0xFF101318) else Color.White
+    val onlineAccent = adaptiveOnlineColor()
+
     Surface(
         color = MaterialTheme.colorScheme.background,
         modifier = Modifier.fillMaxSize()
     ) {
-        Column(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            val isWideScreen = maxWidth >= 680.dp
+
             Column(
-                modifier = Modifier.widthIn(max = 640.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Hero Artwork Card
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(176.dp)
-                        .clip(RoundedCornerShape(24.dp))
+                Column(
+                    modifier = Modifier.widthIn(max = if (isWideScreen) 860.dp else 640.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    Image(
-                        painter = painterResource(id = R.drawable.img_hero_paddock),
-                        contentDescription = "MicroRC Paddock Hero Banner",
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    // 1. Material You Hero Card
                     Box(
                         modifier = Modifier
-                            .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(
-                                        Color.Black.copy(alpha = 0.12f),
-                                        Color(0xFF0B0E14).copy(alpha = 0.88f)
+                            .fillMaxWidth()
+                            .height(152.dp)
+                            .clip(MaterialTheme.shapes.large)
+                    ) {
+                        Image(
+                            painter = painterResource(id = R.drawable.img_hero_paddock),
+                            contentDescription = "MicroRC Paddock Hero Banner",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(
+                                    Brush.verticalGradient(
+                                        colors = listOf(
+                                            Color.Black.copy(alpha = 0.14f),
+                                            Color(0xFF0B0E14).copy(alpha = 0.88f)
+                                        )
                                     )
                                 )
-                            )
-                    )
-                    Column(
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(18.dp)
-                    ) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f),
-                            shape = RoundedCornerShape(50)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.Wifi,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text(
-                                    text = "2-4P ONLINE WEB & WI-FI P2P",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "MicroRC",
-                            style = MaterialTheme.typography.displayLarge,
-                            color = Color.White
                         )
-                        Text(
-                            text = "Top-down local multiplayer RC racing",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color(0xFFDCE3EE)
-                        )
-                    }
-                }
-
-                // Driver Profile Pill Row
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainer,
-                    shape = RoundedCornerShape(20.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
+                        Column(
                             modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable { showNameDialog = true }
-                                .padding(vertical = 4.dp, horizontal = 4.dp)
+                                .align(Alignment.BottomStart)
+                                .padding(18.dp)
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(profile.primaryColorArgb)),
-                                contentAlignment = Alignment.Center
+                            Text(
+                                text = "MicroRC",
+                                style = MaterialTheme.typography.displayLarge,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Top-down RC racing & arenas",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color.White.copy(alpha = 0.84f)
+                            )
+                        }
+                    }
+
+                    // 2. Driver Tag + Active RC Car Garage Card (Material You Tonal Surface)
+                    ElevatedCard(
+                        colors = CardDefaults.elevatedCardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                        ),
+                        shape = MaterialTheme.shapes.large,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            // Driver Callsign & Steering Control Chip Row
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text(
-                                    text = profile.name.take(1).uppercase(),
-                                    style = MaterialTheme.typography.titleLarge,
-                                    color = Color(0xFF0B0E14)
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .defaultMinSize(minHeight = 48.dp)
+                                        .clip(MaterialTheme.shapes.small)
+                                        .clickable { showNameDialog = true }
+                                        .padding(horizontal = 4.dp, vertical = 4.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(CircleShape)
+                                            .background(driverBadgeBg),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = profile.name.take(1).uppercase(),
+                                            style = MaterialTheme.typography.titleLarge,
+                                            color = driverBadgeFg
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = "DRIVER TAG",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = profile.name,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Icon(
+                                                Icons.Default.Edit,
+                                                contentDescription = "Edit Driver Name",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Surface(
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    shape = MaterialTheme.shapes.small,
+                                    modifier = Modifier
+                                        .defaultMinSize(minHeight = 48.dp)
+                                        .clip(MaterialTheme.shapes.small)
+                                        .clickable(onClick = onOpenGarage)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            when (profile.controlMode) {
+                                                ControlMode.TILT_SENSOR -> Icons.Default.PhoneAndroid
+                                                ControlMode.SPRING_SLIDER -> Icons.Default.SwapHoriz
+                                                ControlMode.TOUCH_OVERLAY -> Icons.Default.TouchApp
+                                            },
+                                            contentDescription = "Control Mode",
+                                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            text = profile.controlMode.label,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                    }
+                                }
                             }
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    text = "DRIVER TAG",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+
+                            // Active Car Turntable + Stats + Garage Action
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(84.dp)
+                                        .clip(MaterialTheme.shapes.medium)
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Canvas(modifier = Modifier.fillMaxSize()) {
+                                        drawRcCar(
+                                            x = size.width / 2f,
+                                            y = size.height / 2f,
+                                            angleRad = spinAngle,
+                                            carType = profile.carType,
+                                            primaryColor = Color(profile.primaryColorArgb),
+                                            accentColor = Color(profile.accentColorArgb),
+                                            scale = 1.35f
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = profile.name,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = MaterialTheme.colorScheme.onSurface,
+                                        text = profile.carType.displayName,
+                                        style = MaterialTheme.typography.titleLarge,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = profile.carType.tagline,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Icon(
-                                        Icons.Default.Edit,
-                                        contentDescription = "Edit Driver Name",
-                                        tint = MaterialTheme.colorScheme.secondary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        MiniStatBadge(
+                                            label = "SPD ${profile.carType.topSpeedStat}",
+                                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                        MiniStatBadge(
+                                            label = "HDL ${profile.carType.handlingStat}",
+                                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                        MiniStatBadge(
+                                            label = "GRP ${profile.carType.gripStat}",
+                                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                                        )
+                                    }
                                 }
                             }
-                        }
 
-                        Surface(
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable(onClick = onOpenGarage)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            FilledTonalButton(
+                                onClick = onOpenGarage,
+                                shape = MaterialTheme.shapes.medium,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp)
+                                    .testTag("open_garage_button")
                             ) {
-                                Icon(
-                                    when (profile.controlMode) {
-                                        ControlMode.TILT_SENSOR -> Icons.Default.PhoneAndroid
-                                        ControlMode.SPRING_SLIDER -> Icons.Default.SwapHoriz
-                                        ControlMode.TOUCH_OVERLAY -> Icons.Default.TouchApp
-                                    },
-                                    contentDescription = "Control Mode",
-                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = profile.controlMode.label,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                                )
+                                Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Garage, Colors & Controls")
                             }
                         }
                     }
-                }
 
-                // Active RC Car Preview + Garage Link
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    shape = RoundedCornerShape(22.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    // 3. Intuitive Entry Filter (Material 3 SingleChoiceSegmentedButtonRow)
+                    SingleChoiceSegmentedButtonRow(
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(92.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Canvas(modifier = Modifier.fillMaxSize()) {
-                                drawRcCar(
-                                    x = size.width / 2f,
-                                    y = size.height / 2f,
-                                    angleRad = spinAngle,
-                                    carType = profile.carType,
-                                    primaryColor = Color(profile.primaryColorArgb),
-                                    accentColor = Color(profile.accentColorArgb),
-                                    scale = 1.45f
-                                )
+                        HomeModeScope.entries.forEachIndexed { index, scopeOption ->
+                            val icon = when (scopeOption) {
+                                HomeModeScope.ALL -> null
+                                HomeModeScope.OFFLINE -> Icons.Default.Wifi
+                                HomeModeScope.ONLINE -> Icons.Default.Public
                             }
-                        }
-                        Spacer(modifier = Modifier.width(14.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = profile.carType.displayName,
-                                style = MaterialTheme.typography.titleLarge,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = profile.carType.tagline,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                MiniStatBadge("SPD ${profile.carType.topSpeedStat}", MaterialTheme.colorScheme.primary)
-                                MiniStatBadge("HDL ${profile.carType.handlingStat}", MaterialTheme.colorScheme.secondary)
-                                MiniStatBadge("GRP ${profile.carType.gripStat}", MaterialTheme.colorScheme.tertiary)
-                            }
-                        }
-                    }
-                    FilledTonalButton(
-                        onClick = onOpenGarage,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 14.dp, end = 14.dp, bottom = 14.dp)
-                            .height(48.dp)
-                            .testTag("open_garage_button")
-                    ) {
-                        Icon(Icons.Default.Build, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Garage, Colors & Controls")
-                    }
-                }
-
-                // Full Online Web Play CTA (Lobby + Password-Protected Groups 2-4P)
-                Button(
-                    onClick = onOpenOnlinePlay,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                    ),
-                    shape = RoundedCornerShape(20.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(68.dp)
-                        .testTag("online_play_button")
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(24.dp))
-                            Column {
-                                Text("ONLINE WEB PLAY (2–4P)", style = MaterialTheme.typography.titleMedium)
-                                Text(
-                                    "Central lobby, room codes & password groups",
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            }
-                        }
-                        Icon(
-                            Icons.Default.Lock,
-                            contentDescription = "Supports Password Groups",
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-
-                // Friends List, Live Online Status & Session Invites CTA
-                FilledTonalButton(
-                    onClick = onOpenFriends,
-                    shape = RoundedCornerShape(18.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(58.dp)
-                        .testTag("home_friends_button")
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Icon(Icons.Default.People, contentDescription = null, modifier = Modifier.size(22.dp))
-                            Column {
-                                Text("FRIENDS & SESSION INVITES", style = MaterialTheme.typography.titleSmall)
-                                Text(
-                                    text = when {
-                                        onlineFriendsCount > 0 ->
-                                            "$onlineFriendsCount friend${if (onlineFriendsCount == 1) "" else "s"} online • Notify to race together"
-                                        pendingRequestsCount > 0 ->
-                                            "$pendingRequestsCount friend request${if (pendingRequestsCount == 1) "" else "s"} waiting"
-                                        else -> "Live online status, friend codes & join alerts"
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                        if (onlineFriendsCount > 0 || pendingRequestsCount > 0) {
-                            Surface(
-                                color = if (onlineFriendsCount > 0) {
-                                    Color(0xFF00E676).copy(alpha = 0.2f)
-                                } else {
-                                    MaterialTheme.colorScheme.primaryContainer
+                            SegmentedButton(
+                                selected = modeScope == scopeOption,
+                                onClick = { modeScope = scopeOption },
+                                shape = SegmentedButtonDefaults.itemShape(
+                                    index = index,
+                                    count = HomeModeScope.entries.size
+                                ),
+                                icon = {
+                                    if (icon != null && modeScope != scopeOption) {
+                                        Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    } else {
+                                        SegmentedButtonDefaults.Icon(active = modeScope == scopeOption)
+                                    }
                                 },
-                                shape = RoundedCornerShape(50)
+                                modifier = Modifier.testTag("home_scope_${scopeOption.name.lowercase()}")
                             ) {
                                 Text(
-                                    text = if (onlineFriendsCount > 0) {
-                                        "$onlineFriendsCount ONLINE"
-                                    } else {
-                                        "$pendingRequestsCount NEW"
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (onlineFriendsCount > 0) {
-                                        Color(0xFF00E676)
-                                    } else {
-                                        MaterialTheme.colorScheme.onPrimaryContainer
-                                    },
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    text = scopeOption.label,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    maxLines = 1
                                 )
                             }
                         }
                     }
-                }
 
-                // Local Wi-Fi P2P Multiplayer Actions
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Button(
-                        onClick = onHostRace,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        ),
-                        shape = RoundedCornerShape(18.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(66.dp)
-                            .testTag("host_race_button")
-                    ) {
-                        Icon(Icons.Default.Hub, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text("HOST RACE", style = MaterialTheme.typography.labelLarge)
-                            Text("Wi-Fi Lobby", style = MaterialTheme.typography.labelSmall)
+                    // 4. Primary Game Entry Pillars: OFFLINE (Wi-Fi & Solo) vs ONLINE (Lobbies, Challenges & Leaderboards)
+                    val showOffline = modeScope == HomeModeScope.ALL || modeScope == HomeModeScope.OFFLINE
+                    val showOnline = modeScope == HomeModeScope.ALL || modeScope == HomeModeScope.ONLINE
+
+                    if (isWideScreen && showOffline && showOnline) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            OfflineEntrySection(
+                                modifier = Modifier.weight(1f),
+                                onHostRace = onHostRace,
+                                onJoinRace = onJoinRace,
+                                onPureSoloRace = onPureSoloRace,
+                                onSoloRace = onSoloRace,
+                                onOpenHybridSetup = onOpenHybridSetup
+                            )
+                            OnlineEntrySection(
+                                modifier = Modifier.weight(1f),
+                                onOpenOnlinePlay = onOpenOnlinePlay,
+                                onOpenFriends = onOpenFriends,
+                                onlineFriendsCount = onlineFriendsCount,
+                                pendingRequestsCount = pendingRequestsCount,
+                                onlineAccent = onlineAccent,
+                                onOpenDailyChallenge = onOpenDailyChallenge,
+                                dailyChallengeTitle = dailyChallengeTitle,
+                                dailyChallengeSubtitle = dailyChallengeSubtitle,
+                                dailyChallengeResetLabel = dailyChallengeResetLabel,
+                                dailyBestTimeMs = dailyBestTimeMs,
+                                onOpenLeaderboards = onOpenLeaderboards
+                            )
+                        }
+                    } else {
+                        AnimatedVisibility(visible = showOffline) {
+                            OfflineEntrySection(
+                                modifier = Modifier.fillMaxWidth(),
+                                onHostRace = onHostRace,
+                                onJoinRace = onJoinRace,
+                                onPureSoloRace = onPureSoloRace,
+                                onSoloRace = onSoloRace,
+                                onOpenHybridSetup = onOpenHybridSetup
+                            )
+                        }
+
+                        AnimatedVisibility(visible = showOnline) {
+                            OnlineEntrySection(
+                                modifier = Modifier.fillMaxWidth(),
+                                onOpenOnlinePlay = onOpenOnlinePlay,
+                                onOpenFriends = onOpenFriends,
+                                onlineFriendsCount = onlineFriendsCount,
+                                pendingRequestsCount = pendingRequestsCount,
+                                onlineAccent = onlineAccent,
+                                onOpenDailyChallenge = onOpenDailyChallenge,
+                                dailyChallengeTitle = dailyChallengeTitle,
+                                dailyChallengeSubtitle = dailyChallengeSubtitle,
+                                dailyChallengeResetLabel = dailyChallengeResetLabel,
+                                dailyBestTimeMs = dailyBestTimeMs,
+                                onOpenLeaderboards = onOpenLeaderboards
+                            )
                         }
                     }
 
-                    Button(
-                        onClick = onJoinRace,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.secondary,
-                            contentColor = MaterialTheme.colorScheme.onSecondary
-                        ),
-                        shape = RoundedCornerShape(18.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(66.dp)
-                            .testTag("join_race_button")
-                    ) {
-                        Icon(Icons.Default.Search, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text("JOIN RACE", style = MaterialTheme.typography.labelLarge)
-                            Text("Scan Wi-Fi", style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
-
-                // Pure Solo Time Trial (0 Bots) + Leaderboards & Ghost Challenges
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    FilledTonalButton(
-                        onClick = onPureSoloRace,
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(54.dp)
-                            .testTag("pure_solo_button")
-                    ) {
-                        Icon(Icons.Default.Timer, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Solo Time Trial", style = MaterialTheme.typography.labelLarge, maxLines = 1)
-                    }
-
-                    FilledTonalButton(
-                        onClick = onOpenLeaderboards,
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(54.dp)
-                            .testTag("leaderboards_button")
-                    ) {
-                        Icon(Icons.Default.EmojiEvents, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Records & Ghosts", style = MaterialTheme.typography.labelLarge, maxLines = 1)
-                    }
-                }
-
-                // Solo Practice vs Bots + Hybrid Tour Event Setup
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    FilledTonalButton(
-                        onClick = onSoloRace,
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(54.dp)
-                            .testTag("solo_race_button")
-                    ) {
-                        Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Solo vs Bots", style = MaterialTheme.typography.labelLarge, maxLines = 1)
-                    }
-
-                    FilledTonalButton(
-                        onClick = onOpenHybridSetup,
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(54.dp)
-                            .testTag("home_hybrid_tour_button")
-                    ) {
-                        Icon(Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Hybrid Tour", style = MaterialTheme.typography.labelLarge, maxLines = 1)
-                    }
-                }
-
-                // Track Studio + Match Settings Row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = onOpenTrackEditor,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(52.dp)
-                            .testTag("open_track_editor_button")
-                    ) {
-                        Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Track Studio", style = MaterialTheme.typography.labelLarge, maxLines = 1)
-                    }
-
-                    OutlinedButton(
-                        onClick = onOpenSettings,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(52.dp)
-                            .testTag("open_settings_button")
-                    ) {
-                        Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Rules & Audio", style = MaterialTheme.typography.labelLarge, maxLines = 1)
-                    }
-                }
-
-                // Offline Wi-Fi / Hotspot Tip Card
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    shape = RoundedCornerShape(16.dp)
-                ) {
+                    // 5. Workshop & Match Preferences Row
                     Row(
-                        modifier = Modifier.padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Icon(
-                            Icons.Default.Wifi,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.size(22.dp)
-                        )
-                        Text(
-                            text = "No internet needed: Connect all phones to the same Wi-Fi, or enable a Hotspot on one phone and connect the others before hosting.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        OutlinedButton(
+                            onClick = onOpenTrackEditor,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            shape = MaterialTheme.shapes.medium,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp)
+                                .testTag("open_track_editor_button")
+                        ) {
+                            Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Track Studio", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                        }
+
+                        OutlinedButton(
+                            onClick = onOpenSettings,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            shape = MaterialTheme.shapes.medium,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(52.dp)
+                                .testTag("open_settings_button")
+                        ) {
+                            Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Rules & Audio", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                        }
                     }
                 }
             }
@@ -671,16 +550,458 @@ fun HomeScreen(
 }
 
 @Composable
-private fun MiniStatBadge(label: String, color: Color) {
+private fun OfflineEntrySection(
+    modifier: Modifier = Modifier,
+    onHostRace: () -> Unit,
+    onJoinRace: () -> Unit,
+    onPureSoloRace: () -> Unit,
+    onSoloRace: () -> Unit,
+    onOpenHybridSetup: () -> Unit
+) {
+    ElevatedCard(
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        ),
+        shape = MaterialTheme.shapes.large,
+        modifier = modifier.testTag("home_offline_section")
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Section Header
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.Wifi,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "OFFLINE PLAY",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Local Wi-Fi Lobbies & Solo Modes",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Wi-Fi Lobby Entry Points
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Button(
+                    onClick = onHostRace,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    shape = MaterialTheme.shapes.medium,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(64.dp)
+                        .testTag("host_race_button")
+                ) {
+                    Icon(Icons.Default.Hub, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text("Host Race", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                        Text("Wi-Fi Lobby", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    }
+                }
+
+                FilledTonalButton(
+                    onClick = onJoinRace,
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    ),
+                    shape = MaterialTheme.shapes.medium,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(64.dp)
+                        .testTag("join_race_button")
+                ) {
+                    Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text("Join Race", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                        Text("Scan Wi-Fi", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    }
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+
+            Text(
+                text = "SOLO & OFFLINE GAMEPLAY",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                FilledTonalButton(
+                    onClick = onPureSoloRace,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                        .testTag("pure_solo_button")
+                ) {
+                    Icon(Icons.Default.Timer, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Solo Time Trial", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+
+                FilledTonalButton(
+                    onClick = onSoloRace,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                        .testTag("solo_race_button")
+                ) {
+                    Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Solo vs Bots", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+
+            FilledTonalButton(
+                onClick = onOpenHybridSetup,
+                shape = MaterialTheme.shapes.medium,
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .testTag("home_hybrid_tour_button")
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text("Hybrid Tour", style = MaterialTheme.typography.labelLarge)
+                    }
+                    Text(
+                        text = "Circuit • Arena • Stunts",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OnlineEntrySection(
+    modifier: Modifier = Modifier,
+    onOpenOnlinePlay: () -> Unit,
+    onOpenFriends: () -> Unit,
+    onlineFriendsCount: Int,
+    pendingRequestsCount: Int,
+    onlineAccent: Color,
+    onOpenDailyChallenge: () -> Unit,
+    dailyChallengeTitle: String,
+    dailyChallengeSubtitle: String,
+    dailyChallengeResetLabel: String,
+    dailyBestTimeMs: Long?,
+    onOpenLeaderboards: () -> Unit
+) {
+    ElevatedCard(
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
+        ),
+        shape = MaterialTheme.shapes.large,
+        modifier = modifier.testTag("home_online_section")
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Section Header
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.size(38.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.Public,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "ONLINE PLAY",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Online Lobbies, Daily Challenges & Leaderboards",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Online Lobby (2-4P)
+            Button(
+                onClick = onOpenOnlinePlay,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.secondary,
+                    contentColor = MaterialTheme.colorScheme.onSecondary
+                ),
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(62.dp)
+                    .testTag("online_play_button")
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(22.dp))
+                        Column {
+                            Text("Online Lobby (2–4P)", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                text = "Public & private rooms, codes & invites",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSecondary.copy(alpha = 0.85f)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Friends & Crew
+            FilledTonalButton(
+                onClick = onOpenFriends,
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp)
+                    .testTag("home_friends_button")
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.People, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Column {
+                            Text("Friends & Session Invites", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                text = when {
+                                    onlineFriendsCount > 0 -> "$onlineFriendsCount online • Invite to lobby"
+                                    pendingRequestsCount > 0 -> "$pendingRequestsCount request waiting"
+                                    else -> "Friend codes, online status & alerts"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                    if (onlineFriendsCount > 0 || pendingRequestsCount > 0) {
+                        Surface(
+                            color = if (onlineFriendsCount > 0) {
+                                onlineAccent.copy(alpha = 0.16f)
+                            } else {
+                                MaterialTheme.colorScheme.primaryContainer
+                            },
+                            shape = RoundedCornerShape(50)
+                        ) {
+                            Text(
+                                text = if (onlineFriendsCount > 0) "$onlineFriendsCount ONLINE" else "$pendingRequestsCount NEW",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (onlineFriendsCount > 0) onlineAccent else MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
+
+            Text(
+                text = "CHALLENGES & LEADERBOARDS",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            // Daily Challenge Card
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f)),
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.medium)
+                    .clickable(onClick = onOpenDailyChallenge)
+                    .testTag("daily_challenge_button")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(MaterialTheme.shapes.small)
+                            .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.18f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Today,
+                            contentDescription = "Daily Challenge",
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "DAILY CHALLENGE",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                            if (dailyChallengeResetLabel.isNotBlank()) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.35f),
+                                    shape = RoundedCornerShape(50)
+                                ) {
+                                    Text(
+                                        text = dailyChallengeResetLabel,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+                        Text(
+                            text = "$dailyChallengeTitle • $dailyChallengeSubtitle",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Icon(
+                            Icons.Default.Bolt,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = if (dailyBestTimeMs != null && dailyBestTimeMs > 0L) {
+                                String.format(java.util.Locale.US, "%.2fs", dailyBestTimeMs / 1000f)
+                            } else {
+                                "RACE"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    }
+                }
+            }
+
+            // Records & Ghosts Leaderboard CTA
+            FilledTonalButton(
+                onClick = onOpenLeaderboards,
+                shape = MaterialTheme.shapes.medium,
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .testTag("leaderboards_button")
+            ) {
+                Icon(Icons.Default.EmojiEvents, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Records & Ghosts", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniStatBadge(
+    label: String,
+    containerColor: Color,
+    contentColor: Color
+) {
     Surface(
-        color = color.copy(alpha = 0.14f),
+        color = containerColor,
         shape = RoundedCornerShape(8.dp)
     ) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = color,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+            color = contentColor,
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
         )
     }
 }

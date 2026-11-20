@@ -111,7 +111,7 @@ fun HostSetupScreen(
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Text(
-                        text = "Choose Circuit, Arena, Stunts, or Hybrid Tour before opening lobby",
+                        text = "Configure mode & rules before opening lobby",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -572,7 +572,7 @@ fun HostSetupScreen(
                                 }
                             } else {
                                 Text(
-                                    text = "Starting on Lap 2, each driver receives 1 flashing red Mine!",
+                                    text = "1 flashing Mine activates per driver from Lap 2.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )

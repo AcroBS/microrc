@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.RaceAudioEngine
+import com.example.data.DailyChallengeCatalog
 import com.example.data.PreferencesRepository
 import com.example.data.TrackCatalog
 import com.example.model.ActiveGhostCarState
@@ -89,8 +90,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val rematchState: StateFlow<RematchCountdownState?> = raceManager.rematchState
     val activeChallengeGhost: StateFlow<GhostRunPlayback?> = raceManager.activeChallengeGhost
     val activeGhostCar: StateFlow<ActiveGhostCarState?> = raceManager.activeGhostCar
+    val isDailyChallengeSession: StateFlow<Boolean> = raceManager.isDailyChallenge
     val latestCompletedSoloRun: SharedFlow<CompletedSoloRunSummary> = raceManager.completedSoloRuns
     val navEvents: SharedFlow<RaceNavEvent> = raceManager.navEvents
+
+    val dailyNotificationsEnabled: StateFlow<Boolean> = prefsRepo.dailyNotificationsEnabledFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = true
+    )
+
+    val notificationPermissionPrompted: StateFlow<Boolean> = prefsRepo.notificationPermissionPromptedFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = false
+    )
 
     private val _overviewCamera = MutableStateFlow(false)
     val overviewCamera: StateFlow<Boolean> = _overviewCamera.asStateFlow()
@@ -272,6 +286,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startGhostChallenge(playback: GhostRunPlayback) {
+        val dailyDateKey = DailyChallengeCatalog.extractDateKey(playback.trackId)
+        if (dailyDateKey != null) {
+            startDailyChallenge(dateKey = dailyDateKey, customGhost = playback)
+            return
+        }
         val targetTrack = runCatching { TrackId.valueOf(playback.trackId) }
             .getOrDefault(TrackId.LIVING_ROOM_GP)
         startPureSoloForTrack(
@@ -280,6 +299,62 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             laps = playback.totalLaps,
             ghost = playback
         )
+    }
+
+    fun startDailyChallenge(
+        dateKey: String = DailyChallengeCatalog.todayDateKey(),
+        customGhost: GhostRunPlayback? = null
+    ) {
+        _lastRunWasPersonalBest.value = false
+        val normalizedDate = DailyChallengeCatalog.normalizeDateKey(dateKey)
+        val dailyTrack = DailyChallengeCatalog.dailyCustomTrack(normalizedDate)
+        val boardKey = DailyChallengeCatalog.boardKeyForDate(normalizedDate)
+        val ghostToUse = customGhost ?: localLeaderboard.value.find { it.boardKey == boardKey }
+            ?.takeIf { it.ghostFramesData.isNotBlank() }
+            ?.let { rec ->
+                val frames = GhostCodec.decodeFrames(rec.ghostFramesData)
+                if (frames.size >= 2) {
+                    GhostRunPlayback(
+                        ghostId = "local_${rec.boardKey}",
+                        driverName = "${rec.driverName} (PB)",
+                        carType = rec.carType,
+                        primaryColorArgb = rec.primaryColorArgb,
+                        accentColorArgb = rec.accentColorArgb,
+                        boardKey = rec.boardKey,
+                        trackId = rec.trackKey,
+                        totalLaps = rec.totalLaps,
+                        finishTimeMs = rec.bestRaceTimeMs,
+                        bestLapMs = rec.bestLapTimeMs,
+                        frames = frames
+                    )
+                } else {
+                    null
+                }
+            }
+        raceManager.startDailyChallengeSession(
+            profile = profile.value,
+            baseRules = rules.value,
+            customTrack = dailyTrack,
+            dateKey = normalizedDate,
+            challengeGhost = ghostToUse
+        )
+    }
+
+    fun restartActiveRace() {
+        _lastRunWasPersonalBest.value = false
+        raceManager.restartRace()
+    }
+
+    fun setDailyNotificationsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            prefsRepo.setDailyNotificationsEnabled(enabled)
+        }
+    }
+
+    fun markNotificationPermissionPrompted() {
+        viewModelScope.launch {
+            prefsRepo.markNotificationPermissionPrompted()
+        }
     }
 
     fun startSoloWithRules(setupRules: RaceRulesSettings) {

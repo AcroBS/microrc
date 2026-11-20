@@ -80,7 +80,7 @@ import com.example.model.RcCarType
 import com.example.model.RcColorPresets
 import com.example.sensors.TiltSteeringController
 import com.example.ui.components.drawRcCar
-import com.example.ui.theme.GoldTrophy
+import com.example.ui.theme.adaptiveGoldColor
 
 @Composable
 fun GarageScreen(
@@ -236,7 +236,7 @@ fun GarageScreen(
                         Spacer(modifier = Modifier.height(6.dp))
                         StatBarRow("Acceleration", selectedCar.accelStat, MaterialTheme.colorScheme.secondary)
                         Spacer(modifier = Modifier.height(6.dp))
-                        StatBarRow("Handling", selectedCar.handlingStat, GoldTrophy)
+                        StatBarRow("Handling", selectedCar.handlingStat, adaptiveGoldColor())
                         Spacer(modifier = Modifier.height(6.dp))
                         StatBarRow("Off-Road Grip", selectedCar.gripStat, MaterialTheme.colorScheme.tertiary)
                     }

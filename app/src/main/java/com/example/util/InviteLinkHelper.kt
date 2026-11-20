@@ -16,13 +16,27 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.example.MainActivity
 import com.example.R
+import com.example.data.DailyChallengeCatalog
 import com.example.model.GameMode
+import com.example.model.LeaderboardNotificationDoc
 import com.example.model.SessionInviteDoc
+import java.util.Locale
 
 data class PendingLobbyInvite(
     val roomCode: String,
     val joinToken: String = "",
     val inviteId: String = ""
+)
+
+data class PendingDailyChallengeRoute(
+    val dateKey: String
+)
+
+data class PendingLeaderboardRoute(
+    val boardKey: String,
+    val trackKey: String,
+    val gameMode: String,
+    val isDaily: Boolean = false
 )
 
 object InviteLinkHelper {
@@ -76,6 +90,37 @@ object InviteLinkHelper {
         val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
         if (!sharedText.isNullOrBlank()) {
             return parseInviteFromText(sharedText)
+        }
+        return null
+    }
+
+    fun parseDailyFromIntent(intent: Intent?): PendingDailyChallengeRoute? {
+        val uri = intent?.data ?: return null
+        val scheme = uri.scheme?.lowercase().orEmpty()
+        val host = uri.host?.lowercase().orEmpty()
+        if (scheme == CUSTOM_SCHEME && host == "daily") {
+            val rawDate = uri.getQueryParameter("date")
+            return PendingDailyChallengeRoute(dateKey = DailyChallengeCatalog.normalizeDateKey(rawDate))
+        }
+        return null
+    }
+
+    fun parseLeaderboardFromIntent(intent: Intent?): PendingLeaderboardRoute? {
+        val uri = intent?.data ?: return null
+        val scheme = uri.scheme?.lowercase().orEmpty()
+        val host = uri.host?.lowercase().orEmpty()
+        if (scheme == CUSTOM_SCHEME && host == "leaderboard") {
+            val boardKey = uri.getQueryParameter("boardKey")?.trim().orEmpty().take(96)
+            val trackKey = uri.getQueryParameter("trackKey")?.trim().orEmpty().take(64)
+            val gameMode = uri.getQueryParameter("gameMode")?.trim().orEmpty().ifEmpty { GameMode.RACE.name }
+            if (trackKey.isNotEmpty() || boardKey.isNotEmpty()) {
+                return PendingLeaderboardRoute(
+                    boardKey = boardKey,
+                    trackKey = trackKey,
+                    gameMode = gameMode,
+                    isDaily = DailyChallengeCatalog.isDailyTrackId(trackKey)
+                )
+            }
         }
         return null
     }
@@ -173,11 +218,36 @@ object InviteLinkHelper {
 
 object SessionNotificationHelper {
     private const val CHANNEL_ID = "microrc_session_invites"
+    private const val DAILY_CHANNEL_ID = "microrc_daily_challenge"
+    private const val LEADERBOARD_CHANNEL_ID = "microrc_leaderboard_alerts"
+    private const val NOTIF_PREFS_NAME = "microrc_notif_prefs"
+    private const val KEY_DELIVERED_LB_IDS = "delivered_leaderboard_notif_ids"
+
+    private val deliveredLock = Any()
+
+    /**
+     * Atomically marks a friend leaderboard notification ID as delivered across both
+     * foreground Firestore observers and periodic background receivers.
+     */
+    internal fun claimLeaderboardNotificationDelivery(context: Context, notifId: String): Boolean {
+        val cleanId = notifId.trim()
+        if (cleanId.isEmpty()) return false
+        synchronized(deliveredLock) {
+            val prefs = context.applicationContext.getSharedPreferences(NOTIF_PREFS_NAME, Context.MODE_PRIVATE)
+            val existing = prefs.getStringSet(KEY_DELIVERED_LB_IDS, emptySet()).orEmpty()
+            if (cleanId in existing) return false
+            val updated = existing.toMutableList()
+            updated.add(cleanId)
+            val trimmed = if (updated.size > 120) updated.takeLast(120) else updated
+            prefs.edit().putStringSet(KEY_DELIVERED_LB_IDS, trimmed.toSet()).apply()
+            return true
+        }
+    }
 
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
-            val channel = NotificationChannel(
+            val inviteChannel = NotificationChannel(
                 CHANNEL_ID,
                 context.getString(R.string.session_invite_channel_name),
                 NotificationManager.IMPORTANCE_HIGH
@@ -185,7 +255,23 @@ object SessionNotificationHelper {
                 description = context.getString(R.string.session_invite_channel_desc)
                 enableVibration(true)
             }
-            nm.createNotificationChannel(channel)
+            val dailyChannel = NotificationChannel(
+                DAILY_CHANNEL_ID,
+                context.getString(R.string.daily_challenge_channel_name),
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = context.getString(R.string.daily_challenge_channel_desc)
+            }
+            val leaderboardChannel = NotificationChannel(
+                LEADERBOARD_CHANNEL_ID,
+                context.getString(R.string.leaderboard_alert_channel_name),
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = context.getString(R.string.leaderboard_alert_channel_desc)
+            }
+            nm.createNotificationChannel(inviteChannel)
+            nm.createNotificationChannel(dailyChannel)
+            nm.createNotificationChannel(leaderboardChannel)
         }
     }
 
@@ -248,6 +334,123 @@ object SessionNotificationHelper {
 
         runCatching {
             NotificationManagerCompat.from(context).notify(requestCode, notification)
+        }
+    }
+
+    fun showDailyChallengeAvailableNotification(
+        context: Context,
+        dateKey: String,
+        trackName: String
+    ) {
+        if (!hasNotificationPermission(context)) return
+        ensureChannel(context)
+
+        val deepLinkUri = Uri.Builder()
+            .scheme("microrc")
+            .authority("daily")
+            .appendQueryParameter("date", dateKey)
+            .build()
+
+        val tapIntent = Intent(context, MainActivity::class.java).apply {
+            action = Intent.ACTION_VIEW
+            data = deepLinkUri
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+
+        val requestCode = ("daily_$dateKey").hashCode()
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            requestCode,
+            tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val dailyBody = "$trackName is live now — fair fixed track, fixed portals & 1 Nitro/lap."
+        val notification = NotificationCompat.Builder(context, DAILY_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_race_invite)
+            .setContentTitle("New Daily Challenge Available!")
+            .setContentText(dailyBody)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(dailyBody))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_EVENT)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        runCatching {
+            NotificationManagerCompat.from(context).notify(requestCode, notification)
+        }
+    }
+
+    fun showFriendLeaderboardRecordNotification(
+        context: Context,
+        notif: LeaderboardNotificationDoc
+    ): Boolean {
+        if (!hasNotificationPermission(context)) return false
+        val dedupeKey = notif.id.ifBlank { "${notif.senderUid}_${notif.boardKey}_${notif.bestRaceTimeMs}_${notif.bestScore}" }
+        if (!claimLeaderboardNotificationDelivery(context, dedupeKey)) return false
+        ensureChannel(context)
+
+        val deepLinkUri = Uri.Builder()
+            .scheme("microrc")
+            .authority("leaderboard")
+            .appendQueryParameter("boardKey", notif.boardKey)
+            .appendQueryParameter("trackKey", notif.trackKey)
+            .appendQueryParameter("gameMode", notif.gameMode)
+            .build()
+
+        val tapIntent = Intent(context, MainActivity::class.java).apply {
+            action = Intent.ACTION_VIEW
+            data = deepLinkUri
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+
+        val requestCode = dedupeKey.hashCode()
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            requestCode,
+            tapIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val metricText = if (notif.gameMode == GameMode.STUNTS.name) {
+            "${notif.bestScore} PTS"
+        } else {
+            formatNotifTimeMs(notif.bestRaceTimeMs)
+        }
+        val title = if (notif.dailyChallenge) {
+            "${notif.senderName} set a Daily Challenge time!"
+        } else {
+            "${notif.senderName} posted a new track record!"
+        }
+        val body = "${notif.trackName} • $metricText — Tap to view leaderboard & race their ghost"
+
+        val notification = NotificationCompat.Builder(context, LEADERBOARD_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_race_invite)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setCategory(NotificationCompat.CATEGORY_SOCIAL)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build()
+
+        return runCatching {
+            NotificationManagerCompat.from(context).notify(requestCode, notification)
+            true
+        }.getOrDefault(false)
+    }
+
+    fun formatNotifTimeMs(ms: Long): String {
+        val clamped = ms.coerceAtLeast(0L)
+        val minutes = (clamped / 60_000L).toInt()
+        val seconds = ((clamped % 60_000L) / 1000L).toInt()
+        val hundredths = ((clamped % 1000L) / 10L).toInt()
+        return if (minutes > 0) {
+            String.format(Locale.US, "%d:%02d.%02d", minutes, seconds, hundredths)
+        } else {
+            String.format(Locale.US, "%d.%02ds", seconds, hundredths)
         }
     }
 }

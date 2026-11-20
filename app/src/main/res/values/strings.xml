@@ -20,4 +20,8 @@
     <string name="notify_friends_title">Notify Friends to Join</string>
     <string name="session_invite_channel_name">Race Session Invites</string>
     <string name="session_invite_channel_desc">Alerts when a friend invites you to join an online MicroRC lobby</string>
+    <string name="daily_challenge_channel_name">Daily Challenge Alerts</string>
+    <string name="daily_challenge_channel_desc">Notifies when a new deterministic Daily GP map is available</string>
+    <string name="leaderboard_alert_channel_name">Friend Leaderboard Records</string>
+    <string name="leaderboard_alert_channel_desc">Alerts when a friend posts a new time or score to any track leaderboard</string>
 </resources>

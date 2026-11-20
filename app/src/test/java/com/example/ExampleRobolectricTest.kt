@@ -4,6 +4,7 @@ import android.content.Context
 import android.view.Surface
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -678,6 +679,54 @@ class ExampleRobolectricTest {
         } finally {
             scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
         }
+    }
+
+    @Test
+    fun homeScreen_separatesOfflineAndOnlineEntriesAndRemovesClutter() {
+        composeTestRule.waitForIdle()
+
+        // 1. Unnecessary clutter info messages (e.g. "No internet needed...") are removed
+        assertEquals(
+            0,
+            composeTestRule.onAllNodes(hasText("No internet needed", substring = true, ignoreCase = true))
+                .fetchSemanticsNodes().size
+        )
+
+        // 2. Both Offline (Wi-Fi lobby + Solo) and Online (Lobby, Friends, Daily, Leaderboards) sections are present under All Modes
+        composeTestRule.onNodeWithTag("home_scope_all").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_scope_offline").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_scope_online").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("home_offline_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("host_race_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("join_race_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("pure_solo_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("solo_race_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_hybrid_tour_button").performScrollTo().assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("online_play_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_friends_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("daily_challenge_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("leaderboards_button").performScrollTo().assertIsDisplayed()
+
+        // 3. Filtering to Offline hides Online section and keeps Wi-Fi / Solo actions immediately visible
+        composeTestRule.onNodeWithTag("home_scope_offline").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_offline_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_online_section").assertDoesNotExist()
+
+        // 4. Filtering to Online hides Offline section and keeps Online Lobby / Challenges / Leaderboards visible
+        composeTestRule.onNodeWithTag("home_scope_online").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_offline_section").assertDoesNotExist()
+
+        // 5. Restoring All Modes shows both entry pillars again
+        composeTestRule.onNodeWithTag("home_scope_all").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_offline_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
     }
 }
 

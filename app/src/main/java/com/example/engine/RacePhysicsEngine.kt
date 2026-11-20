@@ -46,7 +46,8 @@ class RacePhysicsEngine(
     stuntSequenceOverride: List<StuntVariant>? = null,
     private val isHybridTour: Boolean = false,
     private val hybridStageNumber: Int = 1,
-    private val nextHybridModeName: String? = null
+    private val nextHybridModeName: String? = null,
+    private val isDailyChallenge: Boolean = false
 ) {
     private data class MutableRacer(
         val playerId: String,
@@ -91,6 +92,7 @@ class RacePhysicsEngine(
         var botPowerUpDelayMs: Long = 0L,
         var minesAvailable: Int = 0,
         var lastMineGrantedLap: Int = 1,
+        var lastNitroGrantedLap: Int = 0,
         var botMineDelayMs: Long = 0L,
         var invertedSteerMs: Long = 0L,
         var portalCooldownMs: Long = 0L,
@@ -240,8 +242,113 @@ class RacePhysicsEngine(
                 flagX = fx
                 flagY = fy
             }
-            randomizeAllItemBoxes()
+            if (isDailyChallenge) {
+                itemBoxes.clear()
+                fieldPickups.clear()
+                nextFieldPickupSpawnMs = Long.MAX_VALUE
+                racers.forEach { r ->
+                    r.heldPowerUp = PowerUpType.TURBO_NITRO
+                    r.lastNitroGrantedLap = 1
+                    r.minesAvailable = 0
+                    r.lastMineGrantedLap = Int.MAX_VALUE
+                }
+                setupFixedDailyPortals()
+            } else {
+                randomizeAllItemBoxes()
+            }
         }
+    }
+
+    private fun computeDeterministicPortalSeed(): Long {
+        var h = 0x517CC1B727220A95L xor track.id.name.hashCode().toLong()
+        h = h * 31L + track.centerline.size.toLong()
+        track.centerline.forEachIndexed { idx, pt ->
+            if (idx % 4 == 0) {
+                h = h * 31L + (pt.x * 10f).toLong()
+                h = h * 31L + (pt.y * 10f).toLong()
+            }
+        }
+        return h
+    }
+
+    private fun setupFixedDailyPortals() {
+        val pts = track.centerline
+        if (pts.size < 24 || track.isArena || track.isStunt) {
+            portalPair = null
+            activePortalEntryIdx = -1
+            activePortalExitIdx = -1
+            return
+        }
+        val portalRng = Random(computeDeterministicPortalSeed())
+        val entryIsRed = portalRng.nextBoolean()
+        val maxSpan = (pts.size / 3).coerceIn(14, 34)
+        val minSpan = 10.coerceAtMost(maxSpan)
+        val span = if (maxSpan > minSpan) portalRng.nextInt(minSpan, maxSpan + 1) else minSpan
+        val minEntry = 8.coerceAtMost((pts.size / 6).coerceAtLeast(1))
+        val maxEntry = (pts.size - span - 5).coerceAtLeast(minEntry + 1)
+
+        var chosenEntryIdx = minEntry
+        var chosenEntryX = pts[minEntry].x
+        var chosenEntryY = pts[minEntry].y
+        var chosenExitIdx = (minEntry + span).coerceAtMost(pts.size - 4)
+        var chosenExitX = pts[chosenExitIdx].x
+        var chosenExitY = pts[chosenExitIdx].y
+        var chosenExitAng = 0f
+        var bestClearanceScore = -1f
+
+        val featurePoints = track.boostPads.map { it.x to it.y } + track.ramps.map { it.x to it.y }
+        repeat(8) {
+            val candidateEntryIdx = if (maxEntry > minEntry) portalRng.nextInt(minEntry, maxEntry) else minEntry
+            val candidateExitIdx = (candidateEntryIdx + span).coerceAtMost(pts.size - 4)
+
+            val ePt = pts[candidateEntryIdx]
+            val eNext = pts[(candidateEntryIdx + 1) % pts.size]
+            val eAng = atan2(eNext.y - ePt.y, eNext.x - ePt.x)
+            val eLat = (portalRng.nextFloat() * 2f - 1f) * (ePt.halfWidth * 0.28f)
+            val entryX = ePt.x + (-sin(eAng)) * eLat
+            val entryY = ePt.y + cos(eAng) * eLat
+
+            val xPt = pts[candidateExitIdx]
+            val xNext = pts[(candidateExitIdx + 1) % pts.size]
+            val exitAng = atan2(xNext.y - xPt.y, xNext.x - xPt.x)
+            val xLat = (portalRng.nextFloat() * 2f - 1f) * (xPt.halfWidth * 0.24f)
+            val exitX = xPt.x + (-sin(exitAng)) * xLat
+            val exitY = xPt.y + cos(exitAng) * xLat
+
+            val clearance = if (featurePoints.isEmpty()) {
+                999f
+            } else {
+                featurePoints.minOf { (fx, fy) ->
+                    minOf(
+                        TrackCatalog.distance(entryX, entryY, fx, fy),
+                        TrackCatalog.distance(exitX, exitY, fx, fy)
+                    )
+                }
+            }
+            if (clearance > bestClearanceScore) {
+                bestClearanceScore = clearance
+                chosenEntryIdx = candidateEntryIdx
+                chosenExitIdx = candidateExitIdx
+                chosenEntryX = entryX
+                chosenEntryY = entryY
+                chosenExitX = exitX
+                chosenExitY = exitY
+                chosenExitAng = exitAng
+            }
+        }
+
+        activePortalEntryIdx = chosenEntryIdx
+        activePortalExitIdx = chosenExitIdx
+        portalPair = PortalPairState(
+            id = nextPortalId++,
+            entryX = chosenEntryX,
+            entryY = chosenEntryY,
+            entryColorIsRed = entryIsRed,
+            exitX = chosenExitX,
+            exitY = chosenExitY,
+            exitAngleRad = chosenExitAng,
+            remainingMs = 3_600_000L
+        )
     }
 
     private fun randomizeAllItemBoxes() {
@@ -364,9 +471,14 @@ class RacePhysicsEngine(
     }
 
     fun grantMineForTest(playerId: String, count: Int = 1) {
-        if (isArenaMode || isStuntMode) return
+        if (isDailyChallenge || isArenaMode || isStuntMode) return
         val racer = racers.find { it.playerId == playerId } ?: return
         racer.minesAvailable = count.coerceIn(0, 1)
+    }
+
+    internal fun simulateCompleteLapForTest(playerId: String) {
+        val racer = racers.find { it.playerId == playerId } ?: return
+        onAdvanceToNextLap(racer)
     }
 
     fun spawnFieldPickupForTest(
@@ -613,7 +725,7 @@ class RacePhysicsEngine(
     }
 
     private fun updateFieldPickups(dtMs: Long) {
-        if (phase != RacePhase.RACING) return
+        if (isDailyChallenge || phase != RacePhase.RACING) return
 
         val it = fieldPickups.iterator()
         while (it.hasNext()) {
@@ -654,7 +766,7 @@ class RacePhysicsEngine(
     }
 
     private fun updatePortals(dtMs: Long) {
-        if (phase != RacePhase.RACING) return
+        if (isDailyChallenge || phase != RacePhase.RACING) return
 
         val current = portalPair
         if (current != null) {
@@ -816,27 +928,37 @@ class RacePhysicsEngine(
             }
         }
 
-        // Update item boxes respawn (relocates to a fresh random road/arena position on respawn)
+        // Update item boxes respawn (fixed spawn points for Daily Challenge; fresh random spot otherwise)
         for (i in itemBoxes.indices) {
             val box = itemBoxes[i]
             if (!box.available) {
                 val rem = (box.respawnMs - dtMs).coerceAtLeast(0L)
                 itemBoxes[i] = if (rem == 0L) {
-                    val avoid = buildList {
-                        racers.forEach { add(it.x to it.y) }
-                        itemBoxes.forEachIndexed { idx, other ->
-                            if (idx != i && other.available) add(other.x to other.y)
+                    if (isDailyChallenge) {
+                        val orig = track.itemSpawns.getOrNull(i)
+                        box.copy(
+                            x = orig?.x ?: box.x,
+                            y = orig?.y ?: box.y,
+                            available = true,
+                            respawnMs = 0L
+                        )
+                    } else {
+                        val avoid = buildList {
+                            racers.forEach { add(it.x to it.y) }
+                            itemBoxes.forEachIndexed { idx, other ->
+                                if (idx != i && other.available) add(other.x to other.y)
+                            }
+                            hazards.forEach { add(it.x to it.y) }
+                            if (isArenaMode) add(flagX to flagY)
                         }
-                        hazards.forEach { add(it.x to it.y) }
-                        if (isArenaMode) add(flagX to flagY)
+                        val (nx, ny) = TrackCatalog.sampleRandomItemBoxPoint(
+                            track = track,
+                            rng = random,
+                            avoidPoints = avoid,
+                            boundaryOverride = if (isArenaMode) currentArenaPolygon() else null
+                        )
+                        box.copy(x = nx, y = ny, available = true, respawnMs = 0L)
                     }
-                    val (nx, ny) = TrackCatalog.sampleRandomItemBoxPoint(
-                        track = track,
-                        rng = random,
-                        avoidPoints = avoid,
-                        boundaryOverride = if (isArenaMode) currentArenaPolygon() else null
-                    )
-                    box.copy(x = nx, y = ny, available = true, respawnMs = 0L)
                 } else {
                     box.copy(respawnMs = rem)
                 }
@@ -1764,7 +1886,7 @@ class RacePhysicsEngine(
     }
 
     private fun handleItemPickups(racer: MutableRacer) {
-        if (racer.heldPowerUp != null) return
+        if (isDailyChallenge || racer.heldPowerUp != null) return
         for (i in itemBoxes.indices) {
             val box = itemBoxes[i]
             if (box.available && TrackCatalog.distance(racer.x, racer.y, box.x, box.y) <= 44f) {
@@ -1801,7 +1923,7 @@ class RacePhysicsEngine(
     }
 
     private fun grantLapMineIfEligible(racer: MutableRacer): Boolean {
-        if (isArenaMode || racer.finished) return false
+        if (isDailyChallenge || isArenaMode || racer.finished) return false
         if (racer.lap >= 2 && racer.lap > racer.lastMineGrantedLap) {
             racer.lastMineGrantedLap = racer.lap
             racer.minesAvailable = 1
@@ -1813,8 +1935,18 @@ class RacePhysicsEngine(
         return false
     }
 
+    private fun grantDailyNitroIfEligible(racer: MutableRacer): Boolean {
+        if (!isDailyChallenge || racer.finished) return false
+        if (racer.lap > racer.lastNitroGrantedLap) {
+            racer.lastNitroGrantedLap = racer.lap
+            racer.heldPowerUp = PowerUpType.TURBO_NITRO
+            return true
+        }
+        return false
+    }
+
     private fun dropMine(racer: MutableRacer) {
-        if (isArenaMode || racer.minesAvailable <= 0) return
+        if (isDailyChallenge || isArenaMode || racer.minesAvailable <= 0) return
         racer.minesAvailable = 0
         val dropX = racer.x - cos(racer.angleRad) * 54f
         val dropY = racer.y - sin(racer.angleRad) * 54f
@@ -1833,7 +1965,7 @@ class RacePhysicsEngine(
     }
 
     private fun handleFieldPickups(racer: MutableRacer) {
-        if (racer.jumpZ > 0.30f || fieldPickups.isEmpty()) return
+        if (isDailyChallenge || racer.jumpZ > 0.30f || fieldPickups.isEmpty()) return
         val hitRadius = 40f + racer.carType.radiusPx * 0.45f
         val it = fieldPickups.iterator()
         while (it.hasNext()) {
@@ -2705,28 +2837,7 @@ class RacePhysicsEngine(
                     }
                     racer.racePoints += 50
 
-                    if (winCondition != WinCondition.TIME_TRIAL_DISTANCE && racer.lap >= effectiveLaps) {
-                        racer.finished = true
-                        racer.finishTimeMs = raceTimeMs
-                        if (!racer.isBot && firstHumanFinishTimeMs == null) {
-                            firstHumanFinishTimeMs = raceTimeMs
-                        }
-                        setBanner("${racer.name} finished!", 1800L)
-                    } else {
-                        racer.lap += 1
-                        racer.currentLapStartMs = raceTimeMs
-                        racer.sectorMask = 0b0001
-                        val mineArmed = grantLapMineIfEligible(racer)
-
-                        if (winCondition != WinCondition.TIME_TRIAL_DISTANCE && racer.lap == effectiveLaps) {
-                            setBanner(
-                                if (mineArmed) "${racer.name}: FINAL LAP — MINE READY!" else "${racer.name}: FINAL LAP!",
-                                1800L
-                            )
-                        } else if (mineArmed && !racer.isBot) {
-                            setBanner("${racer.name}: LAP ${racer.lap} — MINE READY!", 1600L)
-                        }
-                    }
+                    onAdvanceToNextLap(racer)
                 } else {
                     racer.sectorMask = racer.sectorMask or 0b0001
                 }
@@ -2748,6 +2859,38 @@ class RacePhysicsEngine(
                     if ((racer.sectorMask and 0b1000) == 0) racer.racePoints += 10
                     racer.sectorMask = racer.sectorMask or 0b1000
                 }
+            }
+        }
+    }
+
+    private fun onAdvanceToNextLap(racer: MutableRacer) {
+        if (winCondition != WinCondition.TIME_TRIAL_DISTANCE && racer.lap >= effectiveLaps) {
+            racer.finished = true
+            racer.finishTimeMs = raceTimeMs
+            if (!racer.isBot && firstHumanFinishTimeMs == null) {
+                firstHumanFinishTimeMs = raceTimeMs
+            }
+            setBanner("${racer.name} finished!", 1800L)
+        } else {
+            racer.lap += 1
+            racer.currentLapStartMs = raceTimeMs
+            racer.sectorMask = 0b0001
+            val mineArmed = grantLapMineIfEligible(racer)
+            val dailyNitroArmed = grantDailyNitroIfEligible(racer)
+
+            if (winCondition != WinCondition.TIME_TRIAL_DISTANCE && racer.lap == effectiveLaps) {
+                setBanner(
+                    when {
+                        dailyNitroArmed -> "${racer.name}: FINAL LAP — 1 NITRO READY!"
+                        mineArmed -> "${racer.name}: FINAL LAP — MINE READY!"
+                        else -> "${racer.name}: FINAL LAP!"
+                    },
+                    1800L
+                )
+            } else if (dailyNitroArmed && !racer.isBot) {
+                setBanner("${racer.name}: LAP ${racer.lap} — 1 NITRO READY!", 1600L)
+            } else if (mineArmed && !racer.isBot) {
+                setBanner("${racer.name}: LAP ${racer.lap} — MINE READY!", 1600L)
             }
         }
     }

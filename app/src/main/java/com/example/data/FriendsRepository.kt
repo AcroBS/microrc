@@ -4,8 +4,10 @@ import android.content.Context
 import com.example.R
 import com.example.model.DriverFriendCode
 import com.example.model.DriverProfileDoc
+import com.example.model.FriendUiModel
 import com.example.model.FriendshipDoc
 import com.example.model.GameMode
+import com.example.model.LeaderboardNotificationDoc
 import com.example.model.OnlineRoomDoc
 import com.example.model.PlayerProfile
 import com.example.model.SessionInviteDoc
@@ -539,6 +541,157 @@ class FriendsRepository(
         }
     }
 
+    // ========================================================================
+    // 4. Friend Leaderboard Time Alerts (/leaderboardNotifications/{notificationId})
+    // ========================================================================
+
+    suspend fun sendLeaderboardNotificationsToAllFriends(
+        senderProfile: PlayerProfile,
+        gameMode: GameMode,
+        trackKey: String,
+        trackName: String,
+        boardKey: String,
+        totalLaps: Int,
+        finishTimeMs: Long,
+        bestScore: Int,
+        dailyChallenge: Boolean
+    ): Result<Int> {
+        return try {
+            val uid = requireUserId()
+            val friendshipsSnap = try {
+                withFirestoreTimeout(8_000L, "friends notification server") {
+                    db.collection("friendships")
+                        .whereArrayContains("memberUids", uid)
+                        .get(Source.SERVER)
+                        .await()
+                }
+            } catch (_: Exception) {
+                withFirestoreTimeout(6_000L, "friends notification cache") {
+                    db.collection("friendships")
+                        .whereArrayContains("memberUids", uid)
+                        .get()
+                        .await()
+                }
+            }
+            val acceptedDocs = friendshipsSnap.documents.mapNotNull { doc ->
+                doc.toObject(
+                    FriendshipDoc::class.java,
+                    DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                )
+            }.filter { it.status == "ACCEPTED" && it.id.isNotBlank() }
+
+            if (acceptedDocs.isEmpty()) {
+                return Result.success(0)
+            }
+
+            val cleanSender = senderProfile.name.trim().take(24).ifEmpty { "Driver" }
+            val safeMode = when (gameMode) {
+                GameMode.STUNTS -> GameMode.STUNTS.name
+                GameMode.ARENA -> GameMode.ARENA.name
+                else -> GameMode.RACE.name
+            }
+            val cleanTrackKey = trackKey.trim().take(64).ifEmpty { "TRACK" }
+            val cleanTrackName = trackName.trim().take(48).ifEmpty { cleanTrackKey.take(48) }
+            val cleanBoardKey = boardKey.trim().take(96).ifEmpty { "${safeMode}_${cleanTrackKey}_3L" }
+            val safeLaps = totalLaps.coerceIn(1, 9).toLong()
+            val safeRaceMs = finishTimeMs.coerceIn(0L, 3_600_000L)
+            val safeScore = bestScore.coerceIn(0, 1_000_000).toLong()
+
+            var dispatchedCount = 0
+            for (friendship in acceptedDocs) {
+                val friendUid = if (friendship.requesterUid == uid) {
+                    friendship.receiverUid
+                } else {
+                    friendship.requesterUid
+                }
+                if (friendUid.isBlank() || friendUid == uid) continue
+
+                val notifId = "lb_${UUID.randomUUID().toString().replace("-", "").take(18)}"
+                val path = "leaderboardNotifications/$notifId"
+                runCatching {
+                    withFirestoreTimeout(6_000L, "leaderboard notification write") {
+                        db.collection("leaderboardNotifications").document(notifId)
+                            .set(
+                                mapOf(
+                                    "friendshipId" to friendship.id.take(128),
+                                    "senderUid" to uid,
+                                    "senderName" to cleanSender,
+                                    "senderCarType" to senderProfile.carType.name,
+                                    "senderColorArgb" to senderProfile.primaryColorArgb,
+                                    "recipientUid" to friendUid,
+                                    "gameMode" to safeMode,
+                                    "trackKey" to cleanTrackKey,
+                                    "trackName" to cleanTrackName,
+                                    "boardKey" to cleanBoardKey,
+                                    "totalLaps" to safeLaps,
+                                    "bestRaceTimeMs" to safeRaceMs,
+                                    "bestScore" to safeScore,
+                                    "dailyChallenge" to dailyChallenge,
+                                    "status" to "UNREAD",
+                                    "createdAt" to FieldValue.serverTimestamp(),
+                                    "updatedAt" to FieldValue.serverTimestamp()
+                                )
+                            ).await()
+                    }
+                    dispatchedCount++
+                }.onFailure { err ->
+                    rethrowIfRealCancellation(err)
+                    handleFirestoreError(err, OperationType.CREATE, path)
+                }
+            }
+            Result.success(dispatchedCount)
+        } catch (e: Exception) {
+            rethrowIfRealCancellation(e)
+            handleFirestoreError(e, OperationType.CREATE, "leaderboardNotifications")
+            Result.failure(e)
+        }
+    }
+
+    fun observeIncomingLeaderboardNotifications(uid: String): Flow<List<LeaderboardNotificationDoc>> {
+        return db.collection("leaderboardNotifications")
+            .whereEqualTo("recipientUid", uid)
+            .snapshots()
+            .map { snap ->
+                val nowSec = System.currentTimeMillis() / 1000L
+                snap.documents.mapNotNull { doc ->
+                    doc.toObject(
+                        LeaderboardNotificationDoc::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    )
+                }.filter { notif ->
+                    val createdSec = notif.createdAt?.seconds ?: nowSec
+                    notif.status == "UNREAD" && (nowSec - createdSec) <= 172_800L
+                }.sortedByDescending { it.createdAt?.seconds ?: 0L }
+            }
+            .catch { e ->
+                rethrowIfRealCancellation(e)
+                handleFirestoreError(e, OperationType.LIST, "leaderboardNotifications")
+                throw e
+            }
+    }
+
+    suspend fun dismissLeaderboardNotification(notificationId: String): Result<Unit> {
+        if (notificationId.isBlank()) return Result.success(Unit)
+        val path = "leaderboardNotifications/$notificationId"
+        return try {
+            requireUserId()
+            withFirestoreTimeout(6_000L, "leaderboard notification dismiss") {
+                db.collection("leaderboardNotifications").document(notificationId)
+                    .update(
+                        mapOf(
+                            "status" to "DISMISSED",
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            rethrowIfRealCancellation(e)
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
     suspend fun deleteAllUserSocialData(): Result<Unit> {
         val uid = auth.currentUser?.uid ?: return Result.success(Unit)
         return withContext(NonCancellable) {
@@ -568,6 +721,24 @@ class FriendsRepository(
                             .get()
                             .await()
                         receivedInvites.documents.forEach { doc -> doc.reference.delete().await() }
+                    }
+                }
+                runCatching {
+                    withTimeoutOrNull(4_000L) {
+                        val sentNotifs = db.collection("leaderboardNotifications")
+                            .whereEqualTo("senderUid", uid)
+                            .get()
+                            .await()
+                        sentNotifs.documents.forEach { doc -> doc.reference.delete().await() }
+                    }
+                }
+                runCatching {
+                    withTimeoutOrNull(4_000L) {
+                        val receivedNotifs = db.collection("leaderboardNotifications")
+                            .whereEqualTo("recipientUid", uid)
+                            .get()
+                            .await()
+                        receivedNotifs.documents.forEach { doc -> doc.reference.delete().await() }
                     }
                 }
                 runCatching {

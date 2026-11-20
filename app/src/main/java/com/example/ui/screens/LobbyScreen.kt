@@ -100,8 +100,8 @@ import com.example.network.SessionRole
 import com.example.ui.components.ShareLobbyInviteDialog
 import com.example.ui.components.drawRcCar
 import com.example.ui.components.drawTrackMiniMap
-import com.example.ui.theme.ElectricCyan
-import com.example.ui.theme.GoldTrophy
+import com.example.ui.theme.adaptiveGhostAccentColor
+import com.example.ui.theme.adaptiveGoldColor
 import com.example.util.InviteLinkHelper
 
 @Composable
@@ -214,7 +214,7 @@ fun LobbyScreen(
                                 Icon(
                                     Icons.Default.Lock,
                                     contentDescription = "Password Protected",
-                                    tint = GoldTrophy,
+                                    tint = adaptiveGoldColor(),
                                     modifier = Modifier.size(13.dp)
                                 )
                             }
@@ -436,10 +436,11 @@ fun LobbyScreen(
                 // Solo Ghost Challenge Banner or Pick Rival Ghost CTA
                 if (role == SessionRole.Solo && !isArenaMode && !isStuntsMode && !isHybridMode) {
                     if (activeChallengeGhost != null) {
+                        val ghostAccent = adaptiveGhostAccentColor()
                         Surface(
                             color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
                             shape = RoundedCornerShape(16.dp),
-                            border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.7f)),
+                            border = BorderStroke(1.dp, ghostAccent.copy(alpha = 0.7f)),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("lobby_ghost_banner")
@@ -459,7 +460,7 @@ fun LobbyScreen(
                                     Icon(
                                         Icons.Default.DirectionsCar,
                                         contentDescription = null,
-                                        tint = ElectricCyan,
+                                        tint = ghostAccent,
                                         modifier = Modifier.size(20.dp)
                                     )
                                     Column {
@@ -516,7 +517,7 @@ fun LobbyScreen(
                                     Icon(
                                         Icons.Default.EmojiEvents,
                                         contentDescription = null,
-                                        tint = GoldTrophy,
+                                        tint = adaptiveGoldColor(),
                                         modifier = Modifier.size(18.dp)
                                     )
                                     Text(
@@ -1178,7 +1179,7 @@ fun LobbyScreen(
                                             maxLines = 1
                                         )
                                         if (player.isHost) {
-                                            Icon(Icons.Default.Star, contentDescription = "Host", tint = GoldTrophy, modifier = Modifier.size(15.dp))
+                                            Icon(Icons.Default.Star, contentDescription = "Host", tint = adaptiveGoldColor(), modifier = Modifier.size(15.dp))
                                         }
                                         if (player.isBot) {
                                             Icon(Icons.Default.SmartToy, contentDescription = "AI Bot", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(15.dp))

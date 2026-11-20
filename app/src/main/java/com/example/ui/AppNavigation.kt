@@ -1,10 +1,22 @@
 package com.example.ui
 
-import androidx.compose.foundation.layout.Box
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.AlertDialog
@@ -12,6 +24,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -41,12 +54,15 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.data.DailyChallengeCatalog
 import com.example.data.FriendsRepository
 import com.example.data.OnlineRaceRepository
+import com.example.model.GameMode
 import com.example.model.OnlineRoomDoc
 import com.example.network.RaceNavEvent
 import com.example.network.SessionRole
 import com.example.ui.auth.GoogleAuthManager
+import com.example.ui.components.LiveLeaderboardNotificationBanner
 import com.example.ui.components.LiveSessionInviteBanner
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.FriendsScreen
@@ -62,7 +78,9 @@ import com.example.ui.screens.RaceScreen
 import com.example.ui.screens.ResultsScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.TrackEditorScreen
-import com.example.ui.theme.GoldTrophy
+import com.example.ui.theme.adaptiveGoldColor
+import com.example.util.PendingDailyChallengeRoute
+import com.example.util.PendingLeaderboardRoute
 import com.example.util.PendingLobbyInvite
 import com.example.util.SessionNotificationHelper
 import com.google.firebase.Firebase
@@ -86,11 +104,21 @@ object Routes {
     const val RESULTS = "results"
 }
 
+private sealed interface GlobalTopBannerState {
+    data class SessionInvite(val invite: com.example.model.SessionInviteDoc) : GlobalTopBannerState
+    data class LeaderboardRecord(val notification: com.example.model.LeaderboardNotificationDoc) : GlobalTopBannerState
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MicroRCApp(
     viewModel: MainViewModel = viewModel(),
     pendingInvite: PendingLobbyInvite? = null,
-    onConsumePendingInvite: () -> Unit = {}
+    onConsumePendingInvite: () -> Unit = {},
+    pendingDailyRoute: PendingDailyChallengeRoute? = null,
+    onConsumePendingDailyRoute: () -> Unit = {},
+    pendingLeaderboardRoute: PendingLeaderboardRoute? = null,
+    onConsumePendingLeaderboardRoute: () -> Unit = {}
 ) {
     val navController = rememberNavController()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -103,6 +131,10 @@ fun MicroRCApp(
     var globalLockedRoomPrompt by remember { mutableStateOf<OnlineRoomDoc?>(null) }
     var globalLockedPasswordDraft by remember { mutableStateOf("") }
     val notifiedInviteIds = remember { mutableSetOf<String>() }
+    val notifiedLeaderboardIds = remember { mutableSetOf<String>() }
+    var leaderboardInitialDaily by remember { mutableStateOf(false) }
+    var leaderboardInitialMode by remember { mutableStateOf<GameMode?>(null) }
+    var leaderboardInitialTrackKey by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(currentRoute) {
         if (currentRoute != null && currentRoute != Routes.RACE) {
@@ -126,6 +158,8 @@ fun MicroRCApp(
     val offlineRematchState by viewModel.rematchState.collectAsState()
     val activeChallengeGhost by viewModel.activeChallengeGhost.collectAsState()
     val activeGhostCar by viewModel.activeGhostCar.collectAsState()
+    val isDailyChallengeSession by viewModel.isDailyChallengeSession.collectAsState()
+    val dailyNotificationsEnabled by viewModel.dailyNotificationsEnabled.collectAsState()
     val lastRunWasPersonalBest by viewModel.lastRunWasPersonalBest.collectAsState()
     val overviewCamera by viewModel.overviewCamera.collectAsState()
 
@@ -272,6 +306,33 @@ fun MicroRCApp(
         }
     }
 
+    // Handle deep link / notification click into today's Daily Challenge
+    LaunchedEffect(pendingDailyRoute) {
+        if (pendingDailyRoute != null) {
+            leaderboardInitialDaily = true
+            leaderboardInitialMode = GameMode.RACE
+            leaderboardInitialTrackKey = null
+            onConsumePendingDailyRoute()
+            navController.navigate(Routes.LEADERBOARD) {
+                popUpTo(Routes.HOME)
+                launchSingleTop = true
+            }
+        }
+    }
+
+    // Handle deep link / notification click into a Friend Leaderboard record alert
+    LaunchedEffect(pendingLeaderboardRoute) {
+        val route = pendingLeaderboardRoute ?: return@LaunchedEffect
+        leaderboardInitialDaily = route.isDaily
+        leaderboardInitialMode = runCatching { GameMode.valueOf(route.gameMode) }.getOrNull()
+        leaderboardInitialTrackKey = route.trackKey.takeIf { it.isNotBlank() }
+        onConsumePendingLeaderboardRoute()
+        navController.navigate(Routes.LEADERBOARD) {
+            popUpTo(Routes.HOME)
+            launchSingleTop = true
+        }
+    }
+
     val onlineRole = activeOnlineVm?.let { it.role.collectAsState().value } ?: SessionRole.None
     val isOnlineSession = onlineRole.isOnline && activeOnlineVm != null
     val sessionRole = if (isOnlineSession) onlineRole else offlineRole
@@ -287,6 +348,9 @@ fun MicroRCApp(
     val incomingFriendRequests = activeOnlineVm?.let { it.incomingFriendRequests.collectAsState().value }.orEmpty()
     val outgoingFriendRequests = activeOnlineVm?.let { it.outgoingFriendRequests.collectAsState().value }.orEmpty()
     val incomingSessionInvites = activeOnlineVm?.let { it.incomingSessionInvites.collectAsState().value }.orEmpty()
+    val incomingLeaderboardNotifications = activeOnlineVm?.let {
+        it.incomingLeaderboardNotifications.collectAsState().value
+    }.orEmpty()
     val socialFeedback = activeOnlineVm?.let { it.socialFeedback.collectAsState().value }
 
     val onlineFriendsCount = remember(friendsList) { friendsList.count { it.effectivelyOnline } }
@@ -304,6 +368,15 @@ fun MicroRCApp(
             val alreadyInThatRoom = onlineRoom?.roomCode == inv.roomCode
             if (inv.id.isNotBlank() && notifiedInviteIds.add(inv.id) && !alreadyInThatRoom) {
                 SessionNotificationHelper.showSessionInviteNotification(context, inv)
+            }
+        }
+    }
+
+    // Trigger Android system notification when friends post new leaderboard records
+    LaunchedEffect(incomingLeaderboardNotifications) {
+        incomingLeaderboardNotifications.forEach { notif ->
+            if (notif.id.isNotBlank() && notifiedLeaderboardIds.add(notif.id)) {
+                SessionNotificationHelper.showFriendLeaderboardRecordNotification(context, notif)
             }
         }
     }
@@ -353,24 +426,121 @@ fun MicroRCApp(
     val topBannerInvite = incomingSessionInvites.firstOrNull { inv ->
         onlineRoom?.roomCode != inv.roomCode
     }
+    val topBannerLeaderboardNotif = if (topBannerInvite == null) {
+        incomingLeaderboardNotifications.firstOrNull()
+    } else {
+        null
+    }
+    val activeTopBanner: GlobalTopBannerState? = when {
+        currentRoute == Routes.RACE || globalLockedRoomPrompt != null -> null
+        topBannerInvite != null -> GlobalTopBannerState.SessionInvite(topBannerInvite)
+        topBannerLeaderboardNotif != null -> GlobalTopBannerState.LeaderboardRecord(topBannerLeaderboardNotif)
+        else -> null
+    }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .animateContentSize()
+    ) {
+        // Non-overlapping global notification slot pushed above NavHost content so headers/back buttons are never covered
+        if (activeTopBanner != null) {
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.statusBars)
+            ) {
+                AnimatedContent(
+                    targetState = activeTopBanner,
+                    transitionSpec = { fadeIn() togetherWith fadeOut() },
+                    label = "globalTopBanner"
+                ) { bannerState ->
+                    when (bannerState) {
+                        is GlobalTopBannerState.SessionInvite -> LiveSessionInviteBanner(
+                            invite = bannerState.invite,
+                            applyStatusBarInsets = false,
+                            onAccept = { invite ->
+                                activeOnlineVm?.acceptSessionInvite(
+                                    invite = invite,
+                                    profile = profile,
+                                    onBeforeJoin = { viewModel.leaveSession() },
+                                    onPasswordRequired = { lockedRoom ->
+                                        globalLockedPasswordDraft = ""
+                                        globalLockedRoomPrompt = lockedRoom
+                                    }
+                                )
+                            },
+                            onDecline = { invite ->
+                                activeOnlineVm?.declineSessionInvite(invite.id)
+                            }
+                        )
+                        is GlobalTopBannerState.LeaderboardRecord -> LiveLeaderboardNotificationBanner(
+                            notification = bannerState.notification,
+                            applyStatusBarInsets = false,
+                            onViewLeaderboard = { notif ->
+                                activeOnlineVm?.dismissLeaderboardNotification(notif.id)
+                                leaderboardInitialDaily = notif.dailyChallenge
+                                leaderboardInitialMode = runCatching { GameMode.valueOf(notif.gameMode) }.getOrNull()
+                                leaderboardInitialTrackKey = notif.trackKey.takeIf { it.isNotBlank() }
+                                navController.navigate(Routes.LEADERBOARD) {
+                                    popUpTo(Routes.HOME)
+                                    launchSingleTop = true
+                                }
+                            },
+                            onDismiss = { notif ->
+                                activeOnlineVm?.dismissLeaderboardNotification(notif.id)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
         NavHost(
             navController = navController,
-            startDestination = Routes.HOME
+            startDestination = Routes.HOME,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .then(
+                    if (activeTopBanner != null) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier
+                )
         ) {
             composable(Routes.HOME) {
+                val todayKey = remember { DailyChallengeCatalog.todayDateKey() }
+                val todayBoardKey = remember(todayKey) { DailyChallengeCatalog.boardKeyForDate(todayKey) }
+                val todayPbTime = remember(localLeaderboard, todayBoardKey) {
+                    localLeaderboard.find { it.boardKey == todayBoardKey }?.bestRaceTimeMs
+                }
                 HomeScreen(
                     profile = profile,
                     onHostRace = { navController.navigate(Routes.HOST_SETUP) },
                     onJoinRace = { navController.navigate(Routes.BROWSER) },
                     onSoloRace = { viewModel.startSolo() },
                     onPureSoloRace = { viewModel.startPureSolo() },
+                    onOpenDailyChallenge = {
+                        leaderboardInitialDaily = true
+                        leaderboardInitialMode = GameMode.RACE
+                        leaderboardInitialTrackKey = null
+                        navController.navigate(Routes.LEADERBOARD)
+                    },
+                    dailyChallengeTitle = DailyChallengeCatalog.resolveTrackDisplayName(
+                        DailyChallengeCatalog.trackIdForDate(todayKey)
+                    ),
+                    dailyChallengeResetLabel = "Resets in ${DailyChallengeCatalog.formatCountdownUntilReset()}",
+                    dailyBestTimeMs = todayPbTime,
                     onOpenOnlinePlay = { navController.navigate(Routes.ONLINE_HUB) },
                     onOpenFriends = { navController.navigate(Routes.FRIENDS) },
                     onlineFriendsCount = onlineFriendsCount,
                     pendingRequestsCount = incomingFriendRequests.size,
-                    onOpenLeaderboards = { navController.navigate(Routes.LEADERBOARD) },
+                    onOpenLeaderboards = {
+                        leaderboardInitialDaily = false
+                        leaderboardInitialMode = null
+                        leaderboardInitialTrackKey = null
+                        navController.navigate(Routes.LEADERBOARD)
+                    },
                     onOpenHybridSetup = { navController.navigate(Routes.HYBRID_SETUP) },
                     onOpenGarage = { navController.navigate(Routes.GARAGE) },
                     onOpenTrackEditor = { navController.navigate(Routes.TRACK_EDITOR) },
@@ -548,10 +718,17 @@ fun MicroRCApp(
                     isLoadingCloud = isLoadingCloud,
                     ghostLoadingId = ghostLoadingId,
                     cloudStatusMessage = cloudStatus,
+                    initialTabDaily = leaderboardInitialDaily,
+                    initialMode = leaderboardInitialMode,
+                    initialTrackKey = leaderboardInitialTrackKey,
                     onSelectBoardKey = { key -> onlineVm?.observeLeaderboardForBoard(key) },
                     onStartPureSoloForTrack = { mode, trackId, laps, ghost ->
                         onlineVm?.leaveRoom()
                         viewModel.startPureSoloForTrack(mode, trackId, laps, ghost)
+                    },
+                    onStartDailyChallenge = { dateKey, ghost ->
+                        onlineVm?.leaveRoom()
+                        viewModel.startDailyChallenge(dateKey = dateKey, customGhost = ghost)
                     },
                     onChallengeCloudGhost = { entry ->
                         onlineVm?.loadGhostRunForChallenge(entry.ghostId) { playback ->
@@ -619,6 +796,7 @@ fun MicroRCApp(
                 SettingsScreen(
                     rules = effectiveRules,
                     audioSettings = audioSettings,
+                    dailyNotificationsEnabled = dailyNotificationsEnabled,
                     canEditRules = canEdit,
                     inSession = sessionRole != SessionRole.None,
                     onUpdateRules = { updatedRules ->
@@ -628,6 +806,7 @@ fun MicroRCApp(
                         viewModel.updateRaceRules(updatedRules)
                     },
                     onUpdateAudio = viewModel::updateAudioSettings,
+                    onToggleDailyNotifications = viewModel::setDailyNotificationsEnabled,
                     onBack = { navController.popBackStack() }
                 )
             }
@@ -797,6 +976,8 @@ fun MicroRCApp(
                     hapticController = viewModel.hapticController,
                     overviewCamera = overviewCamera,
                     tiltController = viewModel.tiltController,
+                    canRestart = !isOnlineSession && (offlineRole == SessionRole.Host || offlineRole == SessionRole.Solo),
+                    isDailyChallenge = !isOnlineSession && isDailyChallengeSession,
                     onToggleOverviewCamera = viewModel::toggleOverviewCamera,
                     onUpdateControlInput = { throttle, steer ->
                         if (isOnlineSession) {
@@ -821,6 +1002,7 @@ fun MicroRCApp(
                     },
                     onSwitchControlMode = viewModel::updateControlSettings,
                     onUpdateAudioSettings = viewModel::updateAudioSettings,
+                    onRestartRace = { viewModel.restartActiveRace() },
                     onLeaveRace = {
                         if (isOnlineSession) {
                             onlineVm?.leaveRoom()
@@ -849,9 +1031,23 @@ fun MicroRCApp(
                     lobby = lobbyState,
                     rematchState = rematchState,
                     isNewPersonalBest = !isOnlineSession && lastRunWasPersonalBest,
+                    isDailyChallenge = !isOnlineSession && isDailyChallengeSession,
                     challengeGhost = if (!isOnlineSession) activeChallengeGhost else null,
+                    onRetryDailyChallenge = if (!isOnlineSession && isDailyChallengeSession) {
+                        {
+                            val dateKey = DailyChallengeCatalog.extractDateKey(lastResults?.trackId)
+                                ?: DailyChallengeCatalog.todayDateKey()
+                            val ghostToKeep = activeChallengeGhost
+                            viewModel.startDailyChallenge(dateKey = dateKey, customGhost = ghostToKeep)
+                        }
+                    } else {
+                        null
+                    },
                     onOpenLeaderboards = if (!isOnlineSession) {
                         {
+                            leaderboardInitialDaily = isDailyChallengeSession
+                            leaderboardInitialMode = GameMode.RACE
+                            leaderboardInitialTrackKey = null
                             viewModel.leaveSession()
                             navController.navigate(Routes.LEADERBOARD) {
                                 popUpTo(Routes.HOME)
@@ -882,28 +1078,6 @@ fun MicroRCApp(
                 )
             }
         }
-
-        // Global Live Session Invite Banner (hidden during active race to keep HUD clear)
-        if (currentRoute != Routes.RACE) {
-            LiveSessionInviteBanner(
-                invite = topBannerInvite,
-                onAccept = { invite ->
-                    activeOnlineVm?.acceptSessionInvite(
-                        invite = invite,
-                        profile = profile,
-                        onBeforeJoin = { viewModel.leaveSession() },
-                        onPasswordRequired = { lockedRoom ->
-                            globalLockedPasswordDraft = ""
-                            globalLockedRoomPrompt = lockedRoom
-                        }
-                    )
-                },
-                onDecline = { invite ->
-                    activeOnlineVm?.declineSessionInvite(invite.id)
-                },
-                modifier = Modifier.align(Alignment.TopCenter)
-            )
-        }
     }
 
     val lockedRoom = globalLockedRoomPrompt
@@ -912,7 +1086,7 @@ fun MicroRCApp(
             onDismissRequest = { globalLockedRoomPrompt = null },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Lock, contentDescription = null, tint = GoldTrophy)
+                    Icon(Icons.Default.Lock, contentDescription = null, tint = adaptiveGoldColor())
                     Text(
                         text = "  Enter Group Password",
                         style = MaterialTheme.typography.titleLarge

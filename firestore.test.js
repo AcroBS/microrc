@@ -521,3 +521,139 @@ test("Leaderboards & GhostRuns: Kotlin-aligned create, partial update, filtered 
     })
   );
 });
+
+test("LeaderboardNotifications: accepted friends can notify, outsiders blocked, recipient dismiss only & metric immutability", async () => {
+  const hostDb = testEnv.authenticatedContext(HOST_UID).firestore();
+  const bro2Db = testEnv.authenticatedContext(BRO2_UID).firestore();
+  const bro3Db = testEnv.authenticatedContext(BRO3_UID).firestore();
+  const outsiderDb = testEnv.authenticatedContext(OUTSIDER_UID).firestore();
+  const fTs = new Date(Date.now() - 3000);
+  const nTs = new Date(Date.now() - 1000);
+  const friendshipId = `${HOST_UID}_${BRO2_UID}`;
+  const pendingFriendshipId = `${HOST_UID}_${BRO3_UID}`;
+
+  // Seed driverProfiles required by friendships create rule
+  await assertSucceeds(
+    hostDb.collection("driverProfiles").doc(HOST_UID).set(makeDriverProfilePayload(HOST_UID, "Alex", "RCALEX01"))
+  );
+  await assertSucceeds(
+    bro2Db.collection("driverProfiles").doc(BRO2_UID).set(makeDriverProfilePayload(BRO2_UID, "Sam", "RCSAM002"))
+  );
+  await assertSucceeds(
+    bro3Db.collection("driverProfiles").doc(BRO3_UID).set(makeDriverProfilePayload(BRO3_UID, "Leo", "RCLEO003"))
+  );
+
+  // Seed a PENDING and an ACCEPTED friendship
+  await assertSucceeds(
+    hostDb.collection("friendships").doc(pendingFriendshipId).set({
+      memberUids: [HOST_UID, BRO3_UID],
+      requesterUid: HOST_UID,
+      requesterName: "Alex",
+      requesterFriendCode: "RCALEX01",
+      receiverUid: BRO3_UID,
+      receiverName: "Leo",
+      receiverFriendCode: "RCLEO003",
+      status: "PENDING",
+      createdAt: fTs,
+      updatedAt: fTs,
+    })
+  );
+  await assertSucceeds(
+    hostDb.collection("friendships").doc(friendshipId).set({
+      memberUids: [HOST_UID, BRO2_UID],
+      requesterUid: HOST_UID,
+      requesterName: "Alex",
+      requesterFriendCode: "RCALEX01",
+      receiverUid: BRO2_UID,
+      receiverName: "Sam",
+      receiverFriendCode: "RCSAM002",
+      status: "PENDING",
+      createdAt: fTs,
+      updatedAt: fTs,
+    })
+  );
+  await assertSucceeds(
+    bro2Db.collection("friendships").doc(friendshipId).update({
+      status: "ACCEPTED",
+      receiverName: "Sam",
+      updatedAt: new Date(Date.now() - 2000),
+    })
+  );
+
+  const notifPayload = {
+    friendshipId,
+    senderUid: HOST_UID,
+    senderName: "Alex",
+    senderCarType: "VOLT_BUGGY",
+    senderColorArgb: -43230,
+    recipientUid: BRO2_UID,
+    gameMode: "RACE",
+    trackKey: "daily_20261120",
+    trackName: "Daily GP (Nov 20)",
+    boardKey: "RACE_daily_20261120_3L",
+    totalLaps: 3,
+    bestRaceTimeMs: 41250,
+    bestScore: 0,
+    dailyChallenge: true,
+    status: "UNREAD",
+    createdAt: nTs,
+    updatedAt: nTs,
+  };
+
+  // Pending (not yet accepted) friendship cannot trigger notifications
+  await assertFails(
+    hostDb.collection("leaderboardNotifications").doc("lb_pending_1").set({
+      ...notifPayload,
+      friendshipId: pendingFriendshipId,
+      recipientUid: BRO3_UID,
+    })
+  );
+
+  // Outsider forging notification using someone else's accepted friendship is denied
+  await assertFails(
+    outsiderDb.collection("leaderboardNotifications").doc("lb_forged_1").set({
+      ...notifPayload,
+      senderUid: OUTSIDER_UID,
+    })
+  );
+
+  // Accepted friend successfully sends leaderboard notification
+  await assertSucceeds(
+    hostDb.collection("leaderboardNotifications").doc("lb_valid_1").set(notifPayload)
+  );
+
+  // Recipient can list their notifications; outsider cannot read or list
+  await assertSucceeds(
+    bro2Db
+      .collection("leaderboardNotifications")
+      .where("recipientUid", "==", BRO2_UID)
+      .get()
+  );
+  await assertFails(outsiderDb.collection("leaderboardNotifications").doc("lb_valid_1").get());
+  await assertFails(outsiderDb.collection("leaderboardNotifications").get());
+
+  // Cannot tamper with posted time while updating
+  await assertFails(
+    bro2Db.collection("leaderboardNotifications").doc("lb_valid_1").update({
+      status: "DISMISSED",
+      bestRaceTimeMs: 12000,
+      updatedAt: new Date(Date.now() - 200),
+    })
+  );
+
+  // Sender cannot dismiss on behalf of recipient
+  await assertFails(
+    hostDb.collection("leaderboardNotifications").doc("lb_valid_1").update({
+      status: "DISMISSED",
+      updatedAt: new Date(Date.now() - 200),
+    })
+  );
+
+  // Recipient cleanly dismisses the alert
+  await assertSucceeds(
+    bro2Db.collection("leaderboardNotifications").doc("lb_valid_1").update({
+      status: "DISMISSED",
+      updatedAt: new Date(Date.now() - 100),
+    })
+  );
+});

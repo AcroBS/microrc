@@ -78,10 +78,10 @@ import com.example.model.OnlineRoomDoc
 import com.example.model.PlayerProfile
 import com.example.model.RcCarType
 import com.example.ui.components.drawRcCar
+import com.example.ui.theme.adaptiveOnlineColor
 import com.example.util.InviteLinkHelper
 import com.example.util.SessionNotificationHelper
 
-private val LiveOnlineDot = Color(0xFF00E676)
 private val WhatsAppGreen = Color(0xFF25D366)
 
 @Composable
@@ -176,7 +176,7 @@ fun FriendsScreen(
                             Text(
                                 text = "${onlineFriends.size} Online • ${friends.size} Total Friends",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (onlineFriends.isNotEmpty()) LiveOnlineDot else MaterialTheme.colorScheme.onSurfaceVariant
+                                color = if (onlineFriends.isNotEmpty()) adaptiveOnlineColor() else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -242,12 +242,12 @@ fun FriendsScreen(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Enable Session Invite Alerts",
+                                    text = "Enable Friend & Record Alerts",
                                     style = MaterialTheme.typography.titleSmall,
                                     color = MaterialTheme.colorScheme.onTertiaryContainer
                                 )
                                 Text(
-                                    text = "Get notified when friends invite you to race together.",
+                                    text = "Get system notifications when friends post new track times or invite you to race.",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onTertiaryContainer
                                 )
@@ -676,6 +676,7 @@ private fun FriendStatusCard(
 ) {
     val canJoinTheirRoom = friend.canJoinActiveLobby &&
         friend.activeRoomCode != currentRoomCode
+    val liveOnlineColor = adaptiveOnlineColor()
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -683,7 +684,7 @@ private fun FriendStatusCard(
         border = BorderStroke(
             1.dp,
             if (friend.effectivelyOnline) {
-                LiveOnlineDot.copy(alpha = 0.55f)
+                liveOnlineColor.copy(alpha = 0.55f)
             } else {
                 MaterialTheme.colorScheme.outlineVariant
             }
@@ -724,7 +725,7 @@ private fun FriendStatusCard(
                             .size(11.dp)
                             .clip(CircleShape)
                             .background(
-                                if (friend.effectivelyOnline) LiveOnlineDot else MaterialTheme.colorScheme.outline
+                                if (friend.effectivelyOnline) liveOnlineColor else MaterialTheme.colorScheme.outline
                             )
                     )
                 }
@@ -754,7 +755,7 @@ private fun FriendStatusCard(
                         text = friend.statusLabel,
                         style = MaterialTheme.typography.labelMedium,
                         color = if (friend.effectivelyOnline) {
-                            LiveOnlineDot
+                            liveOnlineColor
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         },

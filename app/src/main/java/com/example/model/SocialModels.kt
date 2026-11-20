@@ -71,6 +71,29 @@ data class SessionInviteDoc(
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
+@Keep
+@IgnoreExtraProperties
+data class LeaderboardNotificationDoc(
+    @DocumentId val id: String = "",
+    val friendshipId: String = "",
+    val senderUid: String = "",
+    val senderName: String = "",
+    val senderCarType: String = RcCarType.VOLT_BUGGY.name,
+    val senderColorArgb: Long = 0xFFFF5722,
+    val recipientUid: String = "",
+    val gameMode: String = GameMode.RACE.name,
+    val trackKey: String = "",
+    val trackName: String = "",
+    val boardKey: String = "",
+    val totalLaps: Long = 3L,
+    val bestRaceTimeMs: Long = 0L,
+    val bestScore: Long = 0L,
+    val dailyChallenge: Boolean = false,
+    val status: String = "UNREAD",
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
 // ============================================================================
 // UI Presentation Models & Deterministic Friend Code Helper
 // ============================================================================

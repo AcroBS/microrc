@@ -66,12 +66,13 @@ import com.example.model.RematchCountdownState
 import com.example.model.TrackId
 import com.example.model.WinCondition
 import com.example.network.SessionRole
-import com.example.ui.theme.AcidLime
 import com.example.ui.theme.BronzeMedal
-import com.example.ui.theme.ElectricCyan
-import com.example.ui.theme.GoldTrophy
 import com.example.ui.theme.SignalOrange
 import com.example.ui.theme.SilverMedal
+import com.example.ui.theme.adaptiveGhostAccentColor
+import com.example.ui.theme.adaptiveGoldColor
+import com.example.ui.theme.adaptiveOnlineColor
+import com.example.ui.theme.isMicroRCDarkSurface
 
 @Composable
 fun ResultsScreen(
@@ -81,7 +82,9 @@ fun ResultsScreen(
     lobby: LobbyStatePayload?,
     rematchState: RematchCountdownState? = null,
     isNewPersonalBest: Boolean = false,
+    isDailyChallenge: Boolean = false,
     challengeGhost: GhostRunPlayback? = null,
+    onRetryDailyChallenge: (() -> Unit)? = null,
     onOpenLeaderboards: (() -> Unit)? = null,
     onVoteRematch: (String) -> Unit = {},
     onLaunchRematchNow: () -> Unit = {},
@@ -111,14 +114,23 @@ fun ResultsScreen(
             } ?: "Battle Arena"
         }
         else -> {
-            lobby?.activeCustomTrack?.name ?: runCatching {
-                TrackId.valueOf(results?.trackId ?: TrackId.LIVING_ROOM_GP.name).displayName
-            }.getOrDefault("Circuit")
+            lobby?.activeCustomTrack?.name
+                ?: com.example.data.DailyChallengeCatalog.resolveTrackDisplayName(
+                    results?.trackId ?: TrackId.LIVING_ROOM_GP.name
+                )
         }
     }
     val winCond = runCatching {
         WinCondition.valueOf(results?.winCondition ?: WinCondition.FIRST_TO_FINISH.name)
     }.getOrDefault(WinCondition.FIRST_TO_FINISH)
+
+    val isDark = isMicroRCDarkSurface()
+    val goldColor = adaptiveGoldColor()
+    val onlineAccent = adaptiveOnlineColor()
+    val ghostAccent = adaptiveGhostAccentColor()
+    val silverColor = if (isDark) SilverMedal else Color(0xFF546E7A)
+    val bronzeColor = if (isDark) BronzeMedal else Color(0xFF9E4728)
+    val behindColor = if (isDark) SignalOrange else MaterialTheme.colorScheme.error
 
     Surface(
         color = MaterialTheme.colorScheme.background,
@@ -142,9 +154,9 @@ fun ResultsScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Surface(
-                        color = GoldTrophy.copy(alpha = 0.2f),
+                        color = goldColor.copy(alpha = 0.2f),
                         shape = CircleShape,
-                        border = BorderStroke(1.5.dp, GoldTrophy),
+                        border = BorderStroke(1.5.dp, goldColor),
                         modifier = Modifier.size(52.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -155,13 +167,19 @@ fun ResultsScreen(
                                     else -> Icons.Default.EmojiEvents
                                 },
                                 contentDescription = null,
-                                tint = GoldTrophy,
+                                tint = goldColor,
                                 modifier = Modifier.size(28.dp)
                             )
                         }
                     }
                     Column {
-                        if (isHybridTour) {
+                        if (isDailyChallenge) {
+                            Text(
+                                text = "DAILY CHALLENGE • FIXED FAIR CIRCUIT",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = goldColor
+                            )
+                        } else if (isHybridTour) {
                             Text(
                                 text = "HYBRID TOUR • STAGE #${results?.hybridStageNumber ?: 1}" +
                                     (nextHybridModeLabel?.let { " • NEXT: ${it.uppercase()}" } ?: ""),
@@ -218,7 +236,7 @@ fun ResultsScreen(
                         shape = RoundedCornerShape(16.dp),
                         border = BorderStroke(
                             1.5.dp,
-                            if (isNewPersonalBest || (ghostDelta != null && ghostDelta <= 0L)) AcidLime else ElectricCyan
+                            if (isNewPersonalBest || (ghostDelta != null && ghostDelta <= 0L)) onlineAccent else ghostAccent
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -232,7 +250,7 @@ fun ResultsScreen(
                                 Text(
                                     text = "NEW PERSONAL BEST & GHOST RECORD SAVED!",
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = AcidLime
+                                    color = onlineAccent
                                 )
                             }
                             if (challengeGhost != null && ghostDelta != null) {
@@ -245,7 +263,7 @@ fun ResultsScreen(
                                         "+$secDiff BEHIND ${challengeGhost.driverName.uppercase()}'S GHOST (${formatRaceTime(challengeGhost.finishTimeMs)})"
                                     },
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = if (beatGhost) AcidLime else SignalOrange
+                                    color = if (beatGhost) onlineAccent else behindColor
                                 )
                             }
                         }
@@ -255,9 +273,9 @@ fun ResultsScreen(
                 // Standings Cards
                 sortedRacers.forEach { racer ->
                     val medalColor = when (racer.rank) {
-                        1 -> GoldTrophy
-                        2 -> SilverMedal
-                        3 -> BronzeMedal
+                        1 -> goldColor
+                        2 -> silverColor
+                        3 -> bronzeColor
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
                     val rightMetric = when {
@@ -344,7 +362,7 @@ fun ResultsScreen(
                             Text(
                                 text = rightMetric,
                                 style = MaterialTheme.typography.labelLarge,
-                                color = if (racer.rank == 1) GoldTrophy else MaterialTheme.colorScheme.onSurface
+                                color = if (racer.rank == 1) goldColor else MaterialTheme.colorScheme.onSurface
                             )
                         }
                     }
@@ -384,7 +402,7 @@ fun ResultsScreen(
                                 Icon(
                                     Icons.Default.FlightTakeoff,
                                     contentDescription = null,
-                                    tint = GoldTrophy,
+                                    tint = goldColor,
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Text(
@@ -413,7 +431,7 @@ fun ResultsScreen(
                                     }
                                     LinearProgressIndicator(
                                         progress = { frac },
-                                        color = if (racer.rank == 1) GoldTrophy else Color(racer.primaryColorArgb),
+                                        color = if (racer.rank == 1) goldColor else Color(racer.primaryColorArgb),
                                         trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -443,7 +461,7 @@ fun ResultsScreen(
                                 Icon(
                                     Icons.Default.Flag,
                                     contentDescription = null,
-                                    tint = GoldTrophy,
+                                    tint = goldColor,
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Text(
@@ -473,7 +491,7 @@ fun ResultsScreen(
                                     }
                                     LinearProgressIndicator(
                                         progress = { frac },
-                                        color = if (racer.rank == 1) GoldTrophy else Color(racer.primaryColorArgb),
+                                        color = if (racer.rank == 1) goldColor else Color(racer.primaryColorArgb),
                                         trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                                         modifier = Modifier
                                             .fillMaxWidth()
@@ -582,7 +600,7 @@ fun ResultsScreen(
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(p.name, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                                    Text("${p.wins}W", style = MaterialTheme.typography.labelSmall, color = GoldTrophy, modifier = Modifier.padding(end = 10.dp))
+                                    Text("${p.wins}W", style = MaterialTheme.typography.labelSmall, color = goldColor, modifier = Modifier.padding(end = 10.dp))
                                     Text("${p.sessionPoints} PTS", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
                                 }
                             }
@@ -617,7 +635,27 @@ fun ResultsScreen(
                         Text("Home")
                     }
 
-                    if (isHostOrSolo) {
+                    if (isDailyChallenge && onRetryDailyChallenge != null) {
+                        Button(
+                            onClick = onRetryDailyChallenge,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .weight(1.6f)
+                                .height(52.dp)
+                                .testTag("results_retry_daily_button")
+                        ) {
+                            Icon(Icons.Default.Replay, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Retry Daily Challenge",
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                        }
+                    } else if (isHostOrSolo) {
                         OutlinedButton(
                             onClick = onReturnToLobby,
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary),
@@ -641,16 +679,16 @@ fun ResultsScreen(
                 if (role == SessionRole.Solo && onOpenLeaderboards != null) {
                     OutlinedButton(
                         onClick = onOpenLeaderboards,
-                        border = BorderStroke(1.dp, GoldTrophy.copy(alpha = 0.7f)),
+                        border = BorderStroke(1.dp, goldColor.copy(alpha = 0.7f)),
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(50.dp)
                             .testTag("results_leaderboard_button")
                     ) {
-                        Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = GoldTrophy)
+                        Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = goldColor)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Leaderboards & Ghost Challenges", color = GoldTrophy)
+                        Text("Leaderboards & Ghost Challenges", color = goldColor)
                     }
                 }
             }
@@ -670,6 +708,7 @@ private fun RematchCountdownCard(
     onVoteRematch: (String) -> Unit,
     onLaunchRematchNow: () -> Unit
 ) {
+    val goldColor = adaptiveGoldColor()
     val totalSec = rematchState.totalSeconds.coerceAtLeast(1)
     val secLeft = rematchState.secondsLeft.coerceIn(0, totalSec)
     val progress = secLeft.toFloat() / totalSec.toFloat()
@@ -800,7 +839,7 @@ private fun RematchCountdownCard(
                             width = if (isSelected || isLeading) 1.5.dp else 1.dp,
                             color = when {
                                 isSelected -> MaterialTheme.colorScheme.secondary
-                                isLeading -> GoldTrophy.copy(alpha = 0.8f)
+                                isLeading -> goldColor.copy(alpha = 0.8f)
                                 else -> MaterialTheme.colorScheme.outlineVariant
                             }
                         ),
@@ -827,7 +866,7 @@ private fun RematchCountdownCard(
                                 contentDescription = null,
                                 tint = when {
                                     isSelected -> MaterialTheme.colorScheme.secondary
-                                    option.isRandom -> GoldTrophy
+                                    option.isRandom -> goldColor
                                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                                 },
                                 modifier = Modifier.size(20.dp)
@@ -849,7 +888,7 @@ private fun RematchCountdownCard(
                                     color = if (voteCount > 0) {
                                         MaterialTheme.colorScheme.secondary.copy(alpha = 0.22f)
                                     } else {
-                                        GoldTrophy.copy(alpha = 0.18f)
+                                        goldColor.copy(alpha = 0.18f)
                                     },
                                     shape = RoundedCornerShape(50)
                                 ) {
@@ -860,7 +899,7 @@ private fun RematchCountdownCard(
                                             "DEFAULT"
                                         },
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = if (voteCount > 0) MaterialTheme.colorScheme.secondary else GoldTrophy,
+                                        color = if (voteCount > 0) MaterialTheme.colorScheme.secondary else goldColor,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                                     )
                                 }

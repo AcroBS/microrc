@@ -2,6 +2,7 @@ package com.example.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.data.DailyChallengeCatalog
 import com.example.data.FriendsRepository
 import com.example.data.OnlineRaceRepository
 import com.example.data.TrackCatalog
@@ -13,6 +14,7 @@ import com.example.model.FriendUiModel
 import com.example.model.FriendshipDoc
 import com.example.model.GhostRunPlayback
 import com.example.model.LeaderboardEntryDoc
+import com.example.model.LeaderboardNotificationDoc
 import com.example.model.LobbyStatePayload
 import com.example.model.OnlineRoomDoc
 import com.example.model.PlayerProfile
@@ -101,6 +103,10 @@ class OnlineViewModel(
     private val _incomingSessionInvites = MutableStateFlow<List<SessionInviteDoc>>(emptyList())
     val incomingSessionInvites: StateFlow<List<SessionInviteDoc>> = _incomingSessionInvites.asStateFlow()
 
+    private val _incomingLeaderboardNotifications = MutableStateFlow<List<LeaderboardNotificationDoc>>(emptyList())
+    val incomingLeaderboardNotifications: StateFlow<List<LeaderboardNotificationDoc>> =
+        _incomingLeaderboardNotifications.asStateFlow()
+
     private val _socialFeedback = MutableStateFlow<String?>(null)
     val socialFeedback: StateFlow<String?> = _socialFeedback.asStateFlow()
 
@@ -111,12 +117,14 @@ class OnlineViewModel(
     private var leaderboardSubscriptionJob: Job? = null
     private var friendshipsJob: Job? = null
     private var invitesJob: Job? = null
+    private var leaderboardNotifsJob: Job? = null
     private var presenceHeartbeatJob: Job? = null
 
     init {
         startObservingOpenRooms()
         startObservingFriendsAndPresence()
         startObservingSessionInvites()
+        startObservingLeaderboardNotifications()
         startPresenceLoop()
     }
 
@@ -204,6 +212,19 @@ class OnlineViewModel(
             try {
                 friendsRepository.observeIncomingSessionInvites(currentUserId).collect { invites ->
                     _incomingSessionInvites.value = invites
+                }
+            } catch (e: Exception) {
+                _socialFeedback.value = e.localizedMessage
+            }
+        }
+    }
+
+    private fun startObservingLeaderboardNotifications() {
+        leaderboardNotifsJob?.cancel()
+        leaderboardNotifsJob = viewModelScope.launch {
+            try {
+                friendsRepository.observeIncomingLeaderboardNotifications(currentUserId).collect { list ->
+                    _incomingLeaderboardNotifications.value = list
                 }
             } catch (e: Exception) {
                 _socialFeedback.value = e.localizedMessage
@@ -510,6 +531,12 @@ class OnlineViewModel(
         }
     }
 
+    fun dismissLeaderboardNotification(notificationId: String) {
+        viewModelScope.launch {
+            friendsRepository.dismissLeaderboardNotification(notificationId)
+        }
+    }
+
     fun syncSoloRunToCloud(profile: PlayerProfile, summary: CompletedSoloRunSummary) {
         viewModelScope.launch {
             val res = repository.submitPersonalBestAndGhost(
@@ -525,7 +552,24 @@ class OnlineViewModel(
             )
             res.onSuccess { improved ->
                 if (improved) {
-                    _cloudStatusMessage.value = "New Cloud Leaderboard Record & Ghost uploaded!"
+                    val trackName = DailyChallengeCatalog.resolveTrackDisplayName(summary.trackKey)
+                    val isDaily = DailyChallengeCatalog.isDailyTrackId(summary.trackKey)
+                    val notifiedCount = friendsRepository.sendLeaderboardNotificationsToAllFriends(
+                        senderProfile = profile,
+                        gameMode = summary.gameMode,
+                        trackKey = summary.trackKey,
+                        trackName = trackName,
+                        boardKey = summary.boardKey,
+                        totalLaps = summary.totalLaps,
+                        finishTimeMs = summary.finishTimeMs,
+                        bestScore = summary.bestScore,
+                        dailyChallenge = isDaily
+                    ).getOrDefault(0)
+                    _cloudStatusMessage.value = if (notifiedCount > 0) {
+                        "New Cloud Record & Ghost uploaded — $notifiedCount friend${if (notifiedCount == 1) "" else "s"} notified!"
+                    } else {
+                        "New Cloud Leaderboard Record & Ghost uploaded!"
+                    }
                 }
             }
         }
@@ -639,6 +683,7 @@ class OnlineViewModel(
         presenceHeartbeatJob?.cancel()
         friendshipsJob?.cancel()
         invitesJob?.cancel()
+        leaderboardNotifsJob?.cancel()
         roomsSubscriptionJob?.cancel()
         leaderboardSubscriptionJob?.cancel()
         friendsRepository.setOfflinePresence(latestKnownProfile)
@@ -649,6 +694,7 @@ class OnlineViewModel(
         presenceHeartbeatJob?.cancel()
         friendshipsJob?.cancel()
         invitesJob?.cancel()
+        leaderboardNotifsJob?.cancel()
         roomsSubscriptionJob?.cancel()
         leaderboardSubscriptionJob?.cancel()
         sessionManager.leaveCurrentRoomInternal()
@@ -661,6 +707,7 @@ class OnlineViewModel(
         presenceHeartbeatJob?.cancel()
         friendshipsJob?.cancel()
         invitesJob?.cancel()
+        leaderboardNotifsJob?.cancel()
         roomsSubscriptionJob?.cancel()
         leaderboardSubscriptionJob?.cancel()
         sessionManager.leaveRoom()

@@ -430,13 +430,16 @@ object TrackCatalog {
     fun generateRandomTrack(
         seed: Long = System.currentTimeMillis(),
         preferredTheme: TrackId? = null,
-        roadHalfWidth: Float = 112f
+        roadHalfWidth: Float = 112f,
+        trackIdOverride: String? = null,
+        trackNameOverride: String? = null
     ): CustomTrackData {
         val rng = kotlin.random.Random(seed)
         val theme = preferredTheme ?: TrackId.entries[rng.nextInt(TrackId.entries.size)]
         val adjectives = listOf("Hyper", "Turbo", "Apex", "Drift", "Nitro", "Volt", "Micro", "Ridge")
         val nouns = listOf("Circuit", "Loop", "Speedway", "Chicane", "Run", "Grand Prix", "Sprint")
-        val trackName = "${adjectives[rng.nextInt(adjectives.size)]} ${nouns[rng.nextInt(nouns.size)]} #${(seed % 90 + 10)}"
+        val suffixNum = ((seed and 0x7FFFFFFFL) % 90L + 10L)
+        val trackName = trackNameOverride ?: "${adjectives[rng.nextInt(adjectives.size)]} ${nouns[rng.nextInt(nouns.size)]} #$suffixNum"
 
         val pointCount = rng.nextInt(9, 13)
         val cx = 1100f
@@ -505,7 +508,7 @@ object TrackCatalog {
         }
 
         return CustomTrackData(
-            id = "rand_$seed",
+            id = trackIdOverride ?: "rand_$seed",
             name = trackName,
             themeId = theme.name,
             roadHalfWidth = roadHalfWidth,

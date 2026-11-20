@@ -1,6 +1,10 @@
 package com.example.ui.screens
 
+import android.Manifest
+import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,6 +31,7 @@ import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Speed
@@ -48,6 +53,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.example.model.AudioSettings
@@ -55,18 +61,27 @@ import com.example.model.CarSpeedPreset
 import com.example.model.GameMode
 import com.example.model.RaceRulesSettings
 import com.example.model.WinCondition
+import com.example.util.SessionNotificationHelper
 
 @Composable
 fun SettingsScreen(
     rules: RaceRulesSettings,
     audioSettings: AudioSettings = AudioSettings(),
+    dailyNotificationsEnabled: Boolean = true,
     canEditRules: Boolean,
     inSession: Boolean,
     onUpdateRules: (RaceRulesSettings) -> Unit,
     onUpdateAudio: (AudioSettings) -> Unit = {},
+    onToggleDailyNotifications: (Boolean) -> Unit = {},
     onBack: () -> Unit
 ) {
     BackHandler { onBack() }
+    val context = LocalContext.current
+    val notifPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        onToggleDailyNotifications(granted)
+    }
 
     Surface(
         color = MaterialTheme.colorScheme.background,
@@ -208,6 +223,25 @@ fun SettingsScreen(
                     switchTestTag = "setting_haptics_switch",
                     onCheckedChange = {
                         onUpdateAudio(audioSettings.copy(hapticsEnabled = it))
+                    }
+                )
+
+                RuleToggleCard(
+                    icon = Icons.Default.NotificationsActive,
+                    accent = MaterialTheme.colorScheme.secondary,
+                    title = "Daily Challenge Notifications",
+                    description = "Get notified when each day's new fixed Daily GP track is available.",
+                    checked = dailyNotificationsEnabled,
+                    enabled = true,
+                    switchTestTag = "setting_daily_notifications_switch",
+                    onCheckedChange = { enabled ->
+                        if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                            !SessionNotificationHelper.hasNotificationPermission(context)
+                        ) {
+                            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        } else {
+                            onToggleDailyNotifications(enabled)
+                        }
                     }
                 )
 

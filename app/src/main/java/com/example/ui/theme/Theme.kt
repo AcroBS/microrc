@@ -11,6 +11,7 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
@@ -33,12 +34,19 @@ private val MicroRCDarkScheme = darkColorScheme(
     onSurface = TextPrimary,
     surfaceVariant = PaddockSurfaceElevated,
     onSurfaceVariant = TextSecondary,
+    surfaceDim = Color(0xFF080A0F),
+    surfaceBright = Color(0xFF242E40),
+    surfaceContainerLowest = Color(0xFF07090D),
+    surfaceContainerLow = Color(0xFF10151E),
     surfaceContainer = PaddockSurface,
     surfaceContainerHigh = PaddockSurfaceElevated,
+    surfaceContainerHighest = Color(0xFF263042),
     outline = PaddockOutline,
     outlineVariant = PaddockOutline,
     error = AlertRed,
-    onError = CarbonBg
+    onError = CarbonBg,
+    errorContainer = Color(0xFF5A161A),
+    onErrorContainer = Color(0xFFFFDAD8)
 )
 
 private val MicroRCLightScheme = lightColorScheme(
@@ -60,18 +68,25 @@ private val MicroRCLightScheme = lightColorScheme(
     onSurface = Color(0xFF171B22),
     surfaceVariant = Color(0xFFE7ECF4),
     onSurfaceVariant = Color(0xFF475266),
-    surfaceContainer = Color(0xFFEEF1F7),
-    surfaceContainerHigh = Color(0xFFE4E8F1),
+    surfaceDim = Color(0xFFDCE1EA),
+    surfaceBright = Color(0xFFFFFFFF),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFF1F4F9),
+    surfaceContainer = Color(0xFFEAEFF6),
+    surfaceContainerHigh = Color(0xFFE2E7F0),
+    surfaceContainerHighest = Color(0xFFD8DFEC),
     outline = Color(0xFF778298),
     outlineVariant = Color(0xFFCAD2E0),
     error = Color(0xFFBA1A1A),
-    onError = Color.White
+    onError = Color.White,
+    errorContainer = Color(0xFFFFDAD6),
+    onErrorContainer = Color(0xFF410002)
 )
 
 private val MicroRCShapes = Shapes(
-    small = RoundedCornerShape(10.dp),
-    medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(22.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(24.dp),
     extraLarge = RoundedCornerShape(28.dp)
 )
 
@@ -97,3 +112,19 @@ fun MicroRCTheme(
         content = content
     )
 }
+
+@Composable
+fun isMicroRCDarkSurface(): Boolean = MaterialTheme.colorScheme.background.luminance() < 0.5f
+
+@Composable
+fun adaptiveOnlineColor(): Color =
+    if (isMicroRCDarkSurface()) Color(0xFF00E676) else Color(0xFF137333)
+
+@Composable
+fun adaptiveGoldColor(): Color =
+    if (isMicroRCDarkSurface()) GoldTrophy else Color(0xFF9E6B00)
+
+@Composable
+fun adaptiveGhostAccentColor(): Color =
+    if (isMicroRCDarkSurface()) ElectricCyan else MaterialTheme.colorScheme.secondary
+

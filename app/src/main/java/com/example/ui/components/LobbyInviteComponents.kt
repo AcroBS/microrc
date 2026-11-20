@@ -32,6 +32,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.People
@@ -57,6 +58,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -64,10 +66,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.model.FriendUiModel
 import com.example.model.GameMode
+import com.example.model.LeaderboardNotificationDoc
 import com.example.model.SessionInviteDoc
+import com.example.ui.theme.adaptiveOnlineColor
 import com.example.util.InviteLinkHelper
+import com.example.util.SessionNotificationHelper
 
-private val OnlineGreen = Color(0xFF00E676)
 private val WhatsAppAccent = Color(0xFF25D366)
 
 @Composable
@@ -75,7 +79,8 @@ fun LiveSessionInviteBanner(
     invite: SessionInviteDoc?,
     onAccept: (SessionInviteDoc) -> Unit,
     onDecline: (SessionInviteDoc) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    applyStatusBarInsets: Boolean = true
 ) {
     AnimatedVisibility(
         visible = invite != null,
@@ -86,20 +91,22 @@ fun LiveSessionInviteBanner(
         val current = invite ?: return@AnimatedVisibility
         val modeLabel = runCatching { GameMode.valueOf(current.gameMode).displayName }
             .getOrDefault(current.gameMode)
+        val avatarBg = Color(current.senderColorArgb)
+        val avatarFg = if (avatarBg.luminance() > 0.45f) Color(0xFF101318) else Color.White
 
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.statusBars)
+                .then(if (applyStatusBarInsets) Modifier.windowInsetsPadding(WindowInsets.statusBars) else Modifier)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             contentAlignment = Alignment.TopCenter
         ) {
             Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                shape = RoundedCornerShape(20.dp),
-                tonalElevation = 8.dp,
-                shadowElevation = 10.dp,
-                border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.secondary),
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shape = RoundedCornerShape(22.dp),
+                tonalElevation = 6.dp,
+                shadowElevation = 6.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.65f)),
                 modifier = Modifier
                     .widthIn(max = 600.dp)
                     .fillMaxWidth()
@@ -117,13 +124,13 @@ fun LiveSessionInviteBanner(
                             modifier = Modifier
                                 .size(40.dp)
                                 .clip(CircleShape)
-                                .background(Color(current.senderColorArgb)),
+                                .background(avatarBg),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 Icons.Default.NotificationsActive,
                                 contentDescription = "Game Session Invite",
-                                tint = Color(0xFF0B0E14),
+                                tint = avatarFg,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -131,14 +138,14 @@ fun LiveSessionInviteBanner(
                             Text(
                                 text = "${current.senderName} invited you to join!",
                                 style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = "${current.roomName} • #${current.roomCode} • $modeLabel",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.secondary,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -151,7 +158,7 @@ fun LiveSessionInviteBanner(
                     ) {
                         OutlinedButton(
                             onClick = { onDecline(current) },
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(14.dp),
                             modifier = Modifier
                                 .weight(1f)
                                 .height(48.dp)
@@ -167,7 +174,7 @@ fun LiveSessionInviteBanner(
                                 containerColor = MaterialTheme.colorScheme.secondary,
                                 contentColor = MaterialTheme.colorScheme.onSecondary
                             ),
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(14.dp),
                             modifier = Modifier
                                 .weight(1.35f)
                                 .height(48.dp)
@@ -176,6 +183,124 @@ fun LiveSessionInviteBanner(
                             Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Join Lobby")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun LiveLeaderboardNotificationBanner(
+    notification: LeaderboardNotificationDoc?,
+    onViewLeaderboard: (LeaderboardNotificationDoc) -> Unit,
+    onDismiss: (LeaderboardNotificationDoc) -> Unit,
+    modifier: Modifier = Modifier,
+    applyStatusBarInsets: Boolean = true
+) {
+    AnimatedVisibility(
+        visible = notification != null,
+        enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+        exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+        modifier = modifier
+    ) {
+        val current = notification ?: return@AnimatedVisibility
+        val scoreLabel = if (current.gameMode == GameMode.STUNTS.name) {
+            "${current.bestScore} PTS"
+        } else {
+            SessionNotificationHelper.formatNotifTimeMs(current.bestRaceTimeMs)
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (applyStatusBarInsets) Modifier.windowInsetsPadding(WindowInsets.statusBars) else Modifier)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            contentAlignment = Alignment.TopCenter
+        ) {
+            Surface(
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                shape = RoundedCornerShape(22.dp),
+                tonalElevation = 6.dp,
+                shadowElevation = 6.dp,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.65f)),
+                modifier = Modifier
+                    .widthIn(max = 600.dp)
+                    .fillMaxWidth()
+                    .testTag("live_leaderboard_notification_banner")
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.tertiary),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.EmojiEvents,
+                                contentDescription = "Friend Leaderboard Record",
+                                tint = MaterialTheme.colorScheme.onTertiary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "${current.senderName} set a new record!",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${current.trackName} • $scoreLabel",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { onDismiss(current) },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .testTag("dismiss_leaderboard_notif_button")
+                        ) {
+                            Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Dismiss")
+                        }
+                        Button(
+                            onClick = { onViewLeaderboard(current) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.tertiary,
+                                contentColor = MaterialTheme.colorScheme.onTertiary
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .weight(1.35f)
+                                .height(48.dp)
+                                .testTag("view_leaderboard_notif_button")
+                        ) {
+                            Icon(Icons.Default.EmojiEvents, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("View Board")
                         }
                     }
                 }
@@ -423,13 +548,14 @@ fun ShareLobbyInviteDialog(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         modifier = Modifier.weight(1f)
                                     ) {
+                                        val onlineDot = adaptiveOnlineColor()
                                         Box(
                                             modifier = Modifier
                                                 .size(10.dp)
                                                 .clip(CircleShape)
                                                 .background(
                                                     if (friend.effectivelyOnline) {
-                                                        OnlineGreen
+                                                        onlineDot
                                                     } else {
                                                         MaterialTheme.colorScheme.outline
                                                     }
@@ -447,7 +573,7 @@ fun ShareLobbyInviteDialog(
                                                 text = friend.statusLabel,
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = if (friend.effectivelyOnline) {
-                                                    OnlineGreen
+                                                    onlineDot
                                                 } else {
                                                     MaterialTheme.colorScheme.onSurfaceVariant
                                                 },

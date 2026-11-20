@@ -144,6 +144,9 @@ fun RaceScreen(
     onDropMine: () -> Unit = {},
     onSwitchControlMode: (ControlMode, Float, Boolean, Float) -> Unit,
     onUpdateAudioSettings: (AudioSettings) -> Unit = {},
+    canRestart: Boolean = false,
+    isDailyChallenge: Boolean = false,
+    onRestartRace: () -> Unit = {},
     onLeaveRace: () -> Unit
 ) {
     val view = LocalView.current
@@ -278,6 +281,10 @@ fun RaceScreen(
     LaunchedEffect(snapshot) {
         if (snapshot != null) {
             lastSnapshotArrivalNanos = System.nanoTime()
+            if (snapshot.phase == RacePhase.COUNTDOWN.name && snapshot.raceTimeMs == 0L && snapshot.countdownSec >= 3) {
+                camInitialized = false
+                smoothPoseMap.clear()
+            }
         }
     }
 
@@ -1236,7 +1243,7 @@ fun RaceScreen(
                         horizontalArrangement = Arrangement.spacedBy(actionRowSpacing),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (!isArenaMode && !isStuntsMode) {
+                        if (!isArenaMode && !isStuntsMode && !isDailyChallenge) {
                             val currentLap = localRacer?.lap ?: 1
                             val mineFlash = 0.5f + 0.5f * sin(animTimeSec * 14f)
                             val mineActiveBg = if (mineFlash > 0.45f) {
@@ -1331,7 +1338,12 @@ fun RaceScreen(
                                 )
                                 Spacer(modifier = Modifier.width(5.dp))
                                 Text(
-                                    text = if (stuntControlsLocked) "LOCKED" else (heldPowerUp?.shortName ?: "EMPTY"),
+                                    text = when {
+                                        stuntControlsLocked -> "LOCKED"
+                                        heldPowerUp != null -> heldPowerUp.shortName
+                                        isDailyChallenge -> "1/LAP USED"
+                                        else -> "EMPTY"
+                                    },
                                     style = MaterialTheme.typography.labelLarge,
                                     color = if (canFirePowerUp) CarbonBg else TextSecondary
                                 )
@@ -1552,12 +1564,31 @@ fun RaceScreen(
                 Button(onClick = { showPauseDialog = false }) { Text("Resume") }
             },
             dismissButton = {
-                TextButton(
-                    onClick = {
-                        showPauseDialog = false
-                        onLeaveRace()
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (canRestart) {
+                        OutlinedButton(
+                            onClick = {
+                                showPauseDialog = false
+                                onRestartRace()
+                            },
+                            modifier = Modifier.testTag("race_restart_button")
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Restart")
+                        }
                     }
-                ) { Text("Exit Race", color = MaterialTheme.colorScheme.error) }
+                    TextButton(
+                        onClick = {
+                            showPauseDialog = false
+                            onLeaveRace()
+                        }
+                    ) { Text("Exit Race", color = MaterialTheme.colorScheme.error) }
+                }
             }
         )
     }

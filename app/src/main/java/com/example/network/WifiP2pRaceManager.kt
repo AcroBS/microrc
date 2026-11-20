@@ -3,6 +3,7 @@ package com.example.network
 import android.content.Context
 import android.net.wifi.WifiManager
 import android.os.Build
+import com.example.data.DailyChallengeCatalog
 import com.example.data.TrackCatalog
 import com.example.engine.RacePhysicsEngine
 import com.example.model.ActiveGhostCarState
@@ -272,6 +273,11 @@ class WifiP2pRaceManager(
     private val _activeGhostCar = MutableStateFlow<ActiveGhostCarState?>(null)
     val activeGhostCar: StateFlow<ActiveGhostCarState?> = _activeGhostCar.asStateFlow()
 
+    private val _isDailyChallenge = MutableStateFlow(false)
+    val isDailyChallenge: StateFlow<Boolean> = _isDailyChallenge.asStateFlow()
+
+    private var dailySeedForSession: Long? = null
+
     private val _completedSoloRuns = MutableSharedFlow<CompletedSoloRunSummary>(extraBufferCapacity = 4)
     val completedSoloRuns: SharedFlow<CompletedSoloRunSummary> = _completedSoloRuns.asSharedFlow()
 
@@ -507,6 +513,45 @@ class WifiP2pRaceManager(
             addSystemChat("Ghost target set: ${ghost.driverName} (${String.format("%.2fs", ghost.finishTimeMs / 1000f)})")
             publishLocalLobbyState()
         }
+    }
+
+    fun startDailyChallengeSession(
+        profile: PlayerProfile,
+        baseRules: RaceRulesSettings = RaceRulesSettings(),
+        customTrack: CustomTrackData,
+        dateKey: String,
+        challengeGhost: GhostRunPlayback? = null
+    ) {
+        leaveSession()
+        localPlayerId = profile.playerId
+        val dailyRules = DailyChallengeCatalog.lockedDailyRules(baseRules)
+        _isDailyChallenge.value = true
+        dailySeedForSession = DailyChallengeCatalog.seedForDate(dateKey)
+        configureInitialSessionMode(dailyRules, customTrack)
+        _role.value = SessionRole.Solo
+        _activeChallengeGhost.value = challengeGhost
+        _activeGhostCar.value = null
+        inRace = false
+        chatLog.clear()
+        playersList.clear()
+        playersList.add(profile.toLobbyPlayer(isHost = true, isReady = true))
+        val ghostMsg = challengeGhost?.let {
+            "Daily GP ($dateKey) vs ${it.driverName} (${String.format("%.2fs", it.finishTimeMs / 1000f)})!"
+        } ?: "Daily GP ($dateKey) • Fair Fixed Track Layout (0 AI Bots)!"
+        addSystemChat(ghostMsg)
+        publishLocalLobbyState()
+        startRace()
+    }
+
+    fun restartRace() {
+        if (_role.value != SessionRole.Host && _role.value != SessionRole.Solo) return
+        cancelRematchCountdown()
+        physicsJob?.cancel()
+        physicsJob = null
+        physicsEngine = null
+        _activeGhostCar.value = null
+        inRace = false
+        startRace()
     }
 
     fun hostLobby(
@@ -1384,8 +1429,10 @@ class WifiP2pRaceManager(
             customData != null -> TrackCatalog.buildCustomTrack(customData)
             else -> TrackCatalog.getTrack(currentTrackId)
         }
+        val dailyChallengeRun = _isDailyChallenge.value
         val track = when {
             isStuntMode -> baseTrack
+            dailyChallengeRun -> baseTrack
             customData == null -> TrackCatalog.withRandomJumps(baseTrack, enabled = currentRules.randomJumpsEnabled)
             !currentRules.randomJumpsEnabled -> baseTrack.copy(ramps = emptyList())
             baseTrack.ramps.isEmpty() -> TrackCatalog.withRandomJumps(baseTrack, enabled = true)
@@ -1394,15 +1441,22 @@ class WifiP2pRaceManager(
         _activeTrack.value = track
 
         val effectiveStageRules = currentRules.copy(gameMode = concreteMode.name)
+        val engineRng = if (dailyChallengeRun) {
+            Random(dailySeedForSession ?: DailyChallengeCatalog.seedForDate())
+        } else {
+            Random.Default
+        }
         val engine = RacePhysicsEngine(
             track = track,
             totalLaps = currentTotalLaps,
             players = snapshotPlayers,
             rules = effectiveStageRules,
+            random = engineRng,
             stuntSequenceOverride = stuntSequence,
             isHybridTour = isHybrid,
             hybridStageNumber = hybridStageNumber,
-            nextHybridModeName = upcomingHybridMode?.name
+            nextHybridModeName = upcomingHybridMode?.name,
+            isDailyChallenge = dailyChallengeRun
         )
         physicsEngine = engine
 
@@ -1635,7 +1689,9 @@ class WifiP2pRaceManager(
                     }
                     inRace = false
                     _navEvents.tryEmit(RaceNavEvent.ShowResults)
-                    startRematchCountdown()
+                    if (!dailyChallengeRun) {
+                        startRematchCountdown()
+                    }
                     break
                 } else if (_role.value == SessionRole.Host) {
                     broadcastRaceTelemetry(snap, tickCounter)
@@ -2030,6 +2086,8 @@ class WifiP2pRaceManager(
         _activeTrack.value = null
         _activeChallengeGhost.value = null
         _activeGhostCar.value = null
+        _isDailyChallenge.value = false
+        dailySeedForSession = null
         currentCustomTrack = null
     }
 

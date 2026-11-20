@@ -78,7 +78,8 @@ import com.example.model.GameMode
 import com.example.model.OnlineRoomDoc
 import com.example.model.PlayerProfile
 import com.example.model.RaceRulesSettings
-import com.example.ui.theme.GoldTrophy
+import com.example.ui.theme.adaptiveGoldColor
+import com.example.ui.theme.adaptiveOnlineColor
 import com.example.util.InviteLinkHelper
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -187,7 +188,7 @@ fun OnlineHubScreen(
                             Icon(
                                 Icons.Default.EmojiEvents,
                                 contentDescription = "Leaderboards & Ghosts",
-                                tint = GoldTrophy
+                                tint = adaptiveGoldColor()
                             )
                         }
                         IconButton(
@@ -271,7 +272,7 @@ fun OnlineHubScreen(
                             Icon(
                                 Icons.Default.NotificationsActive,
                                 contentDescription = null,
-                                tint = if (onlineFriendsCount > 0) Color(0xFF00E676) else MaterialTheme.colorScheme.secondary,
+                                tint = if (onlineFriendsCount > 0) adaptiveOnlineColor() else MaterialTheme.colorScheme.secondary,
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
@@ -508,7 +509,7 @@ fun OnlineHubScreen(
                                         Icon(
                                             if (passwordProtected) Icons.Default.Lock else Icons.Default.LockOpen,
                                             contentDescription = null,
-                                            tint = if (passwordProtected) GoldTrophy else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            tint = if (passwordProtected) adaptiveGoldColor() else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(18.dp)
                                         )
                                         Column {
@@ -670,7 +671,7 @@ fun OnlineHubScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "Create an online group above and share the 6-character code (plus password if locked) with your brothers or friends!",
+                                text = "Create a room above or enter a room code to join.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -682,12 +683,13 @@ fun OnlineHubScreen(
                             val isFull = room.playerCount >= room.maxPlayers
                             val modeLabel = runCatching { GameMode.valueOf(room.gameMode).displayName }
                                 .getOrDefault(room.gameMode)
+                            val lockGold = adaptiveGoldColor()
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceContainer,
                                 shape = RoundedCornerShape(18.dp),
                                 border = BorderStroke(
                                     1.dp,
-                                    if (room.passwordProtected) GoldTrophy.copy(alpha = 0.65f) else MaterialTheme.colorScheme.outlineVariant
+                                    if (room.passwordProtected) lockGold.copy(alpha = 0.65f) else MaterialTheme.colorScheme.outlineVariant
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -721,7 +723,7 @@ fun OnlineHubScreen(
                                                 Icon(
                                                     Icons.Default.Lock,
                                                     contentDescription = "Password Protected",
-                                                    tint = GoldTrophy,
+                                                    tint = lockGold,
                                                     modifier = Modifier.size(16.dp)
                                                 )
                                             }
@@ -837,7 +839,7 @@ fun OnlineHubScreen(
 
     // Password Entry Modal for Private / Locked Online Groups
     val targetLockedRoom = passwordPromptRoom
-    if (targetLockedRoom != null) {
+    if (targetLockedRoom != null && !showDeleteAccountDialog) {
         AlertDialog(
             onDismissRequest = { passwordPromptRoom = null },
             title = {
@@ -845,7 +847,7 @@ fun OnlineHubScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.Lock, contentDescription = null, tint = GoldTrophy)
+                    Icon(Icons.Default.Lock, contentDescription = null, tint = adaptiveGoldColor())
                     Text("Enter Group Password", style = MaterialTheme.typography.titleLarge)
                 }
             },

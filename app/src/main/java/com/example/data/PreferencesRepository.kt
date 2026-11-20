@@ -25,6 +25,7 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.io.File
 import java.util.UUID
@@ -88,6 +89,9 @@ class PreferencesRepository(context: Context) {
         val AUDIO_HAPTICS_ENABLED = booleanPreferencesKey("audio_haptics_enabled")
         val CUSTOM_TRACKS_JSON = stringPreferencesKey("custom_tracks_json")
         val LOCAL_LEADERBOARD_JSON = stringPreferencesKey("local_leaderboard_json")
+        val LAST_NOTIFIED_DAILY_KEY = stringPreferencesKey("last_notified_daily_key")
+        val DAILY_NOTIFICATIONS_ENABLED = booleanPreferencesKey("daily_notifications_enabled")
+        val NOTIFICATION_PERMISSION_PROMPTED = booleanPreferencesKey("notification_permission_prompted")
     }
 
     val profileFlow: Flow<PlayerProfile> = dataStore.data.map { prefs ->
@@ -172,6 +176,34 @@ class PreferencesRepository(context: Context) {
         } else {
             runCatching { localLeaderboardListAdapter.fromJson(raw) }.getOrNull().orEmpty()
         }
+    }
+
+    val dailyNotificationsEnabledFlow: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.DAILY_NOTIFICATIONS_ENABLED] ?: true
+    }
+
+    val notificationPermissionPromptedFlow: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.NOTIFICATION_PERMISSION_PROMPTED] ?: false
+    }
+
+    suspend fun getLastNotifiedDailyKey(): String? {
+        return dataStore.data.map { it[Keys.LAST_NOTIFIED_DAILY_KEY] }.first()
+    }
+
+    suspend fun isDailyNotificationsEnabled(): Boolean {
+        return dailyNotificationsEnabledFlow.first()
+    }
+
+    suspend fun markDailyChallengeNotified(dateKey: String) {
+        dataStore.edit { it[Keys.LAST_NOTIFIED_DAILY_KEY] = dateKey }
+    }
+
+    suspend fun setDailyNotificationsEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.DAILY_NOTIFICATIONS_ENABLED] = enabled }
+    }
+
+    suspend fun markNotificationPermissionPrompted() {
+        dataStore.edit { it[Keys.NOTIFICATION_PERMISSION_PROMPTED] = true }
     }
 
     suspend fun ensurePlayerId(): String {

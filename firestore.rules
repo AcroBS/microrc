@@ -191,6 +191,27 @@ service cloud.firestore {
              isValidTimestampBound(data.updatedAt);
     }
 
+    function isValidLeaderboardNotification(data) {
+      return data.friendshipId is string && data.friendshipId.size() >= 3 && data.friendshipId.size() <= 128 &&
+             data.senderUid is string && data.senderUid.size() >= 1 && data.senderUid.size() <= 128 &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 24 &&
+             data.senderCarType is string && data.senderCarType.size() >= 1 && data.senderCarType.size() <= 32 &&
+             data.senderColorArgb is int &&
+             data.recipientUid is string && data.recipientUid.size() >= 1 && data.recipientUid.size() <= 128 &&
+             data.senderUid != data.recipientUid &&
+             data.gameMode is string && data.gameMode in ['RACE', 'STUNTS', 'ARENA'] &&
+             data.trackKey is string && data.trackKey.size() >= 1 && data.trackKey.size() <= 64 &&
+             data.trackName is string && data.trackName.size() >= 1 && data.trackName.size() <= 48 &&
+             data.boardKey is string && data.boardKey.size() >= 3 && data.boardKey.size() <= 96 &&
+             data.totalLaps is int && data.totalLaps >= 1 && data.totalLaps <= 9 &&
+             data.bestRaceTimeMs is int && data.bestRaceTimeMs >= 0 && data.bestRaceTimeMs <= 3600000 &&
+             data.bestScore is int && data.bestScore >= 0 && data.bestScore <= 1000000 &&
+             data.dailyChallenge is bool &&
+             data.status is string && data.status in ['UNREAD', 'DISMISSED'] &&
+             isValidTimestampBound(data.createdAt) &&
+             isValidTimestampBound(data.updatedAt);
+    }
+
     // --- 1. Online Multiplayer Rooms (/onlineRooms/{roomId}) ---
     match /onlineRooms/{roomId} {
       allow get: if isSignedIn() && isValidId(roomId);
@@ -619,6 +640,66 @@ service cloud.firestore {
 
       allow delete: if isSignedIn() &&
                        isValidId(inviteId) &&
+                       (existing().recipientUid == request.auth.uid || existing().senderUid == request.auth.uid);
+    }
+
+    // --- 7. Friend Leaderboard Time Alerts (/leaderboardNotifications/{notificationId}) ---
+    match /leaderboardNotifications/{notificationId} {
+      allow get: if isSignedIn() &&
+                    isValidId(notificationId) &&
+                    (resource == null || existing().recipientUid == request.auth.uid || existing().senderUid == request.auth.uid);
+
+      allow list: if isSignedIn() &&
+                     (existing().recipientUid == request.auth.uid || existing().senderUid == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+                       isValidId(notificationId) &&
+                       incoming().keys().hasAll([
+                         'friendshipId', 'senderUid', 'senderName', 'senderCarType', 'senderColorArgb',
+                         'recipientUid', 'gameMode', 'trackKey', 'trackName', 'boardKey',
+                         'totalLaps', 'bestRaceTimeMs', 'bestScore', 'dailyChallenge', 'status',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'friendshipId', 'senderUid', 'senderName', 'senderCarType', 'senderColorArgb',
+                         'recipientUid', 'gameMode', 'trackKey', 'trackName', 'boardKey',
+                         'totalLaps', 'bestRaceTimeMs', 'bestScore', 'dailyChallenge', 'status',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().senderUid == request.auth.uid &&
+                       incoming().status == 'UNREAD' &&
+                       isValidLeaderboardNotification(incoming()) &&
+                       isValidId(incoming().friendshipId) &&
+                       exists(/databases/$(database)/documents/friendships/$(incoming().friendshipId)) &&
+                       get(/databases/$(database)/documents/friendships/$(incoming().friendshipId)).data.status == 'ACCEPTED' &&
+                       incoming().senderUid in get(/databases/$(database)/documents/friendships/$(incoming().friendshipId)).data.memberUids &&
+                       incoming().recipientUid in get(/databases/$(database)/documents/friendships/$(incoming().friendshipId)).data.memberUids;
+
+      allow update: if isSignedIn() &&
+                       isValidId(notificationId) &&
+                       isValidLeaderboardNotification(incoming()) &&
+                       existing().status == 'UNREAD' &&
+                       existing().recipientUid == request.auth.uid &&
+                       incoming().status == 'DISMISSED' &&
+                       incoming().friendshipId == existing().friendshipId &&
+                       incoming().senderUid == existing().senderUid &&
+                       incoming().senderName == existing().senderName &&
+                       incoming().senderCarType == existing().senderCarType &&
+                       incoming().senderColorArgb == existing().senderColorArgb &&
+                       incoming().recipientUid == existing().recipientUid &&
+                       incoming().gameMode == existing().gameMode &&
+                       incoming().trackKey == existing().trackKey &&
+                       incoming().trackName == existing().trackName &&
+                       incoming().boardKey == existing().boardKey &&
+                       incoming().totalLaps == existing().totalLaps &&
+                       incoming().bestRaceTimeMs == existing().bestRaceTimeMs &&
+                       incoming().bestScore == existing().bestScore &&
+                       incoming().dailyChallenge == existing().dailyChallenge &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+
+      allow delete: if isSignedIn() &&
+                       isValidId(notificationId) &&
                        (existing().recipientUid == request.auth.uid || existing().senderUid == request.auth.uid);
     }
   }

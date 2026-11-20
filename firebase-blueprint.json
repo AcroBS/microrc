@@ -700,6 +700,104 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "LeaderboardNotification": {
+      "title": "LeaderboardNotification",
+      "description": "Real-time notification dispatched to accepted friends when a racer posts a new time or score to a track or Daily Challenge leaderboard.",
+      "type": "object",
+      "properties": {
+        "friendshipId": {
+          "type": "string",
+          "description": "Accepted friendship document ID verifying sender and recipient relationship."
+        },
+        "senderUid": {
+          "type": "string",
+          "description": "UID of the racer who posted the new time."
+        },
+        "senderName": {
+          "type": "string",
+          "description": "Display callsign of the racer."
+        },
+        "senderCarType": {
+          "type": "string",
+          "description": "Equipped RcCarType name."
+        },
+        "senderColorArgb": {
+          "type": "integer",
+          "description": "Primary car ARGB color."
+        },
+        "recipientUid": {
+          "type": "string",
+          "description": "UID of the friend receiving the notification."
+        },
+        "gameMode": {
+          "type": "string",
+          "enum": ["RACE", "STUNTS", "ARENA"],
+          "description": "Leaderboard mode."
+        },
+        "trackKey": {
+          "type": "string",
+          "description": "Track identifier or daily_yyyyMMdd key."
+        },
+        "trackName": {
+          "type": "string",
+          "description": "Human-readable track name."
+        },
+        "boardKey": {
+          "type": "string",
+          "description": "Composite leaderboard partition key."
+        },
+        "totalLaps": {
+          "type": "integer",
+          "description": "Lap count (1..9)."
+        },
+        "bestRaceTimeMs": {
+          "type": "integer",
+          "description": "New finish time in milliseconds."
+        },
+        "bestScore": {
+          "type": "integer",
+          "description": "Score for Stunt Gauntlet or Points modes."
+        },
+        "dailyChallenge": {
+          "type": "boolean",
+          "description": "True when posted on a Daily Challenge board."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["UNREAD", "DISMISSED"],
+          "description": "Delivery read/dismissed status."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp written via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Update timestamp written via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "friendshipId",
+        "senderUid",
+        "senderName",
+        "senderCarType",
+        "senderColorArgb",
+        "recipientUid",
+        "gameMode",
+        "trackKey",
+        "trackName",
+        "boardKey",
+        "totalLaps",
+        "bestRaceTimeMs",
+        "bestScore",
+        "dailyChallenge",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -738,6 +836,10 @@
     "/sessionInvites/{inviteId}": {
       "schema": "SessionInvite",
       "description": "Real-time lobby join notifications delivered to invited friends."
+    },
+    "/leaderboardNotifications/{notificationId}": {
+      "schema": "LeaderboardNotification",
+      "description": "Real-time notifications sent to friends when a new personal best is posted to a leaderboard."
     }
   }
 }
