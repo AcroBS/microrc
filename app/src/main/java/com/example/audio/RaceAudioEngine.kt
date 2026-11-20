@@ -1,8 +1,12 @@
 package com.example.audio
 
+import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.media.MediaPlayer
+import androidx.annotation.RawRes
+import com.example.R
 import com.example.model.AudioSettings
 import com.example.model.RacePhase
 import com.example.model.RaceSnapshot
@@ -12,9 +16,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.exp
 import kotlin.math.hypot
 import kotlin.math.pow
 import kotlin.math.sin
@@ -22,16 +27,16 @@ import kotlin.math.tanh
 import kotlin.random.Random
 
 /**
- * Real-time procedural studio synthesizer & SFX engine:
+ * Hybrid studio audio & SFX engine:
  *  - Calm semi-electronic ambient menu background music (warm Rhodes/pad 9th chords,
- *    soft sub-bass, sparse echoed electronic bell plucks).
- *  - Realistic, smooth, low-stress race soundtracks that change randomly on every run
- *    (Karplus-Strong physical plucked strings, warm filtered electric piano/polysynth chords,
- *    damped stereo-style delay echo, and relaxed brushed percussion).
+ *    soft sub-bass, sparse echoed electronic bell plucks via AudioTrack).
+ *  - Bundled studio race soundtracks (.m4a in res/raw) where one track is randomly selected
+ *    per race run (without immediate back-to-back repeats) and played via MediaPlayer.
  *  - Smooth slewed per-car RC electric motor sound modulated by speed & proximity.
  */
 class RaceAudioEngine(
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val context: Context? = null
 ) {
     enum class AudioMode {
         MENU,
@@ -41,95 +46,36 @@ class RaceAudioEngine(
     data class RaceTrackTheme(
         val index: Int,
         val name: String,
-        val bpm: Int,
-        val swing: Double,
-        // 4-bar chord progression in MIDI note numbers (4-note 7th/9th voicings)
-        val chordMidi: Array<IntArray>,
-        // Bass root MIDI notes per bar
-        val bassRootsMidi: IntArray,
-        // Melodic scale MIDI notes (pentatonic / Dorian / Lydian color tones)
-        val leadScaleMidi: IntArray,
-        val padCutoff: Double,
-        val bassBrightness: Double,
-        val kickPatternMask: Int,
-        val rimPatternMask: Int
-    )
-
-    class RaceRunArrangement(
-        val theme: RaceTrackTheme,
-        val bassSteps: Array<IntArray>, // 8 bars x 16 steps (-1 = sustain/rest, >=0 MIDI note)
-        val leadSteps: Array<IntArray>  // 8 bars x 16 steps (-1 = rest, >=0 MIDI note)
+        @RawRes val rawResId: Int
     )
 
     private val sampleRate = 32000
     private val chunkSamples = 1024
 
     private var audioJob: Job? = null
+    private val mediaMutex = Mutex()
+    private var raceMediaPlayer: MediaPlayer? = null
+    private var preparedThemeIndex: Int = -1
+    private var preparedRunCounter: Int = -1
+
     @Volatile private var currentSnapshot: RaceSnapshot? = null
     @Volatile private var localPlayerId: String = ""
     @Volatile private var settings: AudioSettings = AudioSettings()
     @Volatile private var mode: AudioMode = AudioMode.MENU
     @Volatile private var appInForeground: Boolean = true
-    @Volatile private var currentRunArrangement: RaceRunArrangement = buildArrangement(THEMES[0], Random(1L))
+    @Volatile private var currentRunTheme: RaceTrackTheme = THEMES[0]
     @Volatile private var runChangeCounter: Int = 0
+    @Volatile private var lastSnapshotFinished: Boolean = false
     private var lastThemeIndex: Int = -1
 
     val activeThemeIndex: Int
-        get() = currentRunArrangement.theme.index
+        get() = currentRunTheme.index
 
     val activeThemeName: String
-        get() = currentRunArrangement.theme.name
+        get() = currentRunTheme.name
 
     /**
-     * Karplus-Strong physical waveguide plucked-string voice for realistic bass & guitar plucks.
-     */
-    private class PluckedStringVoice(maxDelaySamples: Int = 1024) {
-        private val buffer = DoubleArray(maxDelaySamples)
-        private var length = 200
-        private var idx = 0
-        private var prevOut = 0.0
-        private var damping = 0.994
-        private var brightness = 0.45
-        private var active = false
-
-        fun pluck(freqHz: Double, sampleRate: Int, velocity: Double, toneBrightness: Double, sustain: Double, rng: Random) {
-            val len = (sampleRate / freqHz.coerceIn(36.0, 1400.0)).toInt().coerceIn(24, buffer.size - 1)
-            length = len
-            idx = 0
-            prevOut = 0.0
-            brightness = toneBrightness.coerceIn(0.18, 0.72)
-            damping = sustain.coerceIn(0.982, 0.9985)
-            // Smoothly filtered pick impulse so string attack sounds warm and realistic, never harsh
-            var lp = 0.0
-            for (i in 0 until len) {
-                val window = sin(PI * (i.toDouble() / len))
-                val raw = (rng.nextDouble() * 2.0 - 1.0) * velocity * window
-                lp += (raw - lp) * brightness
-                buffer[i] = lp
-            }
-            active = true
-        }
-
-        fun nextSample(): Double {
-            if (!active) return 0.0
-            val cur = buffer[idx]
-            val nextIdx = if (idx + 1 >= length) 0 else idx + 1
-            val nxt = buffer[nextIdx]
-            // Low-pass averaging waveguide feedback
-            val averaged = (cur * (1.0 - 0.42 * (1.0 - brightness)) + nxt * (0.42 * (1.0 - brightness))) * damping
-            prevOut = averaged
-            buffer[idx] = averaged
-            idx = nextIdx
-            if (abs(cur) < 1e-5 && abs(nxt) < 1e-5) {
-                // Check if energy has decayed
-                active = true
-            }
-            return cur
-        }
-    }
-
-    /**
-     * Warm damped feedback echo line for spacious electronic depth without clutter.
+     * Warm damped feedback echo line for spacious electronic menu depth without clutter.
      */
     private class WarmEchoDelay(delaySamples: Int) {
         private val buf = DoubleArray(delaySamples.coerceAtLeast(64))
@@ -163,8 +109,14 @@ class RaceAudioEngine(
     private val carVoices = Array(4) { CarVoiceState() }
 
     fun updateSnapshot(snapshot: RaceSnapshot?, playerId: String) {
+        val isFinished = snapshot?.phase == RacePhase.FINISHED.name
+        val finishChanged = isFinished != lastSnapshotFinished
         currentSnapshot = snapshot
         localPlayerId = playerId
+        if (finishChanged) {
+            lastSnapshotFinished = isFinished
+            syncRaceMediaPlayer()
+        }
     }
 
     fun updateAudioSettings(audioSettings: AudioSettings) {
@@ -175,7 +127,9 @@ class RaceAudioEngine(
     fun setAppForeground(inForeground: Boolean) {
         appInForeground = inForeground
         if (!inForeground) {
-            stop()
+            audioJob?.cancel()
+            audioJob = null
+            syncRaceMediaPlayer()
         } else {
             syncEngineLoop()
         }
@@ -186,23 +140,25 @@ class RaceAudioEngine(
      */
     fun setMenuMode() {
         currentSnapshot = null
+        lastSnapshotFinished = false
         mode = AudioMode.MENU
         syncEngineLoop()
     }
 
     /**
-     * Randomizes a brand-new race soundtrack arrangement for this run (guaranteeing no immediate
-     * theme repeat across consecutive runs) and starts/continues playback in RACE mode.
+     * Randomly selects one bundled race soundtrack for this run (guaranteeing no immediate
+     * repeat across consecutive runs) and starts playback in RACE mode.
      */
     fun startRaceRun(seed: Long = System.nanoTime() xor System.currentTimeMillis()): RaceTrackTheme {
         val theme = selectNextRunArrangement(seed)
+        lastSnapshotFinished = currentSnapshot?.phase == RacePhase.FINISHED.name
         mode = AudioMode.RACE
         syncEngineLoop()
         return theme
     }
 
     /**
-     * Pure JVM-safe arrangement selector (also exercised directly in unit tests).
+     * Pure JVM-safe soundtrack selector (also exercised directly in unit tests).
      */
     @Synchronized
     fun selectNextRunArrangement(seed: Long = System.nanoTime() xor System.currentTimeMillis()): RaceTrackTheme {
@@ -214,7 +170,7 @@ class RaceAudioEngine(
         }
         val chosen = candidates[rng.nextInt(candidates.size)]
         lastThemeIndex = chosen.index
-        currentRunArrangement = buildArrangement(chosen, rng)
+        currentRunTheme = chosen
         runChangeCounter += 1
         return chosen
     }
@@ -224,12 +180,141 @@ class RaceAudioEngine(
     }
 
     private fun syncEngineLoop() {
+        syncRaceMediaPlayer()
         val cfg = settings
-        val wantLoop = appInForeground && (cfg.musicEnabled || (mode == AudioMode.RACE && cfg.carSfxEnabled))
-        if (wantLoop) {
+        val wantAudioTrackLoop = appInForeground && when (mode) {
+            AudioMode.MENU -> cfg.musicEnabled
+            AudioMode.RACE -> cfg.carSfxEnabled
+        }
+        if (wantAudioTrackLoop) {
             ensureLoopStarted()
         } else {
-            stop()
+            audioJob?.cancel()
+            audioJob = null
+        }
+    }
+
+    private fun syncRaceMediaPlayer() {
+        val ctx = context ?: return
+        scope.launch(Dispatchers.IO) {
+            mediaMutex.withLock {
+                reconcileMediaPlayerLocked(ctx)
+            }
+        }
+    }
+
+    private fun reconcileMediaPlayerLocked(ctx: Context) {
+        val activeMode = mode
+        val cfg = settings
+        val foreground = appInForeground
+        val finished = lastSnapshotFinished || currentSnapshot?.phase == RacePhase.FINISHED.name
+
+        if (activeMode != AudioMode.RACE) {
+            releaseMediaPlayerLocked()
+            return
+        }
+
+        val wantPlaying = foreground && cfg.musicEnabled && !finished
+        if (!wantPlaying) {
+            val mp = raceMediaPlayer
+            if (mp != null) {
+                runCatching {
+                    if (mp.isPlaying) {
+                        mp.pause()
+                    }
+                    if (finished) {
+                        mp.seekTo(0)
+                    }
+                }
+            }
+            return
+        }
+
+        val targetTheme = currentRunTheme
+        val targetRunId = runChangeCounter
+        val needsNewPlayer = raceMediaPlayer == null ||
+            preparedThemeIndex != targetTheme.index ||
+            preparedRunCounter != targetRunId
+
+        if (needsNewPlayer) {
+            releaseMediaPlayerLocked()
+            val created = runCatching {
+                val afd = runCatching { ctx.resources.openRawResourceFd(targetTheme.rawResId) }.getOrNull()
+                if (afd != null) {
+                    MediaPlayer().apply {
+                        setAudioAttributes(
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_GAME)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                                .build()
+                        )
+                        try {
+                            setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                        } finally {
+                            runCatching { afd.close() }
+                        }
+                        isLooping = true
+                        setVolume(0.76f, 0.76f)
+                        prepare()
+                    }
+                } else {
+                    MediaPlayer.create(ctx, targetTheme.rawResId)?.apply {
+                        isLooping = true
+                        setVolume(0.76f, 0.76f)
+                    }
+                }
+            }.getOrNull()
+
+            if (created != null) {
+                // Re-verify state in case mode/settings changed while preparing
+                val stillWanted = appInForeground &&
+                    mode == AudioMode.RACE &&
+                    settings.musicEnabled &&
+                    !lastSnapshotFinished &&
+                    currentSnapshot?.phase != RacePhase.FINISHED.name &&
+                    currentRunTheme.index == targetTheme.index &&
+                    runChangeCounter == targetRunId
+                if (stillWanted) {
+                    runCatching { created.start() }
+                        .onSuccess {
+                            raceMediaPlayer = created
+                            preparedThemeIndex = targetTheme.index
+                            preparedRunCounter = targetRunId
+                        }
+                        .onFailure {
+                            runCatching { created.release() }
+                        }
+                } else {
+                    runCatching { created.release() }
+                }
+            }
+        } else {
+            val mp = raceMediaPlayer
+            if (mp != null) {
+                runCatching {
+                    if (!mp.isPlaying) {
+                        mp.start()
+                    }
+                }.onFailure {
+                    releaseMediaPlayerLocked()
+                }
+            }
+        }
+    }
+
+    private fun releaseMediaPlayerLocked() {
+        val mp = raceMediaPlayer
+        raceMediaPlayer = null
+        preparedThemeIndex = -1
+        preparedRunCounter = -1
+        if (mp != null) {
+            runCatching {
+                if (mp.isPlaying) {
+                    mp.stop()
+                }
+            }
+            runCatching { mp.reset() }
+            runCatching { mp.release() }
         }
     }
 
@@ -274,10 +359,6 @@ class RaceAudioEngine(
 
             val pcm = ShortArray(chunkSamples)
             val voiceRng = Random(System.nanoTime())
-
-            // Plucked string voices (realistic acoustic/electric bass & melodic guitar plucks)
-            val bassString = PluckedStringVoice(1024)
-            val leadString = PluckedStringVoice(1024)
             val echo = WarmEchoDelay((sampleRate * 0.335).toInt())
 
             // Polyphonic chord oscillator phases (4 chord tones + sub bass)
@@ -287,7 +368,7 @@ class RaceAudioEngine(
             var subPhase = 0.0
             var subFreq = 65.41
 
-            // Bell / soft lead voice state
+            // Bell voice state
             var bellPhase = 0.0
             var bellOvertonePhase = 0.0
             var bellFreq = 440.0
@@ -298,21 +379,18 @@ class RaceAudioEngine(
             var padLp2 = 0.0
             var chordStrikeEnv = 0.0
 
-            // Percussion synthesis state
+            // Soft menu percussion synthesis state
             var kickPhase = 0.0
             var kickEnv = 0.0
             var kickPitchEnv = 0.0
-            var rimEnv = 0.0
-            var rimPhase = 0.0
             var hatEnv = 0.0
             var hatBpState = 0.0
             var noiseSeed = 0x5A17C3
 
-            // Sequencer tracking
+            // Sequencer tracking for menu music
             var stepSamplePos = 0.0
             var stepIndex = -1
             var observedMode = mode
-            var observedRunId = runChangeCounter
 
             // Menu sequencer patterns (calm semi-electronic: Cmaj9 -> Am9 -> Fmaj9 -> G6sus4)
             val menuChords = arrayOf(
@@ -336,16 +414,12 @@ class RaceAudioEngine(
                     val cfg = settings
                     val activeMode = mode
                     val snap = currentSnapshot
-                    val arr = currentRunArrangement
 
-                    if (activeMode != observedMode || observedRunId != runChangeCounter) {
+                    if (activeMode != observedMode) {
                         observedMode = activeMode
-                        observedRunId = runChangeCounter
                         stepIndex = -1
                         stepSamplePos = 0.0
-                        if (activeMode == AudioMode.MENU) {
-                            echo.clear()
-                        }
+                        echo.clear()
                     }
 
                     val inActiveRace = activeMode == AudioMode.RACE &&
@@ -354,16 +428,16 @@ class RaceAudioEngine(
 
                     refreshCarVoices(if (inActiveRace) snap else null)
 
-                    val bpm = if (activeMode == AudioMode.MENU) 88 else arr.theme.bpm
+                    val bpm = 88
                     val baseStepSamples = (sampleRate * 60.0) / (bpm * 4.0)
 
                     for (i in 0 until chunkSamples) {
                         var mix = 0.0
 
-                        if (cfg.musicEnabled) {
-                            // Trigger next 16th-note step when needed
+                        // Keep calm semi-electronic menu music in MENU mode
+                        if (activeMode == AudioMode.MENU && cfg.musicEnabled) {
                             val currentStepOdd = (stepIndex and 1) == 1
-                            val swingFactor = if (activeMode == AudioMode.MENU) 0.03 else arr.theme.swing
+                            val swingFactor = 0.03
                             val curStepLen = baseStepSamples * (if (currentStepOdd) (1.0 - swingFactor) else (1.0 + swingFactor))
 
                             if (stepIndex < 0 || stepSamplePos >= curStepLen) {
@@ -371,101 +445,33 @@ class RaceAudioEngine(
                                 stepIndex = (stepIndex + 1) and 0x7FFFFFFF
                                 val stepInBar = stepIndex % 16
 
-                                if (activeMode == AudioMode.MENU) {
-                                    // Calm semi-electronic menu music triggers
-                                    val bar = (stepIndex / 16) % menuChords.size
-                                    if (stepInBar == 0 || stepInBar == 10) {
-                                        val chord = menuChords[bar]
-                                        for (v in 0 until 4) {
-                                            chordFreqs[v] = midiToHz(chord[v])
-                                        }
-                                        subFreq = midiToHz(menuBassMidi[bar])
-                                        chordStrikeEnv = if (stepInBar == 0) 0.85 else 0.42
+                                val bar = (stepIndex / 16) % menuChords.size
+                                if (stepInBar == 0 || stepInBar == 10) {
+                                    val chord = menuChords[bar]
+                                    for (v in 0 until 4) {
+                                        chordFreqs[v] = midiToHz(chord[v])
                                     }
-                                    // Soft sub heartbeat on step 0 and gentle pulse on step 10
-                                    if (stepInBar == 0) {
-                                        kickEnv = 0.34
-                                        kickPitchEnv = 0.35
-                                    } else if (stepInBar == 10) {
-                                        kickEnv = 0.18
-                                        kickPitchEnv = 0.22
-                                    }
-                                    if (stepInBar == 4 || stepInBar == 12) {
-                                        hatEnv = 0.14
-                                    }
-                                    // Sparse crystalline electronic bell plucks
-                                    val bellIdx = menuBellPattern[stepIndex % menuBellPattern.size]
-                                    if (bellIdx >= 0 && voiceRng.nextFloat() < 0.82f) {
-                                        bellFreq = midiToHz(menuBellScale[bellIdx % menuBellScale.size])
-                                        bellEnv = 0.55
-                                    }
-                                } else if (snap == null || snap.phase != RacePhase.FINISHED.name) {
-                                    // Realistic, smooth race soundtrack triggers (unique per run)
-                                    val theme = arr.theme
-                                    val bar4 = (stepIndex / 16) % 4
-                                    val bar8 = (stepIndex / 16) % 8
-
-                                    // Warm electric-piano / synth chord comping
-                                    if (stepInBar == 0 || stepInBar == 6 || stepInBar == 12) {
-                                        val chord = theme.chordMidi[bar4]
-                                        for (v in 0 until 4) {
-                                            chordFreqs[v] = midiToHz(chord[v])
-                                        }
-                                        subFreq = midiToHz(theme.bassRootsMidi[bar4])
-                                        chordStrikeEnv = when (stepInBar) {
-                                            0 -> 0.92
-                                            6 -> 0.58
-                                            else -> 0.45
-                                        }
-                                    }
-
-                                    // Plucked acoustic/electric bassline
-                                    val bassMidi = arr.bassSteps[bar8][stepInBar]
-                                    if (bassMidi > 0) {
-                                        bassString.pluck(
-                                            freqHz = midiToHz(bassMidi),
-                                            sampleRate = sampleRate,
-                                            velocity = if (stepInBar % 4 == 0) 0.72 else 0.54,
-                                            toneBrightness = theme.bassBrightness,
-                                            sustain = 0.9955,
-                                            rng = voiceRng
-                                        )
-                                    }
-
-                                    // Melodic plucked guitar / bell synth voice
-                                    val leadMidi = arr.leadSteps[bar8][stepInBar]
-                                    if (leadMidi > 0) {
-                                        leadString.pluck(
-                                            freqHz = midiToHz(leadMidi),
-                                            sampleRate = sampleRate,
-                                            velocity = 0.48,
-                                            toneBrightness = 0.52,
-                                            sustain = 0.9965,
-                                            rng = voiceRng
-                                        )
-                                        bellFreq = midiToHz(leadMidi)
-                                        bellEnv = 0.34
-                                    }
-
-                                    // Smooth, relaxed drum groove
-                                    val bit = 1 shl stepInBar
-                                    if ((theme.kickPatternMask and bit) != 0) {
-                                        kickEnv = if (stepInBar == 0 || stepInBar == 8) 0.75 else 0.52
-                                        kickPitchEnv = 1.0
-                                    }
-                                    if ((theme.rimPatternMask and bit) != 0) {
-                                        rimEnv = 0.62
-                                    }
-                                    if (stepInBar % 2 == 0) {
-                                        hatEnv = if (stepInBar % 4 == 2) 0.34 else 0.18
-                                    } else if (stepInBar == 7 || stepInBar == 15) {
-                                        hatEnv = 0.12
-                                    }
+                                    subFreq = midiToHz(menuBassMidi[bar])
+                                    chordStrikeEnv = if (stepInBar == 0) 0.85 else 0.42
+                                }
+                                if (stepInBar == 0) {
+                                    kickEnv = 0.34
+                                    kickPitchEnv = 0.35
+                                } else if (stepInBar == 10) {
+                                    kickEnv = 0.18
+                                    kickPitchEnv = 0.22
+                                }
+                                if (stepInBar == 4 || stepInBar == 12) {
+                                    hatEnv = 0.14
+                                }
+                                val bellIdx = menuBellPattern[stepIndex % menuBellPattern.size]
+                                if (bellIdx >= 0 && voiceRng.nextFloat() < 0.82f) {
+                                    bellFreq = midiToHz(menuBellScale[bellIdx % menuBellScale.size])
+                                    bellEnv = 0.55
                                 }
                             }
                             stepSamplePos += 1.0
 
-                            // Synthesize warm polyphonic chords (Rhodes + analog pad)
                             var rawChord = 0.0
                             for (v in 0 until 4) {
                                 val f = chordFreqs[v]
@@ -478,43 +484,30 @@ class RaceAudioEngine(
                             }
                             chordStrikeEnv *= 0.99945
 
-                            // 2-pole warm low-pass filter on chords
-                            val cutoff = if (activeMode == AudioMode.MENU) {
-                                0.055 + 0.025 * sin(2.0 * PI * (renderedFrames + i) / (sampleRate * 6.5))
-                            } else {
-                                arr.theme.padCutoff + chordStrikeEnv * 0.045
-                            }
+                            val cutoff = 0.055 + 0.025 * sin(2.0 * PI * (renderedFrames + i) / (sampleRate * 6.5))
                             padLp1 += (rawChord - padLp1) * cutoff
                             padLp2 += (padLp1 - padLp2) * cutoff
 
-                            // Sub-bass warmth
                             subPhase = (subPhase + subFreq / sampleRate) % 1.0
-                            val subSample = sin(2.0 * PI * subPhase) *
-                                (if (activeMode == AudioMode.MENU) 0.11 else 0.09)
+                            val subSample = sin(2.0 * PI * subPhase) * 0.11
 
-                            // Crystalline electronic bell / lead shimmer + Karplus-Strong strings
                             var melodicDry = 0.0
                             if (bellEnv > 0.0005) {
                                 bellPhase = (bellPhase + bellFreq / sampleRate) % 1.0
                                 bellOvertonePhase = (bellOvertonePhase + (bellFreq * 2.0) / sampleRate) % 1.0
                                 val bellTone = sin(2.0 * PI * bellPhase) * 0.78 +
                                     sin(2.0 * PI * bellOvertonePhase) * 0.22 * bellEnv
-                                melodicDry += bellTone * bellEnv * (if (activeMode == AudioMode.MENU) 0.15 else 0.11)
-                                bellEnv *= if (activeMode == AudioMode.MENU) 0.99955 else 0.99925
+                                melodicDry += bellTone * bellEnv * 0.15
+                                bellEnv *= 0.99955
                             }
-
-                            val bassPluck = if (activeMode == AudioMode.RACE) bassString.nextSample() * 0.30 else 0.0
-                            val leadPluck = if (activeMode == AudioMode.RACE) leadString.nextSample() * 0.22 else 0.0
-                            melodicDry += leadPluck
 
                             val echoedMelodic = echo.process(
                                 input = melodicDry,
-                                feedback = if (activeMode == AudioMode.MENU) 0.46 else 0.34,
+                                feedback = 0.46,
                                 dampCoeff = 0.22,
-                                wetMix = if (activeMode == AudioMode.MENU) 0.42 else 0.28
+                                wetMix = 0.42
                             )
 
-                            // Smooth studio percussion
                             var drumMix = 0.0
                             if (kickEnv > 0.001) {
                                 val kFreq = 49.0 + 78.0 * kickPitchEnv
@@ -529,20 +522,12 @@ class RaceAudioEngine(
                             hatBpState += (white - hatBpState) * 0.36
                             val airyNoise = white - hatBpState
 
-                            if (rimEnv > 0.001) {
-                                rimPhase = (rimPhase + 188.0 / sampleRate) % 1.0
-                                val woodBody = sin(2.0 * PI * rimPhase) * 0.55
-                                val brushSnap = airyNoise * 0.45
-                                drumMix += (woodBody + brushSnap) * rimEnv * 0.14
-                                rimEnv *= 0.9952
-                            }
                             if (hatEnv > 0.001) {
                                 drumMix += airyNoise * hatEnv * 0.075
                                 hatEnv *= 0.9925
                             }
 
-                            val padGain = if (activeMode == AudioMode.MENU) 0.34 else 0.26
-                            mix += padLp2 * padGain + subSample + bassPluck + melodicDry + echoedMelodic + drumMix
+                            mix += padLp2 * 0.34 + subSample + melodicDry + echoedMelodic + drumMix
                         }
 
                         // Per-car smooth slewed RC electric motor sounds during active races
@@ -628,148 +613,47 @@ class RaceAudioEngine(
     fun stop() {
         audioJob?.cancel()
         audioJob = null
+        CoroutineScope(Dispatchers.IO).launch {
+            mediaMutex.withLock {
+                releaseMediaPlayerLocked()
+            }
+        }
     }
 
     companion object {
         private fun midiToHz(midi: Int): Double = 440.0 * 2.0.pow((midi - 69) / 12.0)
 
         val THEMES: List<RaceTrackTheme> = listOf(
-            // 0: Sunset Coast Groove — Warm Rhodes & acoustic funk bass (Fmaj7 - Em7 - Dm9 - Cmaj7)
             RaceTrackTheme(
                 index = 0,
-                name = "Sunset Coast Groove",
-                bpm = 106,
-                swing = 0.07,
-                chordMidi = arrayOf(
-                    intArrayOf(53, 57, 60, 64), // Fmaj7
-                    intArrayOf(52, 55, 59, 62), // Em7
-                    intArrayOf(50, 53, 57, 64), // Dm9
-                    intArrayOf(48, 52, 55, 59)  // Cmaj7
-                ),
-                bassRootsMidi = intArrayOf(41, 40, 38, 36),
-                leadScaleMidi = intArrayOf(64, 67, 69, 72, 74, 76, 79),
-                padCutoff = 0.11,
-                bassBrightness = 0.44,
-                kickPatternMask = 0b0000_0101_0010_0001, // steps 0, 5, 8, 10
-                rimPatternMask = 0b0001_0000_0001_0000   // steps 4, 12
+                name = "Apex Glide DnB",
+                rawResId = R.raw.apex_glide_dnb
             ),
-            // 1: Midnight Neon Cruise — Smooth synthwave groove (Am9 - Fmaj7 - Cmaj7 - G6)
             RaceTrackTheme(
                 index = 1,
-                name = "Midnight Neon Cruise",
-                bpm = 112,
-                swing = 0.03,
-                chordMidi = arrayOf(
-                    intArrayOf(57, 60, 64, 71), // Am9
-                    intArrayOf(53, 57, 60, 64), // Fmaj7
-                    intArrayOf(48, 52, 55, 59), // Cmaj7
-                    intArrayOf(55, 59, 62, 64)  // G6
-                ),
-                bassRootsMidi = intArrayOf(33, 41, 36, 43),
-                leadScaleMidi = intArrayOf(64, 67, 69, 71, 72, 76, 79),
-                padCutoff = 0.13,
-                bassBrightness = 0.50,
-                kickPatternMask = 0b0001_0001_0001_0001, // relaxed four-on-the-floor pulse
-                rimPatternMask = 0b0001_0000_0001_0000
+                name = "Cardboard Circuit Chaos",
+                rawResId = R.raw.cardboard_circuit_chaos
             ),
-            // 2: Paddock Lounge Funk — Syncopated warm clav/Rhodes & walking bass (Dm9 - G13 - Cmaj9 - A7sus4)
             RaceTrackTheme(
                 index = 2,
-                name = "Paddock Lounge Funk",
-                bpm = 108,
-                swing = 0.08,
-                chordMidi = arrayOf(
-                    intArrayOf(50, 53, 57, 64), // Dm9
-                    intArrayOf(55, 59, 62, 64), // G13 color
-                    intArrayOf(48, 52, 55, 62), // Cmaj9
-                    intArrayOf(57, 62, 64, 67)  // A7sus4
-                ),
-                bassRootsMidi = intArrayOf(38, 43, 36, 33),
-                leadScaleMidi = intArrayOf(62, 65, 67, 69, 72, 74, 76),
-                padCutoff = 0.12,
-                bassBrightness = 0.48,
-                kickPatternMask = 0b0000_1001_0100_0001, // steps 0, 6, 8, 11
-                rimPatternMask = 0b0001_0000_0001_0000
+                name = "MicroRC Circuit Dash",
+                rawResId = R.raw.microrc_circuit_dash
             ),
-            // 3: Horizon Electro-Jazz — Chill liquid groove (Em9 - Cmaj7 - Am9 - B7sus4)
             RaceTrackTheme(
                 index = 3,
-                name = "Horizon Electro-Jazz",
-                bpm = 104,
-                swing = 0.06,
-                chordMidi = arrayOf(
-                    intArrayOf(52, 55, 59, 66), // Em9
-                    intArrayOf(48, 52, 55, 59), // Cmaj7
-                    intArrayOf(57, 60, 64, 71), // Am9
-                    intArrayOf(59, 64, 66, 69)  // B7sus4
-                ),
-                bassRootsMidi = intArrayOf(40, 36, 33, 35),
-                leadScaleMidi = intArrayOf(64, 66, 67, 71, 74, 76, 78),
-                padCutoff = 0.10,
-                bassBrightness = 0.40,
-                kickPatternMask = 0b0010_0000_0100_1001, // airy broken-beat groove
-                rimPatternMask = 0b0001_0000_0001_0000
+                name = "Neon Arena Drift",
+                rawResId = R.raw.neon_arena_drift
             ),
-            // 4: Velvet Drift Circuit — Warm melodic cruiser (Gm9 - Ebmaj7 - Bbmaj7 - F6)
             RaceTrackTheme(
                 index = 4,
-                name = "Velvet Drift Circuit",
-                bpm = 114,
-                swing = 0.04,
-                chordMidi = arrayOf(
-                    intArrayOf(55, 58, 62, 69), // Gm9
-                    intArrayOf(51, 55, 58, 62), // Ebmaj7
-                    intArrayOf(46, 50, 53, 57), // Bbmaj7
-                    intArrayOf(53, 57, 60, 62)  // F6
-                ),
-                bassRootsMidi = intArrayOf(43, 39, 34, 41),
-                leadScaleMidi = intArrayOf(62, 65, 67, 70, 72, 74, 77),
-                padCutoff = 0.125,
-                bassBrightness = 0.46,
-                kickPatternMask = 0b0000_0101_0000_1001, // steps 0, 3, 8, 10
-                rimPatternMask = 0b0001_0000_0001_0000
+                name = "Pocket Pitstop Funk",
+                rawResId = R.raw.pocket_pitstop_funk
+            ),
+            RaceTrackTheme(
+                index = 5,
+                name = "Volt Buggy Drift",
+                rawResId = R.raw.volt_buggy_drift
             )
         )
-
-        private fun buildArrangement(theme: RaceTrackTheme, rng: Random): RaceRunArrangement {
-            val bassSteps = Array(8) { bar ->
-                val root = theme.bassRootsMidi[bar % 4]
-                val fifth = root + 7
-                val octave = root + 12
-                IntArray(16) { step ->
-                    when {
-                        step == 0 -> root
-                        step == 6 && rng.nextFloat() < 0.75f -> fifth
-                        step == 8 -> if (rng.nextFloat() < 0.65f) root else octave
-                        step == 10 && rng.nextFloat() < 0.55f -> octave
-                        step == 14 && rng.nextFloat() < 0.65f -> fifth
-                        step == 3 && rng.nextFloat() < 0.35f -> root
-                        else -> -1
-                    }
-                }
-            }
-
-            // Build tasteful, breathing melodic phrases (plenty of rests so it's never stressful)
-            var motifDeg = rng.nextInt(theme.leadScaleMidi.size)
-            val leadSteps = Array(8) { bar ->
-                IntArray(16) { step ->
-                    val onMusicalSlot = step == 0 || step == 3 || step == 6 || step == 8 || step == 10 || step == 12 || step == 14
-                    val density = if (bar % 2 == 0) 0.44f else 0.36f
-                    if (onMusicalSlot && rng.nextFloat() < density) {
-                        val delta = rng.nextInt(-2, 3)
-                        motifDeg = (motifDeg + delta).coerceIn(0, theme.leadScaleMidi.size - 1)
-                        theme.leadScaleMidi[motifDeg]
-                    } else {
-                        -1
-                    }
-                }
-            }
-
-            return RaceRunArrangement(
-                theme = theme,
-                bassSteps = bassSteps,
-                leadSteps = leadSteps
-            )
-        }
     }
 }

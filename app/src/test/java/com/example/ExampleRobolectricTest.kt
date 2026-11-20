@@ -777,6 +777,27 @@ class ExampleRobolectricTest {
             com.example.data.formatUserFacingOnlineErrorOrNull(realTimeout, "Fallback error")
         )
     }
+
+    @Test
+    fun raceAudioEngine_bundlesAllSixM4aRaceSoundtracksAndKeepsMenuMode() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        assertEquals(6, com.example.audio.RaceAudioEngine.THEMES.size)
+        com.example.audio.RaceAudioEngine.THEMES.forEach { theme ->
+            val stream = context.resources.openRawResource(theme.rawResId)
+            val availableBytes = stream.use { it.available() }
+            assertTrue(
+                "Bundled soundtrack ${theme.name} should have non-empty raw resource bytes",
+                availableBytes > 0
+            )
+        }
+
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob())
+        val engine = com.example.audio.RaceAudioEngine(scope, context)
+        engine.setMenuMode()
+        val chosen = engine.startRaceRun(seed = 42L)
+        assertTrue(com.example.audio.RaceAudioEngine.THEMES.contains(chosen))
+        assertEquals(chosen.name, engine.activeThemeName)
+        engine.setMenuMode()
+        engine.stop()
+    }
 }
-
-

@@ -50,7 +50,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val prefsRepo = PreferencesRepository(application)
     val raceManager = WifiP2pRaceManager(application, viewModelScope)
     val tiltController = TiltSteeringController(application)
-    val audioEngine = RaceAudioEngine(viewModelScope)
+    val audioEngine = RaceAudioEngine(viewModelScope, application.applicationContext)
     val hapticController = RcHapticController(application)
 
     val profile: StateFlow<PlayerProfile> = prefsRepo.profileFlow.stateIn(

@@ -564,10 +564,11 @@ class RaceEngineUnitTest {
 
     @Test
     fun raceAudioEngine_randomizesSoundtrackPerRunWithoutImmediateRepeats() {
+        assertEquals(6, RaceAudioEngine.THEMES.size)
         val scope = CoroutineScope(SupervisorJob())
         val audioEngine = RaceAudioEngine(scope)
         val pickedIndices = mutableListOf<Int>()
-        for (run in 1..20) {
+        for (run in 1..40) {
             val theme = audioEngine.selectNextRunArrangement(seed = run * 987654321L)
             if (pickedIndices.isNotEmpty()) {
                 assertTrue(
@@ -577,9 +578,10 @@ class RaceEngineUnitTest {
             }
             pickedIndices.add(theme.index)
         }
-        assertTrue(
-            "Multiple distinct race soundtracks should be chosen across runs",
-            pickedIndices.toSet().size >= 3
+        assertEquals(
+            "All 6 bundled race soundtracks should be selectable across runs",
+            6,
+            pickedIndices.toSet().size
         )
         audioEngine.stop()
     }
