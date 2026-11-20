@@ -89,6 +89,28 @@ suspend fun <T> withFirestoreTimeout(
     }
 }
 
+fun isSilentCoroutineCancellation(error: Throwable): Boolean {
+    val chain = generateSequence(error) { it.cause }.toList()
+    if (chain.any {
+            it is OnlineServerTimeoutException ||
+                it is TimeoutCancellationException ||
+                it is FirebaseFirestoreException
+        }
+    ) {
+        return false
+    }
+    if (chain.any { it is CancellationException }) {
+        return true
+    }
+    return chain.any { cause ->
+        val msg = cause.message.orEmpty()
+        msg.contains("StandaloneCoroutine was cancelled", ignoreCase = true) ||
+            msg.contains("ScopeCoroutine was cancelled", ignoreCase = true) ||
+            msg.contains("Job was cancelled", ignoreCase = true) ||
+            msg.contains("Child of the scoped flow was cancelled", ignoreCase = true)
+    }
+}
+
 fun rethrowIfScopeCancellation(e: Throwable) {
     if (e is CancellationException &&
         e !is TimeoutCancellationException &&
@@ -98,7 +120,15 @@ fun rethrowIfScopeCancellation(e: Throwable) {
     }
 }
 
+fun formatUserFacingOnlineErrorOrNull(error: Throwable, fallback: String): String? {
+    if (isSilentCoroutineCancellation(error)) return null
+    return formatUserFacingOnlineError(error, fallback)
+}
+
 fun formatUserFacingOnlineError(error: Throwable, fallback: String): String {
+    if (isSilentCoroutineCancellation(error)) {
+        return fallback
+    }
     val chain = generateSequence(error) { it.cause }.toList()
     val timeoutErr = chain.firstOrNull {
         it is OnlineServerTimeoutException || it is TimeoutCancellationException

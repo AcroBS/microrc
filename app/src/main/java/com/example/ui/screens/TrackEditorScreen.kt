@@ -5,8 +5,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,9 +14,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -51,10 +53,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -93,57 +95,38 @@ fun TrackEditorScreen(
     initialTrack: CustomTrackData?,
     savedTracks: List<CustomTrackData>,
     canApplyToLobby: Boolean,
+    hasBottomNav: Boolean = false,
     onSaveTrack: (CustomTrackData, Boolean) -> Unit,
     onDeleteTrack: (String) -> Unit,
     onBack: () -> Unit
 ) {
     BackHandler { onBack() }
 
-    var draft by remember(initialTrack) {
+    var draft by remember(initialTrack?.id) {
         mutableStateOf(initialTrack ?: TrackCatalog.defaultEditorOval())
     }
     var selectedNodeIdx by remember { mutableIntStateOf(0) }
     var activeTool by remember { mutableStateOf(EditorTool.MOVE_NODE) }
     var draggingNodeIdx by remember { mutableIntStateOf(-1) }
-    var canvasWidthPx by remember { mutableFloatStateOf(1f) }
-    var canvasHeightPx by remember { mutableFloatStateOf(1f) }
+    var savedBannerName by remember { mutableStateOf<String?>(null) }
 
     val previewTrack = remember(draft) { TrackCatalog.buildCustomTrack(draft) }
     val selectedTheme = remember(draft.themeId) {
         runCatching { TrackId.valueOf(draft.themeId) }.getOrDefault(TrackId.NEON_ROOFTOP)
     }
 
-    fun toWorldCoords(offset: Offset): Pair<Float, Float> {
-        val scale = minOf(canvasWidthPx / previewTrack.worldWidth, canvasHeightPx / previewTrack.worldHeight)
-            .coerceAtLeast(0.01f)
-        val tx = (canvasWidthPx - previewTrack.worldWidth * scale) / 2f
-        val ty = (canvasHeightPx - previewTrack.worldHeight * scale) / 2f
-        val wx = ((offset.x - tx) / scale).coerceIn(180f, previewTrack.worldWidth - 180f)
-        val wy = ((offset.y - ty) / scale).coerceIn(180f, previewTrack.worldHeight - 180f)
-        return wx to wy
-    }
+    val latestDraft by rememberUpdatedState(draft)
+    val latestTool by rememberUpdatedState(activeTool)
+    val latestPreviewTrack by rememberUpdatedState(previewTrack)
+    val scrollState = rememberScrollState()
 
-    fun findNearestControlNode(wx: Float, wy: Float, maxDist: Float = 155f): Int {
-        var best = -1
-        var bestD = maxDist
-        draft.controlPoints.forEachIndexed { idx, pt ->
-            val d = hypot(pt.x - wx, pt.y - wy)
-            if (d < bestD) {
-                bestD = d
-                best = idx
-            }
-        }
-        return best
-    }
-
-    fun findBestInsertIndex(wx: Float, wy: Float): Int {
-        val pts = draft.controlPoints
-        if (pts.size < 2) return pts.size
+    fun findBestInsertIndex(points: List<TrackPoint>, wx: Float, wy: Float): Int {
+        if (points.size < 2) return points.size
         var bestSegment = 0
         var bestScore = Float.MAX_VALUE
-        for (i in pts.indices) {
-            val a = pts[i]
-            val b = pts[(i + 1) % pts.size]
+        for (i in points.indices) {
+            val a = points[i]
+            val b = points[(i + 1) % points.size]
             val mx = (a.x + b.x) * 0.5f
             val my = (a.y + b.y) * 0.5f
             val d = hypot(wx - mx, wy - my)
@@ -155,6 +138,12 @@ fun TrackEditorScreen(
         return bestSegment
     }
 
+    val topLevelInsets = if (hasBottomNav) {
+        WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+    } else {
+        WindowInsets.safeDrawing
+    }
+
     Surface(
         color = MaterialTheme.colorScheme.background,
         modifier = Modifier.fillMaxSize()
@@ -162,25 +151,27 @@ fun TrackEditorScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing),
+                .windowInsetsPadding(topLevelInsets),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Row(
                 modifier = Modifier
                     .widthIn(max = 720.dp)
                     .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                    .padding(horizontal = if (hasBottomNav) 16.dp else 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier.testTag("editor_back_button")
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = MaterialTheme.colorScheme.onBackground
-                    )
+                if (!hasBottomNav) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.testTag("editor_back_button")
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onBackground
+                        )
+                    }
                 }
                 Text(
                     text = "Track Studio",
@@ -196,6 +187,7 @@ fun TrackEditorScreen(
                             roadHalfWidth = draft.roadHalfWidth
                         )
                         selectedNodeIdx = 0
+                        savedBannerName = null
                     },
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                     modifier = Modifier
@@ -212,117 +204,195 @@ fun TrackEditorScreen(
                 modifier = Modifier
                     .widthIn(max = 720.dp)
                     .weight(1f)
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(scrollState, enabled = draggingNodeIdx < 0)
                     .padding(horizontal = 14.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 val primaryColor = MaterialTheme.colorScheme.primary
                 val secondaryColor = MaterialTheme.colorScheme.secondary
+                val surfaceDotInner = MaterialTheme.colorScheme.surface
+                val overlaySurface = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f)
+                val overlayTextColor = MaterialTheme.colorScheme.primary
 
                 Surface(
                     color = Color(selectedTheme.baseBgColorHex),
                     shape = RoundedCornerShape(18.dp),
-                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.55f)),
+                    border = BorderStroke(
+                        width = if (draggingNodeIdx >= 0) 2.dp else 1.5.dp,
+                        color = if (draggingNodeIdx >= 0) primaryColor else primaryColor.copy(alpha = 0.55f)
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(250.dp)
+                        .height(276.dp)
                         .clip(RoundedCornerShape(18.dp))
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
                         Canvas(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .pointerInput(activeTool, draft) {
-                                    detectTapGestures { pos ->
-                                        canvasWidthPx = size.width.toFloat()
-                                        canvasHeightPx = size.height.toFloat()
-                                        val (wx, wy) = toWorldCoords(pos)
-                                        when (activeTool) {
-                                            EditorTool.MOVE_NODE -> {
-                                                val hit = findNearestControlNode(wx, wy, 190f)
-                                                if (hit >= 0) selectedNodeIdx = hit
-                                            }
-                                            EditorTool.ADD_NODE -> {
-                                                if (draft.controlPoints.size < 16) {
-                                                    val insertAt = findBestInsertIndex(wx, wy)
-                                                    val updated = draft.controlPoints.toMutableList()
-                                                    updated.add(insertAt, TrackPoint(wx, wy, draft.roadHalfWidth))
-                                                    draft = draft.copy(controlPoints = updated)
-                                                    selectedNodeIdx = insertAt
+                                .testTag("track_editor_canvas")
+                                .pointerInput(Unit) {
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        val w = size.width.toFloat().coerceAtLeast(1f)
+                                        val h = size.height.toFloat().coerceAtLeast(1f)
+                                        val track = latestPreviewTrack
+                                        val scale = minOf(w / track.worldWidth, h / track.worldHeight)
+                                            .coerceAtLeast(0.01f)
+                                        val tx = (w - track.worldWidth * scale) / 2f
+                                        val ty = (h - track.worldHeight * scale) / 2f
+
+                                        fun toWorld(pos: Offset): Pair<Float, Float> {
+                                            val wx = ((pos.x - tx) / scale).coerceIn(180f, track.worldWidth - 180f)
+                                            val wy = ((pos.y - ty) / scale).coerceIn(180f, track.worldHeight - 180f)
+                                            return wx to wy
+                                        }
+
+                                        fun findNearestNode(wx: Float, wy: Float): Int {
+                                            val screenHitPx = 38.dp.toPx()
+                                            val worldHitRadius = maxOf(220f, screenHitPx / scale)
+                                            var best = -1
+                                            var bestD = worldHitRadius
+                                            latestDraft.controlPoints.forEachIndexed { idx, pt ->
+                                                val d = hypot(pt.x - wx, pt.y - wy)
+                                                if (d < bestD) {
+                                                    bestD = d
+                                                    best = idx
                                                 }
                                             }
-                                            EditorTool.TOGGLE_RAMP -> {
-                                                val existingIdx = draft.ramps.indexOfFirst {
-                                                    hypot(it.x - wx, it.y - wy) < 130f
+                                            return best
+                                        }
+
+                                        val (startWx, startWy) = toWorld(down.position)
+                                        val currentTool = latestTool
+
+                                        if (currentTool == EditorTool.MOVE_NODE) {
+                                            val hitIdx = findNearestNode(startWx, startWy)
+                                            if (hitIdx >= 0 && hitIdx in latestDraft.controlPoints.indices) {
+                                                // Immediately claim pointer so parent verticalScroll never steals the drag
+                                                down.consume()
+                                                draggingNodeIdx = hitIdx
+                                                selectedNodeIdx = hitIdx
+                                                savedBannerName = null
+                                                val anchorPt = latestDraft.controlPoints[hitIdx]
+                                                val grabOffsetX = anchorPt.x - startWx
+                                                val grabOffsetY = anchorPt.y - startWy
+
+                                                try {
+                                                    while (true) {
+                                                        val event = awaitPointerEvent()
+                                                        val change = event.changes.firstOrNull { it.id == down.id }
+                                                            ?: event.changes.firstOrNull()
+                                                            ?: break
+                                                        if (!change.pressed) {
+                                                            change.consume()
+                                                            break
+                                                        }
+                                                        change.consume()
+                                                        val (curWx, curWy) = toWorld(change.position)
+                                                        val targetX = (curWx + grabOffsetX)
+                                                            .coerceIn(180f, track.worldWidth - 180f)
+                                                        val targetY = (curWy + grabOffsetY)
+                                                            .coerceIn(180f, track.worldHeight - 180f)
+                                                        val currentDraft = latestDraft
+                                                        if (hitIdx in currentDraft.controlPoints.indices) {
+                                                            val prev = currentDraft.controlPoints[hitIdx]
+                                                            if (hypot(targetX - prev.x, targetY - prev.y) > 0.5f) {
+                                                                val updated = currentDraft.controlPoints.toMutableList()
+                                                                updated[hitIdx] = TrackPoint(
+                                                                    x = targetX,
+                                                                    y = targetY,
+                                                                    halfWidth = currentDraft.roadHalfWidth
+                                                                )
+                                                                draft = currentDraft.copy(controlPoints = updated)
+                                                            }
+                                                        }
+                                                    }
+                                                } finally {
+                                                    draggingNodeIdx = -1
                                                 }
-                                                if (existingIdx >= 0) {
-                                                    draft = draft.copy(
-                                                        ramps = draft.ramps.filterIndexed { i, _ -> i != existingIdx }
-                                                    )
-                                                } else {
-                                                    val (closestIdx, _) = TrackCatalog.nearestTrackPoint(previewTrack, wx, wy)
-                                                    val pts = previewTrack.centerline
-                                                    val p = pts[closestIdx]
-                                                    val next = pts[(closestIdx + 1) % pts.size]
-                                                    val ang = atan2(next.y - p.y, next.x - p.x)
-                                                    draft = draft.copy(
-                                                        ramps = draft.ramps + TrackRamp(p.x, p.y, ang)
-                                                    )
-                                                }
+                                                return@awaitEachGesture
                                             }
-                                            EditorTool.TOGGLE_BOOST -> {
-                                                val existingIdx = draft.boostPads.indexOfFirst {
-                                                    hypot(it.x - wx, it.y - wy) < 130f
+                                        }
+
+                                        // Non-drag tap tools (ADD_NODE, TOGGLE_RAMP, TOGGLE_BOOST) or empty-space tap
+                                        val touchSlop = viewConfiguration.touchSlop
+                                        var movedTooFar = false
+                                        var lastPos = down.position
+                                        while (true) {
+                                            val event = awaitPointerEvent()
+                                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                            lastPos = change.position
+                                            if (hypot(lastPos.x - down.position.x, lastPos.y - down.position.y) > touchSlop) {
+                                                movedTooFar = true
+                                            }
+                                            if (!change.pressed) break
+                                        }
+
+                                        if (!movedTooFar) {
+                                            val (wx, wy) = toWorld(lastPos)
+                                            val curDraft = latestDraft
+                                            val curPreview = latestPreviewTrack
+                                            when (currentTool) {
+                                                EditorTool.MOVE_NODE -> {
+                                                    val hit = findNearestNode(wx, wy)
+                                                    if (hit >= 0) selectedNodeIdx = hit
                                                 }
-                                                if (existingIdx >= 0) {
-                                                    draft = draft.copy(
-                                                        boostPads = draft.boostPads.filterIndexed { i, _ -> i != existingIdx }
-                                                    )
-                                                } else {
-                                                    val (closestIdx, _) = TrackCatalog.nearestTrackPoint(previewTrack, wx, wy)
-                                                    val pts = previewTrack.centerline
-                                                    val p = pts[closestIdx]
-                                                    val next = pts[(closestIdx + 1) % pts.size]
-                                                    val ang = atan2(next.y - p.y, next.x - p.x)
-                                                    draft = draft.copy(
-                                                        boostPads = draft.boostPads + BoostPad(p.x, p.y, ang)
-                                                    )
+                                                EditorTool.ADD_NODE -> {
+                                                    if (curDraft.controlPoints.size < 16) {
+                                                        val insertAt = findBestInsertIndex(curDraft.controlPoints, wx, wy)
+                                                        val updated = curDraft.controlPoints.toMutableList()
+                                                        updated.add(insertAt, TrackPoint(wx, wy, curDraft.roadHalfWidth))
+                                                        draft = curDraft.copy(controlPoints = updated)
+                                                        selectedNodeIdx = insertAt
+                                                        savedBannerName = null
+                                                    }
+                                                }
+                                                EditorTool.TOGGLE_RAMP -> {
+                                                    val existingIdx = curDraft.ramps.indexOfFirst {
+                                                        hypot(it.x - wx, it.y - wy) < 150f
+                                                    }
+                                                    if (existingIdx >= 0) {
+                                                        draft = curDraft.copy(
+                                                            ramps = curDraft.ramps.filterIndexed { i, _ -> i != existingIdx }
+                                                        )
+                                                    } else {
+                                                        val (closestIdx, _) = TrackCatalog.nearestTrackPoint(curPreview, wx, wy)
+                                                        val pts = curPreview.centerline
+                                                        val p = pts[closestIdx]
+                                                        val next = pts[(closestIdx + 1) % pts.size]
+                                                        val ang = atan2(next.y - p.y, next.x - p.x)
+                                                        draft = curDraft.copy(
+                                                            ramps = curDraft.ramps + TrackRamp(p.x, p.y, ang)
+                                                        )
+                                                    }
+                                                    savedBannerName = null
+                                                }
+                                                EditorTool.TOGGLE_BOOST -> {
+                                                    val existingIdx = curDraft.boostPads.indexOfFirst {
+                                                        hypot(it.x - wx, it.y - wy) < 150f
+                                                    }
+                                                    if (existingIdx >= 0) {
+                                                        draft = curDraft.copy(
+                                                            boostPads = curDraft.boostPads.filterIndexed { i, _ -> i != existingIdx }
+                                                        )
+                                                    } else {
+                                                        val (closestIdx, _) = TrackCatalog.nearestTrackPoint(curPreview, wx, wy)
+                                                        val pts = curPreview.centerline
+                                                        val p = pts[closestIdx]
+                                                        val next = pts[(closestIdx + 1) % pts.size]
+                                                        val ang = atan2(next.y - p.y, next.x - p.x)
+                                                        draft = curDraft.copy(
+                                                            boostPads = curDraft.boostPads + BoostPad(p.x, p.y, ang)
+                                                        )
+                                                    }
+                                                    savedBannerName = null
                                                 }
                                             }
                                         }
                                     }
                                 }
-                                .pointerInput(activeTool, draft) {
-                                    detectDragGestures(
-                                        onDragStart = { startOffset ->
-                                            canvasWidthPx = size.width.toFloat()
-                                            canvasHeightPx = size.height.toFloat()
-                                            if (activeTool == EditorTool.MOVE_NODE) {
-                                                val (wx, wy) = toWorldCoords(startOffset)
-                                                val hit = findNearestControlNode(wx, wy, 200f)
-                                                draggingNodeIdx = hit
-                                                if (hit >= 0) selectedNodeIdx = hit
-                                            } else {
-                                                draggingNodeIdx = -1
-                                            }
-                                        },
-                                        onDragEnd = { draggingNodeIdx = -1 },
-                                        onDragCancel = { draggingNodeIdx = -1 },
-                                        onDrag = { change, _ ->
-                                            change.consume()
-                                            val idx = draggingNodeIdx
-                                            if (idx in draft.controlPoints.indices) {
-                                                val (wx, wy) = toWorldCoords(change.position)
-                                                val updated = draft.controlPoints.toMutableList()
-                                                updated[idx] = TrackPoint(wx, wy, draft.roadHalfWidth)
-                                                draft = draft.copy(controlPoints = updated)
-                                            }
-                                        }
-                                    )
-                                }
                         ) {
-                            canvasWidthPx = size.width
-                            canvasHeightPx = size.height
                             val scale = minOf(size.width / previewTrack.worldWidth, size.height / previewTrack.worldHeight)
                             val tx = (size.width - previewTrack.worldWidth * scale) / 2f
                             val ty = (size.height - previewTrack.worldHeight * scale) / 2f
@@ -348,7 +418,7 @@ fun TrackEditorScreen(
                                     }
                                     drawPath(
                                         path = poly,
-                                        color = secondaryColor.copy(alpha = 0.45f),
+                                        color = secondaryColor.copy(alpha = 0.50f),
                                         style = Stroke(
                                             width = 5f,
                                             pathEffect = PathEffect.dashPathEffect(floatArrayOf(18f, 14f), 0f)
@@ -357,15 +427,23 @@ fun TrackEditorScreen(
                                 }
 
                                 ctrl.forEachIndexed { idx, pt ->
+                                    val isDragging = idx == draggingNodeIdx
                                     val isSel = idx == selectedNodeIdx
+                                    if (isDragging || isSel) {
+                                        drawCircle(
+                                            color = primaryColor.copy(alpha = if (isDragging) 0.36f else 0.22f),
+                                            radius = if (isDragging) 74f else 54f,
+                                            center = Offset(pt.x, pt.y)
+                                        )
+                                    }
                                     drawCircle(
-                                        color = if (isSel) primaryColor else secondaryColor,
-                                        radius = if (isSel) 34f else 26f,
+                                        color = if (isSel || isDragging) primaryColor else secondaryColor,
+                                        radius = if (isDragging) 42f else if (isSel) 36f else 30f,
                                         center = Offset(pt.x, pt.y)
                                     )
                                     drawCircle(
-                                        color = Color(0xFF0E131B),
-                                        radius = if (isSel) 18f else 13f,
+                                        color = surfaceDotInner,
+                                        radius = if (isDragging) 20f else if (isSel) 18f else 14f,
                                         center = Offset(pt.x, pt.y)
                                     )
                                 }
@@ -373,23 +451,42 @@ fun TrackEditorScreen(
                         }
 
                         Surface(
-                            color = Color(0xFF0B0E14).copy(alpha = 0.82f),
-                            shape = RoundedCornerShape(8.dp),
+                            color = overlaySurface,
+                            shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
                                 .align(Alignment.TopStart)
                                 .padding(8.dp)
                         ) {
                             Text(
-                                text = when (activeTool) {
-                                    EditorTool.MOVE_NODE -> "Drag dots to reshape corners"
-                                    EditorTool.ADD_NODE -> "Tap anywhere to insert a new corner"
-                                    EditorTool.TOGGLE_RAMP -> "Tap on track to add or remove a Jump Ramp"
-                                    EditorTool.TOGGLE_BOOST -> "Tap on track to add or remove a Boost Pad"
+                                text = when {
+                                    draggingNodeIdx >= 0 -> "Moving Corner #${draggingNodeIdx + 1}..."
+                                    activeTool == EditorTool.MOVE_NODE -> "Touch & drag any corner dot smoothly"
+                                    activeTool == EditorTool.ADD_NODE -> "Tap anywhere to insert a new corner"
+                                    activeTool == EditorTool.TOGGLE_RAMP -> "Tap on track to add or remove a Jump Ramp"
+                                    else -> "Tap on track to add or remove a Boost Pad"
                                 },
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF80EAFF),
+                                color = overlayTextColor,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
+                        }
+
+                        if (savedBannerName != null) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.tertiaryContainer,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(8.dp)
+                                    .testTag("editor_saved_banner")
+                            ) {
+                                Text(
+                                    text = "Saved \"$savedBannerName\"",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -578,6 +675,8 @@ fun TrackEditorScreen(
                                 id = draft.id.ifBlank { "custom_${System.currentTimeMillis()}" },
                                 name = cleanName
                             )
+                            draft = finalTrack
+                            savedBannerName = cleanName
                             onSaveTrack(finalTrack, canApplyToLobby)
                         },
                         shape = RoundedCornerShape(16.dp),

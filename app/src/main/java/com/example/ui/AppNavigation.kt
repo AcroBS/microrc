@@ -15,14 +15,20 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -442,6 +448,9 @@ fun MicroRCApp(
         else -> null
     }
 
+    val showBottomNav = sessionRole == SessionRole.None &&
+        (currentRoute == null || currentRoute == Routes.HOME || currentRoute == Routes.TRACK_EDITOR || currentRoute == Routes.SETTINGS)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -547,9 +556,8 @@ fun MicroRCApp(
                     },
                     onOpenHybridSetup = { navController.navigate(Routes.HYBRID_SETUP) },
                     onOpenGarage = { navController.navigate(Routes.GARAGE) },
-                    onOpenTrackEditor = { navController.navigate(Routes.TRACK_EDITOR) },
-                    onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                     onUpdateDriverName = viewModel::updateDriverName,
+                    hasBottomNav = showBottomNav,
                     availableUpdate = (appUpdateState as? AppUpdateUiState.UpdateAvailable)?.takeIf {
                         !viewModel.isPlayStoreInstall && it.release.tagName != dismissedUpdateTag
                     },
@@ -810,6 +818,7 @@ fun MicroRCApp(
                     dailyNotificationsEnabled = dailyNotificationsEnabled,
                     canEditRules = canEdit,
                     inSession = sessionRole != SessionRole.None,
+                    hasBottomNav = showBottomNav,
                     onUpdateRules = { updatedRules ->
                         if (isOnlineSession) {
                             activeOnlineVm?.updateRules(updatedRules)
@@ -822,7 +831,16 @@ fun MicroRCApp(
                     isPlayStoreInstall = viewModel.isPlayStoreInstall,
                     onCheckForUpdates = { viewModel.checkForAppUpdate(manual = true) },
                     onOpenUpdateUrl = { url -> GitHubUpdateChecker.openUpdateUrl(context, url) },
-                    onBack = { navController.popBackStack() }
+                    onBack = {
+                        if (showBottomNav) {
+                            navController.navigate(Routes.HOME) {
+                                popUpTo(Routes.HOME) { inclusive = false }
+                                launchSingleTop = true
+                            }
+                        } else {
+                            navController.popBackStack()
+                        }
+                    }
                 )
             }
 
@@ -832,15 +850,27 @@ fun MicroRCApp(
                     initialTrack = lobbyState?.activeCustomTrack ?: customTracks.firstOrNull(),
                     savedTracks = customTracks,
                     canApplyToLobby = canApplyToLobby,
+                    hasBottomNav = showBottomNav,
                     onSaveTrack = { track, apply ->
                         viewModel.saveCustomTrack(track, apply && !isOnlineSession)
                         if (apply && isOnlineSession) {
                             activeOnlineVm?.selectCustomTrack(track)
                         }
-                        navController.popBackStack()
+                        if (!showBottomNav) {
+                            navController.popBackStack()
+                        }
                     },
                     onDeleteTrack = viewModel::deleteCustomTrack,
-                    onBack = { navController.popBackStack() }
+                    onBack = {
+                        if (showBottomNav) {
+                            navController.navigate(Routes.HOME) {
+                                popUpTo(Routes.HOME) { inclusive = false }
+                                launchSingleTop = true
+                            }
+                        } else {
+                            navController.popBackStack()
+                        }
+                    }
                 )
             }
 
@@ -1090,6 +1120,65 @@ fun MicroRCApp(
                             navController.popBackStack(Routes.HOME, inclusive = false)
                         }
                     }
+                )
+            }
+        }
+
+        if (showBottomNav) {
+            NavigationBar(
+                windowInsets = WindowInsets.navigationBars,
+                modifier = Modifier.testTag("main_bottom_nav")
+            ) {
+                val isPlaySelected = currentRoute == null || currentRoute == Routes.HOME
+                val isStudioSelected = currentRoute == Routes.TRACK_EDITOR
+                val isSettingsSelected = currentRoute == Routes.SETTINGS
+
+                NavigationBarItem(
+                    selected = isPlaySelected,
+                    onClick = {
+                        if (!isPlaySelected) {
+                            navController.navigate(Routes.HOME) {
+                                popUpTo(Routes.HOME) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        }
+                    },
+                    icon = { Icon(Icons.Default.SportsEsports, contentDescription = "Play") },
+                    label = { Text("Play", maxLines = 1) },
+                    modifier = Modifier.testTag("nav_tab_play")
+                )
+
+                NavigationBarItem(
+                    selected = isStudioSelected,
+                    onClick = {
+                        if (!isStudioSelected) {
+                            navController.navigate(Routes.TRACK_EDITOR) {
+                                popUpTo(Routes.HOME) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        }
+                    },
+                    icon = { Icon(Icons.Default.Map, contentDescription = "Track Studio") },
+                    label = { Text("Track Studio", maxLines = 1) },
+                    modifier = Modifier.testTag("open_track_editor_button")
+                )
+
+                NavigationBarItem(
+                    selected = isSettingsSelected,
+                    onClick = {
+                        if (!isSettingsSelected) {
+                            navController.navigate(Routes.SETTINGS) {
+                                popUpTo(Routes.HOME) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        }
+                    },
+                    icon = { Icon(Icons.Default.Tune, contentDescription = "Settings") },
+                    label = { Text("Settings", maxLines = 1) },
+                    modifier = Modifier.testTag("open_settings_button")
                 )
             }
         }

@@ -6,6 +6,8 @@ import com.example.data.DailyChallengeCatalog
 import com.example.data.FriendsRepository
 import com.example.data.OnlineRaceRepository
 import com.example.data.TrackCatalog
+import com.example.data.formatUserFacingOnlineErrorOrNull
+import com.example.data.rethrowIfScopeCancellation
 import com.example.model.ArenaShape
 import com.example.model.CustomTrackData
 import com.example.model.DriverFriendCode
@@ -136,7 +138,10 @@ class OnlineViewModel(
                     _openRooms.value = rooms
                 }
             } catch (e: Exception) {
-                _cloudStatusMessage.value = e.localizedMessage
+                rethrowIfScopeCancellation(e)
+                formatUserFacingOnlineErrorOrNull(e, "Could not load online rooms.")?.let {
+                    _cloudStatusMessage.value = it
+                }
             }
         }
     }
@@ -201,7 +206,10 @@ class OnlineViewModel(
                     _friendsList.value = mapped
                 }
             } catch (e: Exception) {
-                _socialFeedback.value = e.localizedMessage
+                rethrowIfScopeCancellation(e)
+                formatUserFacingOnlineErrorOrNull(e, "Could not sync friends list.")?.let {
+                    _socialFeedback.value = it
+                }
             }
         }
     }
@@ -214,7 +222,10 @@ class OnlineViewModel(
                     _incomingSessionInvites.value = invites
                 }
             } catch (e: Exception) {
-                _socialFeedback.value = e.localizedMessage
+                rethrowIfScopeCancellation(e)
+                formatUserFacingOnlineErrorOrNull(e, "Could not check session invites.")?.let {
+                    _socialFeedback.value = it
+                }
             }
         }
     }
@@ -227,7 +238,10 @@ class OnlineViewModel(
                     _incomingLeaderboardNotifications.value = list
                 }
             } catch (e: Exception) {
-                _socialFeedback.value = e.localizedMessage
+                rethrowIfScopeCancellation(e)
+                formatUserFacingOnlineErrorOrNull(e, "Could not load leaderboard alerts.")?.let {
+                    _socialFeedback.value = it
+                }
             }
         }
     }
@@ -322,7 +336,9 @@ class OnlineViewModel(
             res.onSuccess { list ->
                 _driverSearchResults.value = list
             }.onFailure { err ->
-                _socialFeedback.value = err.localizedMessage ?: "Driver search failed."
+                formatUserFacingOnlineErrorOrNull(err, "Driver search failed.")?.let {
+                    _socialFeedback.value = it
+                }
             }
         }
     }
@@ -333,7 +349,9 @@ class OnlineViewModel(
             res.onSuccess { targetName ->
                 _socialFeedback.value = "Friend request sent to $targetName!"
             }.onFailure { err ->
-                _socialFeedback.value = err.localizedMessage ?: "Could not send friend request."
+                formatUserFacingOnlineErrorOrNull(err, "Could not send friend request.")?.let {
+                    _socialFeedback.value = it
+                }
             }
         }
     }
@@ -344,7 +362,9 @@ class OnlineViewModel(
             res.onSuccess {
                 _socialFeedback.value = "Friend request sent to ${target.driverName}!"
             }.onFailure { err ->
-                _socialFeedback.value = err.localizedMessage ?: "Could not send friend request."
+                formatUserFacingOnlineErrorOrNull(err, "Could not send friend request.")?.let {
+                    _socialFeedback.value = it
+                }
             }
         }
     }
@@ -355,7 +375,9 @@ class OnlineViewModel(
             res.onSuccess { targetName ->
                 _socialFeedback.value = "Friend request sent to $targetName!"
             }.onFailure { err ->
-                _socialFeedback.value = err.localizedMessage ?: "Could not send friend request."
+                formatUserFacingOnlineErrorOrNull(err, "Could not send friend request.")?.let {
+                    _socialFeedback.value = it
+                }
             }
         }
     }
@@ -366,7 +388,9 @@ class OnlineViewModel(
             res.onSuccess {
                 _socialFeedback.value = "Friend added to your Crew!"
             }.onFailure { err ->
-                _socialFeedback.value = err.localizedMessage ?: "Unable to accept friend request."
+                formatUserFacingOnlineErrorOrNull(err, "Unable to accept friend request.")?.let {
+                    _socialFeedback.value = it
+                }
             }
         }
     }
@@ -377,7 +401,9 @@ class OnlineViewModel(
             res.onSuccess {
                 _socialFeedback.value = feedbackText
             }.onFailure { err ->
-                _socialFeedback.value = err.localizedMessage ?: "Unable to update friendship."
+                formatUserFacingOnlineErrorOrNull(err, "Unable to update friendship.")?.let {
+                    _socialFeedback.value = it
+                }
             }
         }
     }
@@ -405,7 +431,9 @@ class OnlineViewModel(
                 res.onSuccess {
                     _socialFeedback.value = "Sent session invite to ${friend.displayName} (#${currentRoom.roomCode})!"
                 }.onFailure { err ->
-                    _socialFeedback.value = err.localizedMessage ?: "Failed to notify ${friend.displayName}."
+                    formatUserFacingOnlineErrorOrNull(err, "Failed to notify ${friend.displayName}.")?.let {
+                        _socialFeedback.value = it
+                    }
                 }
             }
         } else {
@@ -428,7 +456,9 @@ class OnlineViewModel(
                         res.onSuccess {
                             _socialFeedback.value = "Lobby #${createdRoom.roomCode} opened & notified ${friend.displayName}!"
                         }.onFailure { err ->
-                            _socialFeedback.value = err.localizedMessage ?: "Lobby opened, but invite failed."
+                            formatUserFacingOnlineErrorOrNull(err, "Lobby opened, but invite failed.")?.let {
+                                _socialFeedback.value = it
+                            }
                         }
                     }
                 }
@@ -525,8 +555,11 @@ class OnlineViewModel(
                     _leaderboardLoading.value = false
                 }
             } catch (e: Exception) {
+                rethrowIfScopeCancellation(e)
                 _leaderboardLoading.value = false
-                _cloudStatusMessage.value = e.localizedMessage
+                formatUserFacingOnlineErrorOrNull(e, "Could not load cloud leaderboard.")?.let {
+                    _cloudStatusMessage.value = it
+                }
             }
         }
     }
@@ -587,7 +620,9 @@ class OnlineViewModel(
             res.onSuccess { playback ->
                 onLoaded(playback)
             }.onFailure { err ->
-                _cloudStatusMessage.value = err.localizedMessage ?: "Could not load ghost run."
+                formatUserFacingOnlineErrorOrNull(err, "Could not load ghost run.")?.let {
+                    _cloudStatusMessage.value = it
+                }
             }
         }
     }

@@ -298,11 +298,15 @@ class OnlineRaceSessionManager(
                         )
                     }
                 }.onFailure { err ->
-                    _errorBanner.value = formatUserFacingOnlineError(err, "Failed to create online lobby.")
+                    com.example.data.formatUserFacingOnlineErrorOrNull(err, "Failed to create online lobby.")?.let {
+                        _errorBanner.value = it
+                    }
                 }
             } catch (e: Exception) {
                 rethrowIfScopeCancellation(e)
-                _errorBanner.value = formatUserFacingOnlineError(e, "Failed to create online lobby.")
+                com.example.data.formatUserFacingOnlineErrorOrNull(e, "Failed to create online lobby.")?.let {
+                    _errorBanner.value = it
+                }
             } finally {
                 _isBusy.value = false
             }
@@ -329,7 +333,9 @@ class OnlineRaceSessionManager(
                 )
             } catch (e: Exception) {
                 rethrowIfScopeCancellation(e)
-                _errorBanner.value = formatUserFacingOnlineError(e, "Unable to join online lobby.")
+                com.example.data.formatUserFacingOnlineErrorOrNull(e, "Unable to join online lobby.")?.let {
+                    _errorBanner.value = it
+                }
             } finally {
                 _isBusy.value = false
             }
@@ -351,7 +357,9 @@ class OnlineRaceSessionManager(
             try {
                 val foundRes = repository.findRoomByCode(rawCode)
                 val room = foundRes.getOrElse { err ->
-                    _errorBanner.value = formatUserFacingOnlineError(err, "Room code not found.")
+                    com.example.data.formatUserFacingOnlineErrorOrNull(err, "Room code not found.")?.let {
+                        _errorBanner.value = it
+                    }
                     return@launch
                 }
                 val cleanToken = preAuthorizedJoinToken.trim()
@@ -373,7 +381,9 @@ class OnlineRaceSessionManager(
                 }
             } catch (e: Exception) {
                 rethrowIfScopeCancellation(e)
-                _errorBanner.value = formatUserFacingOnlineError(e, "Room code not found.")
+                com.example.data.formatUserFacingOnlineErrorOrNull(e, "Room code not found.")?.let {
+                    _errorBanner.value = it
+                }
             } finally {
                 _isBusy.value = false
             }
@@ -425,7 +435,9 @@ class OnlineRaceSessionManager(
                 )
             }
         }.onFailure { err ->
-            _errorBanner.value = formatUserFacingOnlineError(err, "Unable to join online lobby.")
+            com.example.data.formatUserFacingOnlineErrorOrNull(err, "Unable to join online lobby.")?.let {
+                _errorBanner.value = it
+            }
         }
     }
 

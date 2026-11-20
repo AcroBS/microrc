@@ -50,7 +50,11 @@ class ExampleRobolectricTest {
     @Test
     fun homeScreen_navigatesToSettingsAndTrackStudio() {
         composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("open_settings_button").performScrollTo().performClick()
+        composeTestRule.onNodeWithTag("main_bottom_nav").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("nav_tab_play").assertIsDisplayed()
+
+        // Switch to Settings & About bottom tab
+        composeTestRule.onNodeWithTag("open_settings_button").performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("setting_music_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setting_sfx_switch").performScrollTo().assertIsDisplayed()
@@ -61,14 +65,35 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("setting_random_jumps_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setting_random_conditions_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setting_show_player_names_switch").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("settings_back_button").performClick()
+        composeTestRule.onNodeWithTag("settings_about_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("settings_app_update_card").performScrollTo().assertIsDisplayed()
 
+        // Switch directly to Track Studio bottom tab
+        composeTestRule.onNodeWithTag("open_track_editor_button").performClick()
         composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("open_track_editor_button").performScrollTo().performClick()
-        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("track_editor_canvas").assertIsDisplayed()
         composeTestRule.onNodeWithTag("editor_random_button").assertIsDisplayed()
+
+        // Smoothly drag a corner control point on the Track Studio canvas without stuttering/crashing
+        composeTestRule.onNodeWithTag("track_editor_canvas").performTouchInput {
+            val cornerStart = Offset(width * 0.50f, height * 0.19f)
+            down(cornerStart)
+            moveTo(Offset(width * 0.54f, height * 0.25f))
+            moveTo(Offset(width * 0.58f, height * 0.30f))
+            up()
+        }
+        composeTestRule.waitForIdle()
+
         composeTestRule.onNodeWithTag("editor_random_button").performClick()
         composeTestRule.onNodeWithTag("editor_save_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("editor_save_button").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("editor_saved_banner").assertIsDisplayed()
+
+        // Return to Play tab via bottom navigation bar
+        composeTestRule.onNodeWithTag("nav_tab_play").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_offline_section").performScrollTo().assertIsDisplayed()
     }
 
     @Test
@@ -727,6 +752,30 @@ class ExampleRobolectricTest {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("home_offline_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun silentCoroutineCancellation_isNeverShownAsUserFacingError() {
+        val standaloneCancel = kotlinx.coroutines.CancellationException("StandaloneCoroutine was cancelled")
+        assertTrue(com.example.data.isSilentCoroutineCancellation(standaloneCancel))
+        assertEquals(
+            null,
+            com.example.data.formatUserFacingOnlineErrorOrNull(standaloneCancel, "Fallback error")
+        )
+
+        val wrappedCancel = RuntimeException("StandaloneCoroutine was cancelled")
+        assertTrue(com.example.data.isSilentCoroutineCancellation(wrappedCancel))
+        assertEquals(
+            null,
+            com.example.data.formatUserFacingOnlineErrorOrNull(wrappedCancel, "Fallback error")
+        )
+
+        val realTimeout = com.example.data.OnlineServerTimeoutException("Timed out contacting server")
+        org.junit.Assert.assertFalse(com.example.data.isSilentCoroutineCancellation(realTimeout))
+        assertEquals(
+            "Timed out contacting server",
+            com.example.data.formatUserFacingOnlineErrorOrNull(realTimeout, "Fallback error")
+        )
     }
 }
 

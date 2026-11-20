@@ -226,7 +226,9 @@ fun AuthScreen(
                                         val res = GoogleAuthManager.signInWithGoogle(context)
                                         isSigningIn = false
                                         res.onFailure { err ->
-                                            if (err !is SignInCancelledByUserException) {
+                                            if (err !is SignInCancelledByUserException &&
+                                                !com.example.data.isSilentCoroutineCancellation(err)
+                                            ) {
                                                 errorMessage = err.localizedMessage
                                                     ?: "Couldn't complete Google Sign-In. Please try again."
                                             }

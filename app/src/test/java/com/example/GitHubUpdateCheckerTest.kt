@@ -161,8 +161,6 @@ class GitHubUpdateCheckerTest {
                     onJoinRace = {},
                     onSoloRace = {},
                     onOpenGarage = {},
-                    onOpenTrackEditor = {},
-                    onOpenSettings = {},
                     onUpdateDriverName = {},
                     availableUpdate = AppUpdateUiState.UpdateAvailable(
                         currentVersion = "1.0.42",

@@ -125,6 +125,6 @@ fun adaptiveGoldColor(): Color =
     if (isMicroRCDarkSurface()) GoldTrophy else Color(0xFF9E6B00)
 
 @Composable
-fun adaptiveGhostAccentColor(): Color =
-    if (isMicroRCDarkSurface()) ElectricCyan else MaterialTheme.colorScheme.secondary
+fun adaptiveGhostAccentColor(): Color = MaterialTheme.colorScheme.secondary
+
 

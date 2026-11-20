@@ -112,15 +112,7 @@ import com.example.sensors.TiltSteeringController
 import com.example.ui.components.drawTrackMiniMap
 import com.example.ui.components.drawTrackWorld
 import com.example.ui.components.drawWeatherScreenOverlay
-import com.example.ui.theme.AcidLime
-import com.example.ui.theme.AlertRed
-import com.example.ui.theme.CarbonBg
-import com.example.ui.theme.ElectricCyan
-import com.example.ui.theme.GoldTrophy
-import com.example.ui.theme.PaddockOutline
-import com.example.ui.theme.PaddockSurface
-import com.example.ui.theme.SignalOrange
-import com.example.ui.theme.TextSecondary
+import com.example.ui.theme.adaptiveGoldColor
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
@@ -394,6 +386,17 @@ fun RaceScreen(
         WinCondition.valueOf(snapshot?.winCondition ?: rules.winCondition)
     }.getOrDefault(WinCondition.FIRST_TO_FINISH)
 
+    val colorScheme = MaterialTheme.colorScheme
+    val hudSurface = colorScheme.surfaceContainer.copy(alpha = 0.88f)
+    val hudBorder = colorScheme.outlineVariant
+    val hudOnSurface = colorScheme.onSurface
+    val hudMuted = colorScheme.onSurfaceVariant
+    val primaryAccent = colorScheme.primary
+    val secondaryAccent = colorScheme.secondary
+    val tertiaryAccent = colorScheme.tertiary
+    val errorAccent = colorScheme.error
+    val goldAccent = adaptiveGoldColor()
+
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
@@ -497,9 +500,9 @@ fun RaceScreen(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Surface(
-                    color = CarbonBg.copy(alpha = 0.86f),
+                    color = hudSurface,
                     shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.dp, PaddockOutline)
+                    border = BorderStroke(1.dp, hudBorder)
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -507,11 +510,11 @@ fun RaceScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Column {
-                            Text("POS", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                            Text("POS", style = MaterialTheme.typography.labelSmall, color = hudMuted)
                             Text(
                                 text = "${ordinal(localRacer?.rank ?: 1)}/${snapshot?.racers?.size ?: 1}",
                                 style = MaterialTheme.typography.titleLarge,
-                                color = GoldTrophy
+                                color = goldAccent
                             )
                         }
                         if (isStuntsMode) {
@@ -520,28 +523,28 @@ fun RaceScreen(
                                 Text(
                                     text = "STUNT ${stuntState?.roundIndex ?: 1}/${stuntState?.totalRounds ?: 4}",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = TextSecondary
+                                    color = hudMuted
                                 )
                                 Text(
                                     text = stuntState?.variantEnum?.shortName ?: "STUNT",
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = ElectricCyan
+                                    color = secondaryAccent
                                 )
                             }
                             Column {
-                                Text("PTS", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                Text("PTS", style = MaterialTheme.typography.labelSmall, color = hudMuted)
                                 Text(
                                     text = "${localRacer?.racePoints ?: 0}",
                                     style = MaterialTheme.typography.titleLarge,
-                                    color = AcidLime
+                                    color = tertiaryAccent
                                 )
                             }
                             Column {
-                                Text("TURN", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                Text("TURN", style = MaterialTheme.typography.labelSmall, color = hudMuted)
                                 Text(
                                     text = "${turnRemSec}s",
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = if (turnRemSec <= 3L) AlertRed else Color.White
+                                    color = if (turnRemSec <= 3L) errorAccent else hudOnSurface
                                 )
                             }
                         } else if (isArenaMode) {
@@ -551,15 +554,15 @@ fun RaceScreen(
                             val iHaveFlag = carrierId != null && carrierId == localRacer?.playerId
                             val carrierRacer = snapshot?.racers?.find { it.playerId == carrierId }
                             Column {
-                                Text("FLAG HOLD", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                Text("FLAG HOLD", style = MaterialTheme.typography.labelSmall, color = hudMuted)
                                 Text(
                                     text = "${formatArenaHoldClock(myHoldMs)}/${formatArenaHoldClock(targetMs)}",
                                     style = MaterialTheme.typography.titleLarge,
-                                    color = if (iHaveFlag) GoldTrophy else ElectricCyan
+                                    color = if (iHaveFlag) goldAccent else secondaryAccent
                                 )
                             }
                             Column {
-                                Text("FLAG", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                Text("FLAG", style = MaterialTheme.typography.labelSmall, color = hudMuted)
                                 Text(
                                     text = when {
                                         iHaveFlag -> "YOU!"
@@ -568,9 +571,9 @@ fun RaceScreen(
                                     },
                                     style = MaterialTheme.typography.labelLarge,
                                     color = when {
-                                        iHaveFlag -> GoldTrophy
-                                        carrierRacer != null -> SignalOrange
-                                        else -> AcidLime
+                                        iHaveFlag -> goldAccent
+                                        carrierRacer != null -> primaryAccent
+                                        else -> tertiaryAccent
                                     }
                                 )
                             }
@@ -580,7 +583,7 @@ fun RaceScreen(
                                 Text(
                                     text = if (sdStage > 0) "FINALE" else "CLOCK",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = TextSecondary
+                                    color = hudMuted
                                 )
                                 Text(
                                     text = if (sdStage > 0) {
@@ -591,9 +594,9 @@ fun RaceScreen(
                                     },
                                     style = MaterialTheme.typography.labelLarge,
                                     color = when {
-                                        sdStage > 0 -> AlertRed
-                                        curClockMs >= 110_000L -> SignalOrange
-                                        else -> Color.White
+                                        sdStage > 0 -> errorAccent
+                                        curClockMs >= 110_000L -> primaryAccent
+                                        else -> hudOnSurface
                                     }
                                 )
                             }
@@ -601,47 +604,47 @@ fun RaceScreen(
                             val totalMs = ((snapshot?.timeLimitSec ?: rules.timeLimitSec) * 1000L)
                             val remMs = (totalMs - (snapshot?.raceTimeMs ?: 0L)).coerceAtLeast(0L)
                             Column {
-                                Text("LEFT", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                Text("LEFT", style = MaterialTheme.typography.labelSmall, color = hudMuted)
                                 Text(
                                     text = formatRaceTime(remMs),
                                     style = MaterialTheme.typography.titleLarge,
-                                    color = if (remMs < 15000L) AlertRed else ElectricCyan
+                                    color = if (remMs < 15000L) errorAccent else secondaryAccent
                                 )
                             }
                             Column {
-                                Text("LAP", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                Text("LAP", style = MaterialTheme.typography.labelSmall, color = hudMuted)
                                 Text(
                                     text = "${localRacer?.lap ?: 1}",
                                     style = MaterialTheme.typography.titleLarge,
-                                    color = Color.White
+                                    color = hudOnSurface
                                 )
                             }
                         } else {
                             Column {
-                                Text("LAP", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                Text("LAP", style = MaterialTheme.typography.labelSmall, color = hudMuted)
                                 Text(
                                     text = "${localRacer?.lap ?: 1}/${snapshot?.totalLaps ?: 3}",
                                     style = MaterialTheme.typography.titleLarge,
-                                    color = Color.White
+                                    color = hudOnSurface
                                 )
                             }
                             if (winCond == WinCondition.CHAMPIONSHIP_POINTS) {
                                 Column {
-                                    Text("PTS", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                    Text("PTS", style = MaterialTheme.typography.labelSmall, color = hudMuted)
                                     Text(
                                         text = "${localRacer?.racePoints ?: 0}",
                                         style = MaterialTheme.typography.titleLarge,
-                                        color = AcidLime
+                                        color = tertiaryAccent
                                     )
                                 }
                             } else {
                                 Column {
-                                    Text("TIME", style = MaterialTheme.typography.labelSmall, color = TextSecondary)
+                                    Text("TIME", style = MaterialTheme.typography.labelSmall, color = hudMuted)
                                     val curLapMs = ((snapshot?.raceTimeMs ?: 0L) - (localRacer?.currentLapStartMs ?: 0L)).coerceAtLeast(0L)
                                     Text(
                                         text = formatRaceTime(curLapMs),
                                         style = MaterialTheme.typography.labelLarge,
-                                        color = ElectricCyan
+                                        color = primaryAccent
                                     )
                                 }
                             }
@@ -652,15 +655,15 @@ fun RaceScreen(
                 // Hybrid Tour Stage Pill
                 if (snapshot?.isHybridTour == true) {
                     Surface(
-                        color = CarbonBg.copy(alpha = 0.88f),
+                        color = hudSurface,
                         shape = RoundedCornerShape(50),
-                        border = BorderStroke(1.dp, GoldTrophy.copy(alpha = 0.75f)),
+                        border = BorderStroke(1.dp, goldAccent.copy(alpha = 0.75f)),
                         modifier = Modifier.testTag("hybrid_stage_badge")
                     ) {
                         Text(
                             text = "HYBRID STAGE #${snapshot.hybridStageNumber}",
                             style = MaterialTheme.typography.labelSmall,
-                            color = GoldTrophy,
+                            color = goldAccent,
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                         )
                     }
@@ -672,9 +675,9 @@ fun RaceScreen(
                     val sdPulse = 0.5f + 0.5f * sin(animTimeSec * 12f)
                     val remSec = (((snapshot.arenaSuddenDeathRemainingMs) + 999L) / 1000L).coerceAtLeast(1L)
                     Surface(
-                        color = Color(0xFF33060E).copy(alpha = 0.92f),
+                        color = colorScheme.errorContainer.copy(alpha = 0.94f),
                         shape = RoundedCornerShape(50),
-                        border = BorderStroke(1.5.dp, AlertRed.copy(alpha = 0.7f + 0.3f * sdPulse)),
+                        border = BorderStroke(1.5.dp, errorAccent.copy(alpha = 0.7f + 0.3f * sdPulse)),
                         modifier = Modifier.testTag("sudden_death_badge")
                     ) {
                         Row(
@@ -685,13 +688,13 @@ fun RaceScreen(
                             Icon(
                                 Icons.Default.Warning,
                                 contentDescription = null,
-                                tint = AlertRed,
+                                tint = errorAccent,
                                 modifier = Modifier.size(15.dp)
                             )
                             Text(
                                 text = "SUDDEN DEATH • WAVE $suddenDeathStage/3 • ${remSec}s",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color.White
+                                color = colorScheme.onErrorContainer
                             )
                         }
                     }
@@ -700,15 +703,15 @@ fun RaceScreen(
                 // Weather / Quake active pill
                 if (activeEvent != ExternalEventType.NONE && snapshot?.phase == RacePhase.RACING.name) {
                     val (evIcon, evColor) = when (activeEvent) {
-                        ExternalEventType.RAIN -> Icons.Default.WaterDrop to ElectricCyan
-                        ExternalEventType.EARTHQUAKE -> Icons.Default.Vibration to SignalOrange
-                        ExternalEventType.WIND -> Icons.Default.Air to AcidLime
-                        ExternalEventType.SNOW -> Icons.Default.AcUnit to Color.White
-                        ExternalEventType.NONE -> Icons.Default.WaterDrop to ElectricCyan
+                        ExternalEventType.RAIN -> Icons.Default.WaterDrop to secondaryAccent
+                        ExternalEventType.EARTHQUAKE -> Icons.Default.Vibration to primaryAccent
+                        ExternalEventType.WIND -> Icons.Default.Air to tertiaryAccent
+                        ExternalEventType.SNOW -> Icons.Default.AcUnit to hudOnSurface
+                        ExternalEventType.NONE -> Icons.Default.WaterDrop to secondaryAccent
                     }
                     val remSec = ((snapshot.eventRemainingMs + 999L) / 1000L).coerceAtLeast(1L)
                     Surface(
-                        color = CarbonBg.copy(alpha = 0.86f),
+                        color = hudSurface,
                         shape = RoundedCornerShape(50),
                         border = BorderStroke(1.dp, evColor),
                         modifier = Modifier.testTag("active_weather_badge")
@@ -740,14 +743,14 @@ fun RaceScreen(
                         modifier = Modifier
                             .size(48.dp)
                             .clip(CircleShape)
-                            .background(if (overviewCamera) ElectricCyan else CarbonBg.copy(alpha = 0.86f))
-                            .border(1.dp, PaddockOutline, CircleShape)
+                            .background(if (overviewCamera) primaryAccent else hudSurface)
+                            .border(1.dp, if (overviewCamera) primaryAccent else hudBorder, CircleShape)
                             .testTag("toggle_camera_button")
                     ) {
                         Icon(
                             Icons.Default.Videocam,
                             contentDescription = "Toggle Camera",
-                            tint = if (overviewCamera) CarbonBg else ElectricCyan
+                            tint = if (overviewCamera) colorScheme.onPrimary else primaryAccent
                         )
                     }
                     IconButton(
@@ -755,19 +758,19 @@ fun RaceScreen(
                         modifier = Modifier
                             .size(48.dp)
                             .clip(CircleShape)
-                            .background(CarbonBg.copy(alpha = 0.86f))
-                            .border(1.dp, PaddockOutline, CircleShape)
+                            .background(hudSurface)
+                            .border(1.dp, hudBorder, CircleShape)
                             .testTag("race_pause_button")
                     ) {
-                        Icon(Icons.Default.Pause, contentDescription = "Pause & Controls", tint = Color.White)
+                        Icon(Icons.Default.Pause, contentDescription = "Pause & Controls", tint = hudOnSurface)
                     }
                 }
 
                 if (!overviewCamera) {
                     Surface(
-                        color = CarbonBg.copy(alpha = 0.84f),
+                        color = hudSurface,
                         shape = RoundedCornerShape(14.dp),
-                        border = BorderStroke(1.2.dp, ElectricCyan.copy(alpha = 0.55f)),
+                        border = BorderStroke(1.2.dp, primaryAccent.copy(alpha = 0.6f)),
                         modifier = Modifier
                             .size(width = 136.dp, height = 94.dp)
                             .testTag("race_minimap")
@@ -788,7 +791,7 @@ fun RaceScreen(
                             Text(
                                 text = "MAP",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = TextSecondary,
+                                color = hudMuted,
                                 modifier = Modifier
                                     .align(Alignment.TopStart)
                                     .padding(horizontal = 6.dp, vertical = 3.dp)
@@ -806,16 +809,16 @@ fun RaceScreen(
                 contentAlignment = Alignment.Center
             ) {
                 Surface(
-                    color = CarbonBg.copy(alpha = 0.88f),
+                    color = colorScheme.primaryContainer.copy(alpha = 0.94f),
                     shape = CircleShape,
-                    border = BorderStroke(3.dp, SignalOrange),
+                    border = BorderStroke(3.dp, primaryAccent),
                     modifier = Modifier.size(120.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(
                             text = "${snapshot.countdownSec}",
                             style = MaterialTheme.typography.displayLarge,
-                            color = SignalOrange
+                            color = colorScheme.onPrimaryContainer
                         )
                     }
                 }
@@ -850,12 +853,12 @@ fun RaceScreen(
                     else -> String.format(java.util.Locale.US, "+%.2fs", delta / 1000f)
                 }
                 val badgeColor = when {
-                    delta == null -> ElectricCyan
-                    ahead -> AcidLime
-                    else -> SignalOrange
+                    delta == null -> secondaryAccent
+                    ahead -> tertiaryAccent
+                    else -> primaryAccent
                 }
                 Surface(
-                    color = CarbonBg.copy(alpha = 0.90f),
+                    color = hudSurface,
                     shape = RoundedCornerShape(50),
                     border = BorderStroke(1.5.dp, badgeColor),
                     modifier = Modifier.testTag("ghost_delta_badge")
@@ -868,7 +871,7 @@ fun RaceScreen(
                         Text(
                             text = "GHOST • ${ghostCar.driverName.take(10).uppercase()}",
                             style = MaterialTheme.typography.labelSmall,
-                            color = ElectricCyan,
+                            color = secondaryAccent,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -884,14 +887,14 @@ fun RaceScreen(
             if (isStuntsMode && snapshot?.phase != RacePhase.FINISHED.name && stuntState != null) {
                 Surface(
                     color = if (isLocalActiveStuntDriver) {
-                        Color(0xFF1A2810).copy(alpha = 0.92f)
+                        colorScheme.tertiaryContainer.copy(alpha = 0.94f)
                     } else {
-                        Color(0xFF0E1B2E).copy(alpha = 0.92f)
+                        colorScheme.secondaryContainer.copy(alpha = 0.94f)
                     },
                     shape = RoundedCornerShape(50),
                     border = BorderStroke(
                         1.5.dp,
-                        if (isLocalActiveStuntDriver) AcidLime else ElectricCyan
+                        if (isLocalActiveStuntDriver) tertiaryAccent else secondaryAccent
                     ),
                     modifier = Modifier.testTag("stunt_turn_banner")
                 ) {
@@ -902,7 +905,11 @@ fun RaceScreen(
                             "SPECTATING: ${stuntState.activePlayerName.uppercase()} • ${stuntState.variantEnum.shortName}"
                         },
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (isLocalActiveStuntDriver) AcidLime else ElectricCyan,
+                        color = if (isLocalActiveStuntDriver) {
+                            colorScheme.onTertiaryContainer
+                        } else {
+                            colorScheme.onSecondaryContainer
+                        },
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
@@ -914,9 +921,9 @@ fun RaceScreen(
                 val shockPulse = 0.5f + 0.5f * sin(animTimeSec * 18f)
                 val shockSecText = String.format("%.1fs", electroParalyzedRemMs / 1000f)
                 Surface(
-                    color = Color(0xFF180A33).copy(alpha = 0.94f),
+                    color = colorScheme.tertiaryContainer.copy(alpha = 0.94f),
                     shape = RoundedCornerShape(50),
-                    border = BorderStroke(2.dp, Color(0xFF7C4DFF).copy(alpha = 0.65f + 0.35f * shockPulse)),
+                    border = BorderStroke(2.dp, tertiaryAccent.copy(alpha = 0.65f + 0.35f * shockPulse)),
                     modifier = Modifier.testTag("electro_paralyzed_banner")
                 ) {
                     Row(
@@ -927,12 +934,12 @@ fun RaceScreen(
                         Text(
                             text = "ELECTRO SHOCKED!",
                             style = MaterialTheme.typography.labelLarge,
-                            color = Color(0xFFB388FF)
+                            color = colorScheme.onTertiaryContainer
                         )
                         Text(
                             text = shockSecText,
                             style = MaterialTheme.typography.labelMedium,
-                            color = Color.White
+                            color = colorScheme.onTertiaryContainer
                         )
                     }
                 }
@@ -942,9 +949,9 @@ fun RaceScreen(
                 val invPulse = 0.5f + 0.5f * sin(animTimeSec * 12f)
                 val invSecText = String.format("%.1fs", invertedRemMs / 1000f)
                 Surface(
-                    color = Color(0xFF280633).copy(alpha = 0.92f),
+                    color = colorScheme.errorContainer.copy(alpha = 0.94f),
                     shape = RoundedCornerShape(50),
-                    border = BorderStroke(2.dp, Color(0xFFE040FB).copy(alpha = 0.65f + 0.35f * invPulse)),
+                    border = BorderStroke(2.dp, errorAccent.copy(alpha = 0.65f + 0.35f * invPulse)),
                     modifier = Modifier.testTag("inverted_banner")
                 ) {
                     Row(
@@ -955,12 +962,12 @@ fun RaceScreen(
                         Text(
                             text = "INVERTED",
                             style = MaterialTheme.typography.labelLarge,
-                            color = Color(0xFFFF80AB)
+                            color = colorScheme.onErrorContainer
                         )
                         Text(
                             text = invSecText,
                             style = MaterialTheme.typography.labelMedium,
-                            color = Color.White
+                            color = colorScheme.onErrorContainer
                         )
                     }
                 }
@@ -969,15 +976,15 @@ fun RaceScreen(
             if (localRacer?.finished == true && snapshot?.phase == RacePhase.RACING.name && !isStuntsMode) {
                 val graceSec = ((snapshot.postFinishGraceMs + 999L) / 1000L).coerceAtLeast(1L)
                 Surface(
-                    color = CarbonBg.copy(alpha = 0.88f),
+                    color = hudSurface,
                     shape = RoundedCornerShape(50),
-                    border = BorderStroke(1.5.dp, GoldTrophy),
+                    border = BorderStroke(1.5.dp, goldAccent),
                     modifier = Modifier.testTag("top_event_banner")
                 ) {
                     Text(
                         text = "FINISHED ${ordinal(localRacer.rank)}! Waiting for rivals (${graceSec}s)",
                         style = MaterialTheme.typography.labelMedium,
-                        color = GoldTrophy,
+                        color = goldAccent,
                         textAlign = TextAlign.Center,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -986,15 +993,15 @@ fun RaceScreen(
                 }
             } else if (!snapshot?.eventBanner.isNullOrBlank() && snapshot?.phase != RacePhase.COUNTDOWN.name) {
                 Surface(
-                    color = CarbonBg.copy(alpha = 0.86f),
+                    color = hudSurface,
                     shape = RoundedCornerShape(50),
-                    border = BorderStroke(1.dp, ElectricCyan),
+                    border = BorderStroke(1.dp, primaryAccent),
                     modifier = Modifier.testTag("top_event_banner")
                 ) {
                     Text(
                         text = snapshot?.eventBanner ?: "",
                         style = MaterialTheme.typography.labelMedium,
-                        color = ElectricCyan,
+                        color = primaryAccent,
                         textAlign = TextAlign.Center,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -1009,31 +1016,31 @@ fun RaceScreen(
             ) {
                 if (rules.autoAccelerate && isLocalActiveStuntDriver) {
                     Surface(
-                        color = AcidLime.copy(alpha = 0.22f),
+                        color = colorScheme.tertiaryContainer.copy(alpha = 0.88f),
                         shape = RoundedCornerShape(50),
-                        border = BorderStroke(1.dp, AcidLime.copy(alpha = 0.7f)),
+                        border = BorderStroke(1.dp, tertiaryAccent.copy(alpha = 0.7f)),
                         modifier = Modifier.testTag("auto_gas_badge")
                     ) {
                         Text(
                             text = "AUTO GAS",
                             style = MaterialTheme.typography.labelSmall,
-                            color = AcidLime,
+                            color = colorScheme.onTertiaryContainer,
                             modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp)
                         )
                     }
                 }
                 if (isArenaMode && arenaFlagToDraw?.carrierId == localRacer?.playerId) {
-                    StatusChip("CARRYING FLAG!", GoldTrophy)
+                    StatusChip("CARRYING FLAG!", goldAccent)
                 }
-                if (stuntControlsLocked && isLocalActiveStuntDriver) StatusChip("LANDED — COASTING", ElectricCyan)
-                if ((localRacer?.jumpZ ?: 0f) > 0.1f) StatusChip("AIRBORNE!", GoldTrophy)
-                if ((localRacer?.boostMs ?: 0L) > 0L) StatusChip("TURBO", SignalOrange)
-                if ((localRacer?.shieldMs ?: 0L) > 0L) StatusChip("SHIELD", AcidLime)
-                if ((localRacer?.overdriveMs ?: 0L) > 0L) StatusChip("OVERDRIVE", Color(0xFFE040FB))
-                if ((localRacer?.laserBeamMs ?: 0L) > 0L) StatusChip("RED LASER", AlertRed)
-                if ((localRacer?.electroShockAuraMs ?: 0L) > 0L) StatusChip("ELECTRO AURA", Color(0xFFB388FF))
-                if ((localRacer?.electroParalyzedMs ?: 0L) > 0L) StatusChip("MOTIONLESS!", Color(0xFF7C4DFF))
-                if ((localRacer?.stunnedMs ?: 0L) > 0L) StatusChip("ZAPPED!", AlertRed)
+                if (stuntControlsLocked && isLocalActiveStuntDriver) StatusChip("LANDED — COASTING", secondaryAccent)
+                if ((localRacer?.jumpZ ?: 0f) > 0.1f) StatusChip("AIRBORNE!", goldAccent)
+                if ((localRacer?.boostMs ?: 0L) > 0L) StatusChip("TURBO", primaryAccent)
+                if ((localRacer?.shieldMs ?: 0L) > 0L) StatusChip("SHIELD", tertiaryAccent)
+                if ((localRacer?.overdriveMs ?: 0L) > 0L) StatusChip("OVERDRIVE", secondaryAccent)
+                if ((localRacer?.laserBeamMs ?: 0L) > 0L) StatusChip("RED LASER", errorAccent)
+                if ((localRacer?.electroShockAuraMs ?: 0L) > 0L) StatusChip("ELECTRO AURA", tertiaryAccent)
+                if ((localRacer?.electroParalyzedMs ?: 0L) > 0L) StatusChip("MOTIONLESS!", errorAccent)
+                if ((localRacer?.stunnedMs ?: 0L) > 0L) StatusChip("ZAPPED!", errorAccent)
             }
         }
 
@@ -1087,9 +1094,9 @@ fun RaceScreen(
             if (isStuntsMode && !isLocalActiveStuntDriver) {
                 // Spectator Live Scoreboard Bar while watching another player's stunt run
                 Surface(
-                    color = CarbonBg.copy(alpha = 0.88f),
+                    color = hudSurface,
                     shape = RoundedCornerShape(20.dp),
-                    border = BorderStroke(1.5.dp, ElectricCyan.copy(alpha = 0.7f)),
+                    border = BorderStroke(1.5.dp, primaryAccent.copy(alpha = 0.7f)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("stunt_spectator_bar")
@@ -1106,13 +1113,13 @@ fun RaceScreen(
                             Text(
                                 text = "SPECTATOR MODE • WATCHING ${stuntState?.activePlayerName?.uppercase() ?: "DRIVER"}",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = ElectricCyan
+                                color = primaryAccent
                             )
                             if (!stuntState?.lastAttemptSummary.isNullOrBlank()) {
                                 Text(
                                     text = stuntState?.lastAttemptSummary ?: "",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = GoldTrophy,
+                                    color = goldAccent,
                                     maxLines = 1
                                 )
                             }
@@ -1124,17 +1131,17 @@ fun RaceScreen(
                             snapshot?.racers.orEmpty().forEach { r ->
                                 val isActiveTurn = r.playerId == stuntState?.activePlayerId
                                 Surface(
-                                    color = if (isActiveTurn) ElectricCyan.copy(alpha = 0.22f) else PaddockSurface,
+                                    color = if (isActiveTurn) colorScheme.primaryContainer else colorScheme.surfaceContainerHigh,
                                     shape = RoundedCornerShape(50),
                                     border = BorderStroke(
                                         1.dp,
-                                        if (isActiveTurn) ElectricCyan else PaddockOutline
+                                        if (isActiveTurn) primaryAccent else hudBorder
                                     )
                                 ) {
                                     Text(
                                         text = "${if (isActiveTurn) "▶ " else ""}${r.name.take(10)}: ${r.racePoints} pts",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = if (isActiveTurn) Color.White else TextSecondary,
+                                        color = if (isActiveTurn) colorScheme.onPrimaryContainer else hudMuted,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                                     )
                                 }
@@ -1155,7 +1162,8 @@ fun RaceScreen(
                                 label = null,
                                 icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
                                 contentDesc = "Steer Left",
-                                activeColor = ElectricCyan,
+                                activeColor = primaryAccent,
+                                onActiveColor = colorScheme.onPrimary,
                                 iconSize = steerIconSize,
                                 modifier = Modifier
                                     .size(width = steerWidth, height = controlHeight)
@@ -1166,7 +1174,8 @@ fun RaceScreen(
                                 label = null,
                                 icon = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                                 contentDesc = "Steer Right",
-                                activeColor = ElectricCyan,
+                                activeColor = primaryAccent,
+                                onActiveColor = colorScheme.onPrimary,
                                 iconSize = steerIconSize,
                                 modifier = Modifier
                                     .size(width = steerWidth, height = controlHeight)
@@ -1187,9 +1196,9 @@ fun RaceScreen(
                     }
                     ControlMode.TILT_SENSOR -> {
                         Surface(
-                            color = CarbonBg.copy(alpha = 0.84f),
+                            color = hudSurface,
                             shape = RoundedCornerShape(16.dp),
-                            border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.6f)),
+                            border = BorderStroke(1.dp, primaryAccent.copy(alpha = 0.65f)),
                             modifier = Modifier.width(172.dp)
                         ) {
                             Column(
@@ -1201,11 +1210,11 @@ fun RaceScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("TILT STEER", style = MaterialTheme.typography.labelSmall, color = ElectricCyan)
+                                    Text("TILT STEER", style = MaterialTheme.typography.labelSmall, color = primaryAccent)
                                     Icon(
                                         Icons.Default.Refresh,
                                         contentDescription = "Calibrate Neutral Tilt",
-                                        tint = Color.White,
+                                        tint = hudOnSurface,
                                         modifier = Modifier
                                             .size(22.dp)
                                             .clip(CircleShape)
@@ -1217,7 +1226,7 @@ fun RaceScreen(
                                         .fillMaxWidth()
                                         .height(10.dp)
                                         .clip(RoundedCornerShape(50))
-                                        .background(PaddockSurface)
+                                        .background(colorScheme.surfaceContainerHighest)
                                 ) {
                                     val frac = ((tiltSteer + 1f) / 2f).coerceIn(0.05f, 0.95f)
                                     Box(modifier = Modifier.fillMaxWidth(frac).height(10.dp)) {
@@ -1226,7 +1235,7 @@ fun RaceScreen(
                                                 .align(Alignment.CenterEnd)
                                                 .size(14.dp, 10.dp)
                                                 .clip(CircleShape)
-                                                .background(ElectricCyan)
+                                                .background(primaryAccent)
                                         )
                                     }
                                 }
@@ -1247,14 +1256,14 @@ fun RaceScreen(
                             val currentLap = localRacer?.lap ?: 1
                             val mineFlash = 0.5f + 0.5f * sin(animTimeSec * 14f)
                             val mineActiveBg = if (mineFlash > 0.45f) {
-                                AlertRed.copy(alpha = 0.94f)
+                                errorAccent.copy(alpha = 0.94f)
                             } else {
-                                Color(0xFF7F0019).copy(alpha = 0.92f)
+                                colorScheme.errorContainer.copy(alpha = 0.94f)
                             }
                             val mineBorder = if (hasMine) {
-                                if (mineFlash > 0.45f) Color(0xFFFFCDD2) else AlertRed
+                                if (mineFlash > 0.45f) colorScheme.onError else errorAccent
                             } else {
-                                PaddockOutline
+                                hudBorder
                             }
                             val mineLabel = when {
                                 hasMine -> "MINE"
@@ -1262,7 +1271,7 @@ fun RaceScreen(
                                 else -> "USED"
                             }
                             Surface(
-                                color = if (hasMine) mineActiveBg else CarbonBg.copy(alpha = 0.65f),
+                                color = if (hasMine) mineActiveBg else hudSurface.copy(alpha = 0.72f),
                                 shape = RoundedCornerShape(18.dp),
                                 border = BorderStroke(2.dp, mineBorder),
                                 modifier = Modifier
@@ -1287,9 +1296,9 @@ fun RaceScreen(
                                             .clip(CircleShape)
                                             .background(
                                                 if (hasMine) {
-                                                    if (mineFlash > 0.45f) Color.White else Color(0xFFFF5252)
+                                                    if (mineFlash > 0.45f) colorScheme.onError else errorAccent
                                                 } else {
-                                                    TextSecondary.copy(alpha = 0.5f)
+                                                    hudMuted.copy(alpha = 0.5f)
                                                 }
                                             )
                                     )
@@ -1298,22 +1307,28 @@ fun RaceScreen(
                                         text = mineLabel,
                                         maxLines = 1,
                                         style = MaterialTheme.typography.labelLarge,
-                                        color = if (hasMine) Color.White else TextSecondary
+                                        color = if (hasMine) {
+                                            if (mineFlash > 0.45f) colorScheme.onError else colorScheme.onErrorContainer
+                                        } else {
+                                            hudMuted
+                                        }
                                     )
                                 }
                             }
                         }
 
                         val canFirePowerUp = heldPowerUp != null && !stuntControlsLocked
-                        val powerUpColor = if (canFirePowerUp) {
-                            heldPowerUp?.let { Color(it.colorHex) } ?: PaddockOutline
+                        val powerUpBg = if (canFirePowerUp) {
+                            primaryAccent.copy(alpha = 0.94f)
                         } else {
-                            PaddockOutline
+                            hudSurface.copy(alpha = 0.72f)
                         }
+                        val powerUpBorder = if (canFirePowerUp) primaryAccent else hudBorder
+                        val powerUpContent = if (canFirePowerUp) colorScheme.onPrimary else hudMuted
                         Surface(
-                            color = if (canFirePowerUp) powerUpColor.copy(alpha = 0.92f) else CarbonBg.copy(alpha = 0.65f),
+                            color = powerUpBg,
                             shape = RoundedCornerShape(18.dp),
-                            border = BorderStroke(2.dp, powerUpColor),
+                            border = BorderStroke(2.dp, powerUpBorder),
                             modifier = Modifier
                                 .size(width = powerBtnWidth, height = 56.dp)
                                 .clip(RoundedCornerShape(18.dp))
@@ -1333,7 +1348,7 @@ fun RaceScreen(
                                 Icon(
                                     Icons.Default.Bolt,
                                     contentDescription = "Power-up",
-                                    tint = if (canFirePowerUp) CarbonBg else TextSecondary,
+                                    tint = powerUpContent,
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Spacer(modifier = Modifier.width(5.dp))
@@ -1345,7 +1360,7 @@ fun RaceScreen(
                                         else -> "EMPTY"
                                     },
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = if (canFirePowerUp) CarbonBg else TextSecondary
+                                    color = powerUpContent
                                 )
                             }
                         }
@@ -1360,7 +1375,8 @@ fun RaceScreen(
                                 label = "BRAKE",
                                 icon = null,
                                 contentDesc = "Brake or Reverse",
-                                activeColor = AlertRed,
+                                activeColor = errorAccent,
+                                onActiveColor = colorScheme.onError,
                                 modifier = Modifier
                                     .size(width = 116.dp, height = controlHeight)
                                     .testTag("brake_button"),
@@ -1371,7 +1387,8 @@ fun RaceScreen(
                                 label = "BRK",
                                 icon = null,
                                 contentDesc = "Brake or Reverse",
-                                activeColor = AlertRed,
+                                activeColor = errorAccent,
+                                onActiveColor = colorScheme.onError,
                                 modifier = Modifier
                                     .size(width = 68.dp, height = controlHeight)
                                     .testTag("brake_button"),
@@ -1381,7 +1398,8 @@ fun RaceScreen(
                                 label = if (profile.controlMode == ControlMode.TILT_SENSOR && profile.autoGasInTilt) "AUTO" else "GAS",
                                 icon = null,
                                 contentDesc = "Accelerate",
-                                activeColor = AcidLime,
+                                activeColor = tertiaryAccent,
+                                onActiveColor = colorScheme.onTertiary,
                                 modifier = Modifier
                                     .size(width = 88.dp, height = controlHeight)
                                     .testTag("gas_button"),
@@ -1600,10 +1618,12 @@ private fun HoldControlPad(
     icon: androidx.compose.ui.graphics.vector.ImageVector?,
     contentDesc: String,
     activeColor: Color,
+    onActiveColor: Color = MaterialTheme.colorScheme.onPrimary,
     iconSize: Dp = 44.dp,
     modifier: Modifier = Modifier,
     onPressedChange: (Boolean) -> Unit
 ) {
+    val scheme = MaterialTheme.colorScheme
     var pressed by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
@@ -1616,9 +1636,9 @@ private fun HoldControlPad(
     }
 
     Surface(
-        color = if (pressed) activeColor.copy(alpha = 0.85f) else CarbonBg.copy(alpha = 0.75f),
+        color = if (pressed) activeColor.copy(alpha = 0.90f) else scheme.surfaceContainer.copy(alpha = 0.84f),
         shape = RoundedCornerShape(22.dp),
-        border = BorderStroke(2.2.dp, if (pressed) Color.White else activeColor.copy(alpha = 0.8f)),
+        border = BorderStroke(2.2.dp, if (pressed) scheme.onSurface else activeColor.copy(alpha = 0.82f)),
         modifier = modifier.pointerInput(Unit) {
             awaitPointerEventScope {
                 while (true) {
@@ -1638,14 +1658,14 @@ private fun HoldControlPad(
                 Icon(
                     imageVector = icon,
                     contentDescription = contentDesc,
-                    tint = if (pressed) CarbonBg else activeColor,
+                    tint = if (pressed) onActiveColor else activeColor,
                     modifier = Modifier.size(iconSize)
                 )
             } else if (label != null) {
                 Text(
                     text = label,
                     style = MaterialTheme.typography.titleLarge,
-                    color = if (pressed) CarbonBg else activeColor
+                    color = if (pressed) onActiveColor else activeColor
                 )
             }
         }
@@ -1659,6 +1679,16 @@ fun SpringSteeringSlider(
     iconSize: Dp = 44.dp,
     modifier: Modifier = Modifier
 ) {
+    val scheme = MaterialTheme.colorScheme
+    val sliderAccent = scheme.primary
+    val sliderOnAccent = scheme.onPrimary
+    val sliderSecondary = scheme.secondary
+    val sliderBg = scheme.surfaceContainer
+    val sliderPadIdle = scheme.surfaceContainerHighest
+    val sliderOutline = scheme.outlineVariant
+    val sliderOnSurface = scheme.onSurface
+    val sliderMuted = scheme.onSurfaceVariant
+
     val density = LocalDensity.current
     val thumbHalfWidthPx = with(density) { 22.dp.toPx() }
     val slideSlopPx = with(density) { 8.dp.toPx() }
@@ -1689,11 +1719,11 @@ fun SpringSteeringSlider(
     val displayOffset = if (isInteracting) rawThumbOffset else animatedThumbOffset
 
     Surface(
-        color = CarbonBg.copy(alpha = 0.80f),
+        color = sliderBg.copy(alpha = 0.86f),
         shape = RoundedCornerShape(24.dp),
         border = BorderStroke(
             2.2.dp,
-            if (isInteracting) Color.White else ElectricCyan.copy(alpha = 0.82f)
+            if (isInteracting) sliderOnSurface else sliderAccent.copy(alpha = 0.82f)
         ),
         modifier = modifier
             .onSizeChanged { sliderWidthPx = it.width.toFloat() }
@@ -1790,16 +1820,16 @@ fun SpringSteeringSlider(
 
                 drawRoundRect(
                     color = when {
-                        tapButtonDir < 0 -> ElectricCyan.copy(alpha = 0.55f)
-                        leftActive -> ElectricCyan.copy(alpha = 0.18f)
-                        else -> PaddockSurface.copy(alpha = 0.45f)
+                        tapButtonDir < 0 -> sliderAccent.copy(alpha = 0.58f)
+                        leftActive -> sliderAccent.copy(alpha = 0.22f)
+                        else -> sliderPadIdle.copy(alpha = 0.52f)
                     },
                     topLeft = Offset(padInset, padInset),
                     size = Size(padWidth, padHeight),
                     cornerRadius = padCorner
                 )
                 drawRoundRect(
-                    color = if (tapButtonDir < 0) Color.White else ElectricCyan.copy(alpha = 0.42f),
+                    color = if (tapButtonDir < 0) sliderOnSurface else sliderAccent.copy(alpha = 0.45f),
                     topLeft = Offset(padInset, padInset),
                     size = Size(padWidth, padHeight),
                     cornerRadius = padCorner,
@@ -1809,16 +1839,16 @@ fun SpringSteeringSlider(
                 val rightLeftX = w - padInset - padWidth
                 drawRoundRect(
                     color = when {
-                        tapButtonDir > 0 -> ElectricCyan.copy(alpha = 0.55f)
-                        rightActive -> ElectricCyan.copy(alpha = 0.18f)
-                        else -> PaddockSurface.copy(alpha = 0.45f)
+                        tapButtonDir > 0 -> sliderAccent.copy(alpha = 0.58f)
+                        rightActive -> sliderAccent.copy(alpha = 0.22f)
+                        else -> sliderPadIdle.copy(alpha = 0.52f)
                     },
                     topLeft = Offset(rightLeftX, padInset),
                     size = Size(padWidth, padHeight),
                     cornerRadius = padCorner
                 )
                 drawRoundRect(
-                    color = if (tapButtonDir > 0) Color.White else ElectricCyan.copy(alpha = 0.42f),
+                    color = if (tapButtonDir > 0) sliderOnSurface else sliderAccent.copy(alpha = 0.45f),
                     topLeft = Offset(rightLeftX, padInset),
                     size = Size(padWidth, padHeight),
                     cornerRadius = padCorner,
@@ -1829,7 +1859,7 @@ fun SpringSteeringSlider(
                 val railHeight = 8.dp.toPx()
                 val railMargin = thumbHalfWidthPx * 0.75f
                 drawRoundRect(
-                    color = CarbonBg.copy(alpha = 0.85f),
+                    color = sliderBg.copy(alpha = 0.92f),
                     topLeft = Offset(railMargin, centerY - railHeight / 2f),
                     size = Size((w - railMargin * 2f).coerceAtLeast(4f), railHeight),
                     cornerRadius = CornerRadius(railHeight / 2f, railHeight / 2f)
@@ -1842,7 +1872,7 @@ fun SpringSteeringSlider(
                     val isZero = tf == 0f
                     val tickHalfH = if (isZero) h * 0.32f else h * 0.14f
                     drawLine(
-                        color = if (isZero) SignalOrange.copy(alpha = 0.88f) else PaddockOutline,
+                        color = if (isZero) sliderSecondary.copy(alpha = 0.9f) else sliderOutline,
                         start = Offset(tx, centerY - tickHalfH),
                         end = Offset(tx, centerY + tickHalfH),
                         strokeWidth = if (isZero) 2.5.dp.toPx() else 1.4.dp.toPx()
@@ -1854,7 +1884,7 @@ fun SpringSteeringSlider(
                 val barWidth = kotlin.math.abs(thumbCenterX - centerX)
                 if (barWidth > 1f) {
                     drawRoundRect(
-                        color = ElectricCyan.copy(alpha = 0.90f),
+                        color = sliderAccent.copy(alpha = 0.92f),
                         topLeft = Offset(barLeft, centerY - railHeight / 2f),
                         size = Size(barWidth, railHeight),
                         cornerRadius = CornerRadius(railHeight / 2f, railHeight / 2f)
@@ -1866,7 +1896,7 @@ fun SpringSteeringSlider(
                 val puckH = (h - 18.dp.toPx()).coerceAtLeast(42.dp.toPx())
                 val puckLeft = thumbCenterX - puckW / 2f
                 val puckTop = centerY - puckH / 2f
-                val puckColor = if (isInteracting) ElectricCyan else ElectricCyan.copy(alpha = 0.88f)
+                val puckColor = if (isInteracting) sliderAccent else sliderAccent.copy(alpha = 0.90f)
 
                 drawRoundRect(
                     color = puckColor,
@@ -1876,7 +1906,7 @@ fun SpringSteeringSlider(
                 )
 
                 // Knurled grip ridges on thumb puck
-                val ridgeColor = CarbonBg.copy(alpha = 0.72f)
+                val ridgeColor = sliderOnAccent.copy(alpha = 0.75f)
                 val ridgeSpacing = 5.dp.toPx()
                 for (ri in -1..1) {
                     val rx = thumbCenterX + ri * ridgeSpacing
@@ -1893,7 +1923,7 @@ fun SpringSteeringSlider(
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
                 contentDescription = "Steer Left",
-                tint = if (tapButtonDir < 0) CarbonBg else ElectricCyan,
+                tint = if (tapButtonDir < 0) sliderOnAccent else sliderAccent,
                 modifier = Modifier
                     .align(Alignment.CenterStart)
                     .padding(start = 10.dp)
@@ -1903,7 +1933,7 @@ fun SpringSteeringSlider(
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = "Steer Right",
-                tint = if (tapButtonDir > 0) CarbonBg else ElectricCyan,
+                tint = if (tapButtonDir > 0) sliderOnAccent else sliderAccent,
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .padding(end = 10.dp)
@@ -1919,7 +1949,7 @@ fun SpringSteeringSlider(
                     "SLIDE / TAP"
                 },
                 style = MaterialTheme.typography.labelSmall,
-                color = if (isInteracting) Color.White else TextSecondary.copy(alpha = 0.82f),
+                color = if (isInteracting) sliderOnSurface else sliderMuted.copy(alpha = 0.88f),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = 3.dp)

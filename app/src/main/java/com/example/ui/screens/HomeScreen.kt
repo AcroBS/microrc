@@ -20,10 +20,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -41,7 +43,6 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Hub
-import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Public
@@ -53,7 +54,6 @@ import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material.icons.filled.TouchApp
-import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -124,9 +124,8 @@ fun HomeScreen(
     onOpenLeaderboards: () -> Unit = {},
     onOpenHybridSetup: () -> Unit = {},
     onOpenGarage: () -> Unit,
-    onOpenTrackEditor: () -> Unit,
-    onOpenSettings: () -> Unit,
     onUpdateDriverName: (String) -> Unit,
+    hasBottomNav: Boolean = false,
     availableUpdate: AppUpdateUiState.UpdateAvailable? = null,
     onDownloadUpdate: (GitHubReleaseInfo) -> Unit = {},
     onDismissUpdate: (String) -> Unit = {}
@@ -148,6 +147,11 @@ fun HomeScreen(
     val driverBadgeBg = Color(profile.primaryColorArgb)
     val driverBadgeFg = if (driverBadgeBg.luminance() > 0.45f) Color(0xFF101318) else Color.White
     val onlineAccent = adaptiveOnlineColor()
+    val homeInsets = if (hasBottomNav) {
+        WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+    } else {
+        WindowInsets.safeDrawing
+    }
 
     Surface(
         color = MaterialTheme.colorScheme.background,
@@ -156,7 +160,7 @@ fun HomeScreen(
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .windowInsetsPadding(homeInsets)
         ) {
             val isWideScreen = maxWidth >= 680.dp
 
@@ -495,39 +499,7 @@ fun HomeScreen(
                         }
                     }
 
-                    // 5. Workshop & Match Preferences Row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        OutlinedButton(
-                            onClick = onOpenTrackEditor,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            shape = MaterialTheme.shapes.medium,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(52.dp)
-                                .testTag("open_track_editor_button")
-                        ) {
-                            Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Track Studio", style = MaterialTheme.typography.labelLarge, maxLines = 1)
-                        }
-
-                        OutlinedButton(
-                            onClick = onOpenSettings,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            shape = MaterialTheme.shapes.medium,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(52.dp)
-                                .testTag("open_settings_button")
-                        ) {
-                            Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Rules & Audio", style = MaterialTheme.typography.labelLarge, maxLines = 1)
-                        }
-                    }
+                    Spacer(modifier = Modifier.height(4.dp))
                 }
             }
         }

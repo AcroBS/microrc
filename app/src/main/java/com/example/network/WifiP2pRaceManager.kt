@@ -625,6 +625,7 @@ class WifiP2pRaceManager(
                     }
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 _connectionError.value = "Failed to open host socket: ${e.message}"
                 leaveSession()
             }
@@ -879,6 +880,7 @@ class WifiP2pRaceManager(
                     }
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
                 _connectionError.value = "Could not connect to $ip:$port (${e.localizedMessage ?: "timeout"})"
                 _role.value = SessionRole.None
                 releaseLowLatencyWifiLock()
