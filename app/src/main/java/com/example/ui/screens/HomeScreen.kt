@@ -37,6 +37,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Hub
@@ -48,6 +49,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material.icons.filled.TouchApp
@@ -93,6 +95,8 @@ import com.example.model.ControlMode
 import com.example.model.PlayerProfile
 import com.example.ui.components.drawRcCar
 import com.example.ui.theme.adaptiveOnlineColor
+import com.example.util.AppUpdateUiState
+import com.example.util.GitHubReleaseInfo
 
 private enum class HomeModeScope(val label: String) {
     ALL("All Modes"),
@@ -122,7 +126,10 @@ fun HomeScreen(
     onOpenGarage: () -> Unit,
     onOpenTrackEditor: () -> Unit,
     onOpenSettings: () -> Unit,
-    onUpdateDriverName: (String) -> Unit
+    onUpdateDriverName: (String) -> Unit,
+    availableUpdate: AppUpdateUiState.UpdateAvailable? = null,
+    onDownloadUpdate: (GitHubReleaseInfo) -> Unit = {},
+    onDismissUpdate: (String) -> Unit = {}
 ) {
     var showNameDialog by remember { mutableStateOf(false) }
     var modeScope by remember { mutableStateOf(HomeModeScope.ALL) }
@@ -205,6 +212,15 @@ fun HomeScreen(
                                 color = Color.White.copy(alpha = 0.84f)
                             )
                         }
+                    }
+
+                    // 1b. Non-overlapping Inline GitHub Update Hint Card (only shown when newer GitHub release is available)
+                    if (availableUpdate != null) {
+                        HomeUpdateHintCard(
+                            update = availableUpdate,
+                            onDownload = { onDownloadUpdate(availableUpdate.release) },
+                            onDismiss = { onDismissUpdate(availableUpdate.release.tagName) }
+                        )
                     }
 
                     // 2. Driver Tag + Active RC Car Garage Card (Material You Tonal Surface)
@@ -982,6 +998,101 @@ private fun OnlineEntrySection(
                 Icon(Icons.Default.EmojiEvents, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Records & Ghosts", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeUpdateHintCard(
+    update: AppUpdateUiState.UpdateAvailable,
+    onDownload: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    ElevatedCard(
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        ),
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("home_update_banner")
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.size(40.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.SystemUpdate,
+                            contentDescription = "Update Available",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Update Available • ${update.release.tagName}",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "Installed v${update.currentVersion} • Download the latest MicroRC APK from GitHub.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Button(
+                    onClick = onDownload,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ),
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .testTag("home_update_download_button")
+                ) {
+                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Download APK", style = MaterialTheme.typography.labelLarge)
+                }
+
+                TextButton(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    ),
+                    modifier = Modifier
+                        .height(48.dp)
+                        .testTag("home_update_dismiss_button")
+                ) {
+                    Text("Later", style = MaterialTheme.typography.labelLarge)
+                }
             }
         }
     }

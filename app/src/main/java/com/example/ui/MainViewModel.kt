@@ -3,6 +3,7 @@ package com.example.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.BuildConfig
 import com.example.audio.RaceAudioEngine
 import com.example.data.DailyChallengeCatalog
 import com.example.data.PreferencesRepository
@@ -34,6 +35,8 @@ import com.example.network.SessionRole
 import com.example.network.WifiP2pRaceManager
 import com.example.sensors.RcHapticController
 import com.example.sensors.TiltSteeringController
+import com.example.util.AppUpdateUiState
+import com.example.util.GitHubUpdateChecker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -106,6 +109,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         initialValue = false
     )
 
+    val dismissedUpdateTag: StateFlow<String?> = prefsRepo.dismissedUpdateTagFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = null
+    )
+
+    val isPlayStoreInstall: Boolean = GitHubUpdateChecker.isInstalledFromPlayStore(application)
+
+    private val _appUpdateState = MutableStateFlow<AppUpdateUiState>(AppUpdateUiState.Idle)
+    val appUpdateState: StateFlow<AppUpdateUiState> = _appUpdateState.asStateFlow()
+
     private val _overviewCamera = MutableStateFlow(false)
     val overviewCamera: StateFlow<Boolean> = _overviewCamera.asStateFlow()
 
@@ -115,6 +129,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch {
             prefsRepo.ensurePlayerId()
+        }
+        if (!isPlayStoreInstall && BuildConfig.GITHUB_REPOSITORY.isNotBlank()) {
+            checkForAppUpdate(manual = false)
         }
         viewModelScope.launch {
             audioSettings.collect {
@@ -137,6 +154,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 _lastRunWasPersonalBest.value = improved
             }
+        }
+    }
+
+    fun checkForAppUpdate(manual: Boolean = true) {
+        if (isPlayStoreInstall) {
+            _appUpdateState.value = AppUpdateUiState.Idle
+            return
+        }
+        if (_appUpdateState.value is AppUpdateUiState.Checking) return
+        viewModelScope.launch {
+            if (manual) {
+                prefsRepo.clearDismissedUpdateTag()
+                _appUpdateState.value = AppUpdateUiState.Checking
+            }
+            val result = GitHubUpdateChecker.checkLatestRelease(
+                repository = BuildConfig.GITHUB_REPOSITORY,
+                currentVersion = BuildConfig.VERSION_NAME
+            )
+            // Keep automatic startup checks silent when offline or unconfigured
+            _appUpdateState.value = if (!manual && result is AppUpdateUiState.Unavailable) {
+                AppUpdateUiState.Idle
+            } else {
+                result
+            }
+        }
+    }
+
+    fun dismissUpdateHint(tagName: String) {
+        viewModelScope.launch {
+            prefsRepo.dismissUpdateTag(tagName)
         }
     }
 

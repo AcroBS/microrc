@@ -92,6 +92,7 @@ class PreferencesRepository(context: Context) {
         val LAST_NOTIFIED_DAILY_KEY = stringPreferencesKey("last_notified_daily_key")
         val DAILY_NOTIFICATIONS_ENABLED = booleanPreferencesKey("daily_notifications_enabled")
         val NOTIFICATION_PERMISSION_PROMPTED = booleanPreferencesKey("notification_permission_prompted")
+        val DISMISSED_UPDATE_TAG = stringPreferencesKey("dismissed_update_tag")
     }
 
     val profileFlow: Flow<PlayerProfile> = dataStore.data.map { prefs ->
@@ -186,6 +187,10 @@ class PreferencesRepository(context: Context) {
         prefs[Keys.NOTIFICATION_PERMISSION_PROMPTED] ?: false
     }
 
+    val dismissedUpdateTagFlow: Flow<String?> = dataStore.data.map { prefs ->
+        prefs[Keys.DISMISSED_UPDATE_TAG]
+    }
+
     suspend fun getLastNotifiedDailyKey(): String? {
         return dataStore.data.map { it[Keys.LAST_NOTIFIED_DAILY_KEY] }.first()
     }
@@ -204,6 +209,17 @@ class PreferencesRepository(context: Context) {
 
     suspend fun markNotificationPermissionPrompted() {
         dataStore.edit { it[Keys.NOTIFICATION_PERMISSION_PROMPTED] = true }
+    }
+
+    suspend fun dismissUpdateTag(tagName: String) {
+        val clean = tagName.trim()
+        if (clean.isNotEmpty()) {
+            dataStore.edit { it[Keys.DISMISSED_UPDATE_TAG] = clean }
+        }
+    }
+
+    suspend fun clearDismissedUpdateTag() {
+        dataStore.edit { it.remove(Keys.DISMISSED_UPDATE_TAG) }
     }
 
     suspend fun ensurePlayerId(): String {

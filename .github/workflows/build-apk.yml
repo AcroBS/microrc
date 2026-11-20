@@ -311,7 +311,12 @@ jobs:
           RUN_NUMBER: ${{ github.run_number }}
         run: |
           echo "CI_VERSION_CODE=$((RUN_NUMBER + 100))" >> "$GITHUB_ENV"
-          echo "CI_VERSION_NAME=1.0.${RUN_NUMBER}" >> "$GITHUB_ENV"
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            CLEAN_TAG="${GITHUB_REF_NAME#v}"
+            echo "CI_VERSION_NAME=${CLEAN_TAG}" >> "$GITHUB_ENV"
+          else
+            echo "CI_VERSION_NAME=1.0.${RUN_NUMBER}" >> "$GITHUB_ENV"
+          fi
 
       - name: Build installable debug APK
         run: |
@@ -326,7 +331,7 @@ jobs:
         run: |
           if [ -n "${UPLOAD_KEYSTORE_BASE64:-}" ] && [ -n "${STORE_PASSWORD:-}" ] && [ -n "${KEY_PASSWORD:-}" ]; then
             printf '%s' "$UPLOAD_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > my-upload-key.jks
-            KEYSTORE_PATH="${GITHUB_WORKSPACE}/my-upload-key.jks" gradle bundleRelease --no-daemon
+            KEYSTORE_PATH="${GITHUB_WORKSPACE}/my-upload-key.jks" DISABLE_GITHUB_UPDATE_CHECK=true gradle bundleRelease --no-daemon
             cp app/build/outputs/bundle/release/app-release.aab MicroRC-play-store.aab
             rm -f my-upload-key.jks
             echo "HAS_PLAY_AAB=true" >> "$GITHUB_ENV"

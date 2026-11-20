@@ -82,6 +82,24 @@ android {
     buildConfigField("String", "CI_FIREBASE_GCM_SENDER_ID", ciEnvLiteral("FIREBASE_GCM_SENDER_ID"))
     buildConfigField("String", "CI_FIREBASE_WEB_CLIENT_ID", ciEnvLiteral("FIREBASE_WEB_CLIENT_ID"))
     buildConfigField("String", "CI_FIRESTORE_DATABASE_ID", ciEnvLiteral("FIRESTORE_DATABASE_ID"))
+
+    val disableGithubUpdateCheck =
+      providers.environmentVariable("DISABLE_GITHUB_UPDATE_CHECK").orNull
+        ?.equals("true", ignoreCase = true) == true
+    val githubRepo =
+      if (disableGithubUpdateCheck) {
+        ""
+      } else {
+        providers.environmentVariable("GITHUB_UPDATE_REPO").orNull
+          ?.trim()
+          ?.takeIf { it.isNotBlank() }
+          ?: providers.environmentVariable("GITHUB_REPOSITORY").orNull?.trim().orEmpty()
+      }
+    buildConfigField(
+      "String",
+      "GITHUB_REPOSITORY",
+      "\"${githubRepo.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+    )
   }
 
   // Do not remove or modify these signingConfigs. They are necessary for building, installing,

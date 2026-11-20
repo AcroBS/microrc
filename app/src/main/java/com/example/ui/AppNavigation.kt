@@ -79,6 +79,8 @@ import com.example.ui.screens.ResultsScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.TrackEditorScreen
 import com.example.ui.theme.adaptiveGoldColor
+import com.example.util.AppUpdateUiState
+import com.example.util.GitHubUpdateChecker
 import com.example.util.PendingDailyChallengeRoute
 import com.example.util.PendingLeaderboardRoute
 import com.example.util.PendingLobbyInvite
@@ -162,6 +164,8 @@ fun MicroRCApp(
     val dailyNotificationsEnabled by viewModel.dailyNotificationsEnabled.collectAsState()
     val lastRunWasPersonalBest by viewModel.lastRunWasPersonalBest.collectAsState()
     val overviewCamera by viewModel.overviewCamera.collectAsState()
+    val appUpdateState by viewModel.appUpdateState.collectAsState()
+    val dismissedUpdateTag by viewModel.dismissedUpdateTag.collectAsState()
 
     // Reactive Firebase Auth observation — automatically picks up late/runtime Firebase init
     val authFlow = remember(appContext) {
@@ -545,7 +549,14 @@ fun MicroRCApp(
                     onOpenGarage = { navController.navigate(Routes.GARAGE) },
                     onOpenTrackEditor = { navController.navigate(Routes.TRACK_EDITOR) },
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
-                    onUpdateDriverName = viewModel::updateDriverName
+                    onUpdateDriverName = viewModel::updateDriverName,
+                    availableUpdate = (appUpdateState as? AppUpdateUiState.UpdateAvailable)?.takeIf {
+                        !viewModel.isPlayStoreInstall && it.release.tagName != dismissedUpdateTag
+                    },
+                    onDownloadUpdate = { release ->
+                        GitHubUpdateChecker.openUpdateUrl(context, release.preferredUpdateUrl)
+                    },
+                    onDismissUpdate = viewModel::dismissUpdateHint
                 )
             }
 
@@ -807,6 +818,10 @@ fun MicroRCApp(
                     },
                     onUpdateAudio = viewModel::updateAudioSettings,
                     onToggleDailyNotifications = viewModel::setDailyNotificationsEnabled,
+                    updateState = appUpdateState,
+                    isPlayStoreInstall = viewModel.isPlayStoreInstall,
+                    onCheckForUpdates = { viewModel.checkForAppUpdate(manual = true) },
+                    onOpenUpdateUrl = { url -> GitHubUpdateChecker.openUpdateUrl(context, url) },
                     onBack = { navController.popBackStack() }
                 )
             }
