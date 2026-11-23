@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
@@ -64,13 +66,17 @@ import com.example.data.DailyChallengeCatalog
 import com.example.data.FriendStandingsCalculator
 import com.example.data.FriendsRepository
 import com.example.data.OnlineRaceRepository
+import com.example.model.FriendUiModel
 import com.example.model.GameMode
 import com.example.model.OnlineRoomDoc
+import com.example.model.PendingFriendChallengeState
 import com.example.model.RacePhase
 import com.example.network.RaceNavEvent
 import com.example.network.SessionRole
 import com.example.ui.auth.GoogleAuthManager
+import com.example.ui.components.LiveFriendOnlineBanner
 import com.example.ui.components.LiveLeaderboardNotificationBanner
+import com.example.ui.components.LivePendingChallengeBanner
 import com.example.ui.components.LiveSessionInviteBanner
 import com.example.ui.screens.AuthScreen
 import com.example.ui.screens.FriendsScreen
@@ -96,6 +102,7 @@ import com.example.util.PendingLobbyInvite
 import com.google.firebase.Firebase
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.auth
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 object Routes {
@@ -116,6 +123,8 @@ object Routes {
 
 private sealed interface GlobalTopBannerState {
     data class SessionInvite(val invite: com.example.model.SessionInviteDoc) : GlobalTopBannerState
+    data class PendingChallenge(val state: PendingFriendChallengeState) : GlobalTopBannerState
+    data class FriendOnline(val alert: com.example.model.FriendOnlineAlert) : GlobalTopBannerState
     data class LeaderboardRecord(val notification: com.example.model.LeaderboardNotificationDoc) : GlobalTopBannerState
 }
 
@@ -372,9 +381,16 @@ fun MicroRCApp(
     val incomingLeaderboardNotifications = activeOnlineVm?.let {
         it.incomingLeaderboardNotifications.collectAsState().value
     }.orEmpty()
+    val friendOnlineAlerts = activeOnlineVm?.let {
+        it.friendOnlineAlerts.collectAsState().value
+    }.orEmpty()
+    val pendingFriendChallenge = activeOnlineVm?.let {
+        it.pendingFriendChallenge.collectAsState().value
+    }
     val socialFeedback = activeOnlineVm?.let { it.socialFeedback.collectAsState().value }
 
-    val onlineFriendsCount = remember(friendsList) { friendsList.count { it.effectivelyOnline } }
+    val onlineFriendsList = remember(friendsList) { friendsList.filter { it.effectivelyOnline } }
+    val onlineFriendsCount = onlineFriendsList.size
     val friendCircleEntries = activeOnlineVm?.let { it.friendCircleEntries.collectAsState().value }.orEmpty()
     val friendStandings = remember(
         currentUser?.uid,
@@ -453,7 +469,19 @@ fun MicroRCApp(
     val topBannerInvite = incomingSessionInvites.firstOrNull { inv ->
         onlineRoom?.roomCode != inv.roomCode
     }
-    val topBannerLeaderboardNotif = if (topBannerInvite == null) {
+    val topBannerPendingChallenge = if (topBannerInvite == null) pendingFriendChallenge else null
+    val topBannerFriendOnline = if (topBannerInvite == null && topBannerPendingChallenge == null) {
+        friendOnlineAlerts.firstOrNull { alert ->
+            !(isOnlineSession && onlineRoom != null && alert.activeRoomCode == onlineRoom.roomCode)
+        }
+    } else {
+        null
+    }
+    val topBannerLeaderboardNotif = if (
+        topBannerInvite == null &&
+        topBannerPendingChallenge == null &&
+        topBannerFriendOnline == null
+    ) {
         incomingLeaderboardNotifications.firstOrNull()
     } else {
         null
@@ -461,8 +489,45 @@ fun MicroRCApp(
     val activeTopBanner: GlobalTopBannerState? = when {
         currentRoute == Routes.RACE || globalLockedRoomPrompt != null -> null
         topBannerInvite != null -> GlobalTopBannerState.SessionInvite(topBannerInvite)
+        topBannerPendingChallenge != null -> GlobalTopBannerState.PendingChallenge(topBannerPendingChallenge)
+        topBannerFriendOnline != null -> GlobalTopBannerState.FriendOnline(topBannerFriendOnline)
         topBannerLeaderboardNotif != null -> GlobalTopBannerState.LeaderboardRecord(topBannerLeaderboardNotif)
         else -> null
+    }
+    val activeRaceOverlayBanner: GlobalTopBannerState? = when {
+        currentRoute != Routes.RACE || globalLockedRoomPrompt != null -> null
+        topBannerInvite != null -> GlobalTopBannerState.SessionInvite(topBannerInvite)
+        topBannerPendingChallenge != null -> GlobalTopBannerState.PendingChallenge(topBannerPendingChallenge)
+        topBannerFriendOnline != null -> GlobalTopBannerState.FriendOnline(topBannerFriendOnline)
+        else -> null
+    }
+
+    LaunchedEffect(
+        currentRoute,
+        (activeRaceOverlayBanner as? GlobalTopBannerState.FriendOnline)?.alert?.friendUid
+    ) {
+        val alert = (activeRaceOverlayBanner as? GlobalTopBannerState.FriendOnline)?.alert
+        if (currentRoute == Routes.RACE && alert != null) {
+            delay(15_000L)
+            activeOnlineVm?.dismissFriendOnlineAlert(alert.friendUid)
+        }
+    }
+
+    val handleChallengeFriends: (List<FriendUiModel>) -> Unit = { targets ->
+        activeOnlineVm?.challengeFriendsFromNotification(
+            targets = targets,
+            profile = profile,
+            defaultRules = rules,
+            onBeforeEnterCommonLobby = { viewModel.leaveSession() },
+            onAlreadyInLobbyNavigate = {
+                if (currentRoute != Routes.LOBBY) {
+                    navController.navigate(Routes.LOBBY) {
+                        popUpTo(Routes.HOME)
+                        launchSingleTop = true
+                    }
+                }
+            }
+        )
     }
 
     val showBottomNav = sessionRole == SessionRole.None &&
@@ -506,6 +571,25 @@ fun MicroRCApp(
                                 activeOnlineVm?.declineSessionInvite(invite.id)
                             }
                         )
+                        is GlobalTopBannerState.PendingChallenge -> LivePendingChallengeBanner(
+                            state = bannerState.state,
+                            compact = false,
+                            applyStatusBarInsets = false,
+                            onCancel = {
+                                activeOnlineVm?.cancelPendingFriendChallenge()
+                            }
+                        )
+                        is GlobalTopBannerState.FriendOnline -> LiveFriendOnlineBanner(
+                            alert = bannerState.alert,
+                            onlineFriends = onlineFriendsList,
+                            alreadyInOnlineRoom = isOnlineSession && onlineRoom != null,
+                            compact = false,
+                            applyStatusBarInsets = false,
+                            onChallengeFriends = handleChallengeFriends,
+                            onDismiss = { alert ->
+                                activeOnlineVm?.dismissFriendOnlineAlert(alert.friendUid)
+                            }
+                        )
                         is GlobalTopBannerState.LeaderboardRecord -> LiveLeaderboardNotificationBanner(
                             notification = bannerState.notification,
                             applyStatusBarInsets = false,
@@ -528,9 +612,7 @@ fun MicroRCApp(
             }
         }
 
-        NavHost(
-            navController = navController,
-            startDestination = Routes.HOME,
+        Box(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
@@ -538,6 +620,11 @@ fun MicroRCApp(
                     if (activeTopBanner != null) Modifier.consumeWindowInsets(WindowInsets.statusBars) else Modifier
                 )
         ) {
+            NavHost(
+                navController = navController,
+                startDestination = Routes.HOME,
+                modifier = Modifier.fillMaxSize()
+            ) {
             composable(Routes.HOME) {
                 val todayKey = currentUtcDateKey
                 val todayBoardKey = remember(todayKey) { DailyChallengeCatalog.boardKeyForDate(todayKey) }
@@ -1151,6 +1238,60 @@ fun MicroRCApp(
                         }
                     }
                 )
+            }
+        }
+
+            if (activeRaceOverlayBanner != null) {
+                AnimatedContent(
+                    targetState = activeRaceOverlayBanner,
+                    transitionSpec = { fadeIn() togetherWith fadeOut() },
+                    label = "raceOverlayBanner",
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .windowInsetsPadding(WindowInsets.statusBars)
+                        .padding(top = 64.dp)
+                ) { raceBanner ->
+                    when (raceBanner) {
+                        is GlobalTopBannerState.SessionInvite -> LiveSessionInviteBanner(
+                            invite = raceBanner.invite,
+                            applyStatusBarInsets = false,
+                            onAccept = { invite ->
+                                activeOnlineVm?.acceptSessionInvite(
+                                    invite = invite,
+                                    profile = profile,
+                                    onBeforeJoin = { viewModel.leaveSession() },
+                                    onPasswordRequired = { lockedRoom ->
+                                        globalLockedPasswordDraft = ""
+                                        globalLockedRoomPrompt = lockedRoom
+                                    }
+                                )
+                            },
+                            onDecline = { invite ->
+                                activeOnlineVm?.declineSessionInvite(invite.id)
+                            }
+                        )
+                        is GlobalTopBannerState.PendingChallenge -> LivePendingChallengeBanner(
+                            state = raceBanner.state,
+                            compact = true,
+                            applyStatusBarInsets = false,
+                            onCancel = {
+                                activeOnlineVm?.cancelPendingFriendChallenge()
+                            }
+                        )
+                        is GlobalTopBannerState.FriendOnline -> LiveFriendOnlineBanner(
+                            alert = raceBanner.alert,
+                            onlineFriends = onlineFriendsList,
+                            alreadyInOnlineRoom = isOnlineSession && onlineRoom != null,
+                            compact = true,
+                            applyStatusBarInsets = false,
+                            onChallengeFriends = handleChallengeFriends,
+                            onDismiss = { alert ->
+                                activeOnlineVm?.dismissFriendOnlineAlert(alert.friendUid)
+                            }
+                        )
+                        is GlobalTopBannerState.LeaderboardRecord -> Unit
+                    }
+                }
             }
         }
 

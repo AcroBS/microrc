@@ -19,12 +19,18 @@ import androidx.work.WorkManager
 import androidx.work.testing.WorkManagerTestInitHelper
 import com.example.data.FriendStandingsCalculator
 import com.example.data.PlayStreakState
+import com.example.model.ChallengedFriendStatus
+import com.example.model.FriendOnlineAlert
 import com.example.model.FriendUiModel
 import com.example.model.GameMode
 import com.example.model.LeaderboardEntryDoc
+import com.example.model.PendingChallengePhase
+import com.example.model.PendingFriendChallengeState
 import com.example.model.PlayerProfile
 import com.example.model.RcCarType
 import com.example.model.SessionInviteDoc
+import com.example.ui.components.LiveFriendOnlineBanner
+import com.example.ui.components.LivePendingChallengeBanner
 import com.example.ui.screens.HomeScreen
 import com.example.ui.theme.MicroRCTheme
 import com.example.util.DailyChallengeScheduler
@@ -261,5 +267,108 @@ class StreakAndStandingsTest {
         composeTestRule.onNodeWithText("3 Local PBs").assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_standings_cta_button").performScrollTo().performClick()
         assertTrue(openedFriends)
+    }
+
+    @Test
+    fun liveFriendOnlineBanner_supportsSingleAndMultiFriendChallengeAndPendingCountdownBanner() {
+        var challengedUids: List<String> = emptyList()
+        var dismissedUid: String? = null
+        val alert = FriendOnlineAlert(
+            friendUid = "uid_riley",
+            displayName = "Riley",
+            activeRoomCode = "RACE99",
+            activeRoomName = "Riley's Crew",
+            activityStatus = "IN_LOBBY"
+        )
+        val onlineFriends = listOf(
+            FriendUiModel(
+                friendshipId = "f_riley",
+                friendUid = "uid_riley",
+                displayName = "Riley",
+                friendCode = "RCRILEY1",
+                carType = RcCarType.VOLT_BUGGY,
+                primaryColorArgb = 0xFF00E5FF,
+                accentColorArgb = 0xFFFFD54F,
+                effectivelyOnline = true,
+                activityStatus = "IN_LOBBY",
+                activeRoomId = "room_RACE99",
+                activeRoomCode = "RACE99",
+                activeRoomName = "Riley's Crew",
+                statusLabel = "Online"
+            ),
+            FriendUiModel(
+                friendshipId = "f_alex",
+                friendUid = "uid_alex",
+                displayName = "Alex",
+                friendCode = "RCALEX02",
+                carType = RcCarType.VOLT_BUGGY,
+                primaryColorArgb = 0xFFFF5722,
+                accentColorArgb = 0xFFFFD54F,
+                effectivelyOnline = true,
+                activityStatus = "ONLINE",
+                activeRoomId = "",
+                activeRoomCode = "",
+                activeRoomName = "",
+                statusLabel = "Online"
+            )
+        )
+
+        composeTestRule.setContent {
+            MicroRCTheme {
+                LiveFriendOnlineBanner(
+                    alert = alert,
+                    onlineFriends = onlineFriends,
+                    compact = true,
+                    applyStatusBarInsets = false,
+                    onChallengeFriends = { targets -> challengedUids = targets.map { it.friendUid } },
+                    onDismiss = { dismissedUid = it.friendUid }
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("live_friend_online_banner").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Riley + 1 online").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("friend_online_multi_select_row").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("friend_online_select_all_chip").performClick()
+        composeTestRule.onNodeWithText("Challenge (2)").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("challenge_friend_online_button").performClick()
+        assertEquals(listOf("uid_riley", "uid_alex"), challengedUids)
+        composeTestRule.onNodeWithTag("dismiss_friend_online_button").performClick()
+        assertEquals("uid_riley", dismissedUid)
+    }
+
+    @Test
+    fun livePendingChallengeBanner_displaysWaitingStateTimerAndCancel() {
+        var cancelled = false
+        val pendingState = PendingFriendChallengeState(
+            challengeId = "ch_ui_1",
+            roomId = "room_CH99",
+            roomCode = "CH99",
+            ownsStandbyRoom = true,
+            targets = listOf(
+                ChallengedFriendStatus(friendUid = "uid_riley", displayName = "Riley", inviteId = "inv_1")
+            ),
+            totalSeconds = 60,
+            remainingSeconds = 45,
+            phase = PendingChallengePhase.WAITING
+        )
+
+        composeTestRule.setContent {
+            MicroRCTheme {
+                LivePendingChallengeBanner(
+                    state = pendingState,
+                    compact = true,
+                    applyStatusBarInsets = false,
+                    onCancel = { cancelled = true }
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("live_pending_challenge_banner").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Waiting for Riley...").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("pending_challenge_timer_text").assertIsDisplayed()
+        composeTestRule.onNodeWithText("45s").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("cancel_friend_challenge_button").performClick()
+        assertTrue(cancelled)
     }
 }

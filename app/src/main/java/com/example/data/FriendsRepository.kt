@@ -453,7 +453,19 @@ class FriendsRepository(
         recipientUid: String,
         recipientName: String,
         room: OnlineRoomDoc
-    ): Result<Unit> {
+    ): Result<Unit> = sendSessionInviteReturningId(
+        senderProfile = senderProfile,
+        recipientUid = recipientUid,
+        recipientName = recipientName,
+        room = room
+    ).map { Unit }
+
+    suspend fun sendSessionInviteReturningId(
+        senderProfile: PlayerProfile,
+        recipientUid: String,
+        recipientName: String,
+        room: OnlineRoomDoc
+    ): Result<String> {
         val inviteId = "inv_${UUID.randomUUID().toString().replace("-", "").take(18)}"
         val path = "sessionInvites/$inviteId"
         return try {
@@ -488,7 +500,7 @@ class FriendsRepository(
                         )
                     ).await()
             }
-            Result.success(Unit)
+            Result.success(inviteId)
         } catch (e: Exception) {
             rethrowIfRealCancellation(e)
             handleFirestoreError(e, OperationType.CREATE, path)
@@ -519,6 +531,26 @@ class FriendsRepository(
             }
     }
 
+    fun observeOutgoingSessionInvites(uid: String, inviteIds: Set<String>): Flow<List<SessionInviteDoc>> {
+        if (inviteIds.isEmpty()) return flowOf(emptyList())
+        return db.collection("sessionInvites")
+            .whereEqualTo("senderUid", uid)
+            .snapshots()
+            .map { snap ->
+                snap.documents.mapNotNull { doc ->
+                    doc.toObject(
+                        SessionInviteDoc::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    )
+                }.filter { it.id in inviteIds }
+            }
+            .catch { e ->
+                rethrowIfRealCancellation(e)
+                handleFirestoreError(e, OperationType.LIST, "sessionInvites")
+                throw e
+            }
+    }
+
     suspend fun respondToSessionInvite(inviteId: String, accepted: Boolean): Result<Unit> {
         if (inviteId.isBlank()) return Result.success(Unit)
         val path = "sessionInvites/$inviteId"
@@ -529,6 +561,28 @@ class FriendsRepository(
                     .update(
                         mapOf(
                             "status" to if (accepted) "ACCEPTED" else "DECLINED",
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            rethrowIfRealCancellation(e)
+            handleFirestoreError(e, OperationType.UPDATE, path)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun expireSessionInvite(inviteId: String): Result<Unit> {
+        if (inviteId.isBlank()) return Result.success(Unit)
+        val path = "sessionInvites/$inviteId"
+        return try {
+            requireUserId()
+            withFirestoreTimeout(5_000L, "session invite server") {
+                db.collection("sessionInvites").document(inviteId)
+                    .update(
+                        mapOf(
+                            "status" to "EXPIRED",
                             "updatedAt" to FieldValue.serverTimestamp()
                         )
                     ).await()

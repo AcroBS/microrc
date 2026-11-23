@@ -10,9 +10,14 @@ import com.example.data.TrackCatalog
 import com.example.data.formatUserFacingOnlineErrorOrNull
 import com.example.data.rethrowIfScopeCancellation
 import com.example.model.ArenaShape
+import com.example.model.ChallengeInviteResponse
+import com.example.model.ChallengeProgressEvaluator
+import com.example.model.ChallengedFriendStatus
 import com.example.model.CustomTrackData
 import com.example.model.DriverFriendCode
 import com.example.model.DriverProfileDoc
+import com.example.model.FriendOnlineAlert
+import com.example.model.FriendPresenceTransitionTracker
 import com.example.model.FriendUiModel
 import com.example.model.FriendshipDoc
 import com.example.model.GhostRunPlayback
@@ -20,6 +25,8 @@ import com.example.model.LeaderboardEntryDoc
 import com.example.model.LeaderboardNotificationDoc
 import com.example.model.LobbyStatePayload
 import com.example.model.OnlineRoomDoc
+import com.example.model.PendingChallengePhase
+import com.example.model.PendingFriendChallengeState
 import com.example.model.PlayerProfile
 import com.example.model.RacePhase
 import com.example.model.RaceRulesSettings
@@ -36,6 +43,7 @@ import com.example.network.SessionRole
 import com.example.util.SessionNotificationHelper
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -47,6 +55,8 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.UUID
 
 class OnlineViewModel(
     val repository: OnlineRaceRepository,
@@ -112,6 +122,13 @@ class OnlineViewModel(
     val incomingLeaderboardNotifications: StateFlow<List<LeaderboardNotificationDoc>> =
         _incomingLeaderboardNotifications.asStateFlow()
 
+    private val friendOnlineTracker = FriendPresenceTransitionTracker()
+    private val _friendOnlineAlerts = MutableStateFlow<List<FriendOnlineAlert>>(emptyList())
+    val friendOnlineAlerts: StateFlow<List<FriendOnlineAlert>> = _friendOnlineAlerts.asStateFlow()
+
+    private val _pendingFriendChallenge = MutableStateFlow<PendingFriendChallengeState?>(null)
+    val pendingFriendChallenge: StateFlow<PendingFriendChallengeState?> = _pendingFriendChallenge.asStateFlow()
+
     private val _friendCircleEntries = MutableStateFlow<List<LeaderboardEntryDoc>>(emptyList())
     val friendCircleEntries: StateFlow<List<LeaderboardEntryDoc>> = _friendCircleEntries.asStateFlow()
 
@@ -128,6 +145,7 @@ class OnlineViewModel(
     private var leaderboardNotifsJob: Job? = null
     private var friendCircleEntriesJob: Job? = null
     private var presenceHeartbeatJob: Job? = null
+    private var pendingChallengeJob: Job? = null
 
     init {
         startObservingOpenRooms()
@@ -212,6 +230,7 @@ class OnlineViewModel(
                     )
                 }.collect { mapped ->
                     _friendsList.value = mapped
+                    _friendOnlineAlerts.value = friendOnlineTracker.onFriendsUpdated(mapped)
                 }
             } catch (e: Exception) {
                 rethrowIfScopeCancellation(e)
@@ -590,6 +609,258 @@ class OnlineViewModel(
         }
     }
 
+    fun dismissFriendOnlineAlert(friendUid: String) {
+        _friendOnlineAlerts.value = friendOnlineTracker.dismiss(friendUid)
+    }
+
+    /**
+     * Challenges 1..3 online friends from the in-app notification without interrupting gameplay.
+     * Prepares a standby private lobby in the background, notifies the selected friend(s),
+     * displays a 60-second waiting countdown, and transitions both challenger and accepting
+     * friend(s) into the multiplayer lobby as soon as a friend accepts.
+     */
+    fun challengeFriendsFromNotification(
+        targets: List<FriendUiModel>,
+        profile: PlayerProfile,
+        defaultRules: RaceRulesSettings,
+        onBeforeEnterCommonLobby: () -> Unit,
+        onAlreadyInLobbyNavigate: () -> Unit = {}
+    ) {
+        val cleanTargets = targets
+            .filter { it.friendUid.isNotBlank() && it.friendUid != currentUserId }
+            .distinctBy { it.friendUid }
+        if (cleanTargets.isEmpty()) return
+
+        var updatedAlerts = _friendOnlineAlerts.value
+        cleanTargets.forEach { f ->
+            updatedAlerts = friendOnlineTracker.dismiss(f.friendUid)
+        }
+        _friendOnlineAlerts.value = updatedAlerts
+
+        val previousPending = _pendingFriendChallenge.value
+        pendingChallengeJob?.cancel()
+        pendingChallengeJob = null
+
+        val onlineExistingRoom = activeRoom.value?.takeIf { role.value.isOnline }
+        val inOnlineRoom = onlineExistingRoom != null
+        val maxTargets = if (onlineExistingRoom != null) {
+            (onlineExistingRoom.maxPlayers.toInt().coerceIn(2, 4) - 1).coerceAtLeast(1)
+        } else {
+            3
+        }
+        val cappedTargets = cleanTargets.take(maxTargets)
+        val challengeId = UUID.randomUUID().toString().replace("-", "").take(12)
+
+        _pendingFriendChallenge.value = PendingFriendChallengeState(
+            challengeId = challengeId,
+            roomId = onlineExistingRoom?.id.orEmpty(),
+            roomCode = onlineExistingRoom?.roomCode.orEmpty(),
+            ownsStandbyRoom = !inOnlineRoom,
+            targets = cappedTargets.map { f ->
+                ChallengedFriendStatus(
+                    friendUid = f.friendUid,
+                    displayName = f.displayName,
+                    carType = f.carType,
+                    primaryColorArgb = f.primaryColorArgb
+                )
+            },
+            totalSeconds = 60,
+            remainingSeconds = 60,
+            phase = PendingChallengePhase.SENDING
+        )
+
+        pendingChallengeJob = viewModelScope.launch {
+            if (previousPending != null) {
+                withContext(NonCancellable) {
+                    cleanupChallengeResources(previousPending)
+                }
+            }
+
+            val roomResult: Result<Pair<OnlineRoomDoc, Boolean>> = if (onlineExistingRoom != null) {
+                Result.success(onlineExistingRoom to false)
+            } else {
+                sessionManager.createStandbyChallengeRoom(
+                    profile = profile,
+                    roomName = "${profile.name.take(12)}'s Challenge",
+                    maxPlayers = 4,
+                    initialRules = defaultRules
+                ).map { it to true }
+            }
+
+            val (room, ownsStandby) = roomResult.getOrElse { err ->
+                rethrowIfScopeCancellation(err)
+                if (_pendingFriendChallenge.value?.challengeId == challengeId) {
+                    _pendingFriendChallenge.value = null
+                }
+                formatUserFacingOnlineErrorOrNull(err, "Could not prepare challenge lobby.")?.let {
+                    _socialFeedback.value = it
+                }
+                return@launch
+            }
+
+            val sentStatuses = mutableListOf<ChallengedFriendStatus>()
+            for (friend in cappedTargets) {
+                val inviteRes = friendsRepository.sendSessionInviteReturningId(
+                    senderProfile = profile,
+                    recipientUid = friend.friendUid,
+                    recipientName = friend.displayName,
+                    room = room
+                )
+                inviteRes.onSuccess { invId ->
+                    sentStatuses.add(
+                        ChallengedFriendStatus(
+                            friendUid = friend.friendUid,
+                            displayName = friend.displayName,
+                            carType = friend.carType,
+                            primaryColorArgb = friend.primaryColorArgb,
+                            inviteId = invId,
+                            response = ChallengeInviteResponse.PENDING
+                        )
+                    )
+                }
+            }
+
+            if (sentStatuses.isEmpty()) {
+                if (ownsStandby) {
+                    withContext(NonCancellable) {
+                        sessionManager.discardStandbyChallengeRoom(room.id)
+                    }
+                }
+                if (_pendingFriendChallenge.value?.challengeId == challengeId) {
+                    _pendingFriendChallenge.value = null
+                }
+                _socialFeedback.value = "Could not notify friend${if (cappedTargets.size > 1) "s" else ""}. Try again."
+                return@launch
+            }
+
+            _pendingFriendChallenge.value = PendingFriendChallengeState(
+                challengeId = challengeId,
+                roomId = room.id,
+                roomCode = room.roomCode,
+                ownsStandbyRoom = ownsStandby,
+                targets = sentStatuses,
+                totalSeconds = 60,
+                remainingSeconds = 60,
+                phase = PendingChallengePhase.WAITING
+            )
+
+            var settled = false
+            var allDeclined = false
+            val inviteIds = sentStatuses.map { it.inviteId }.toSet()
+
+            val observerJob = launch {
+                try {
+                    friendsRepository.observeOutgoingSessionInvites(currentUserId, inviteIds).collect { inviteDocs ->
+                        val current = _pendingFriendChallenge.value
+                            ?.takeIf { it.challengeId == challengeId }
+                            ?: return@collect
+                        val eval = ChallengeProgressEvaluator.applyInviteUpdates(current, inviteDocs)
+                        _pendingFriendChallenge.value = eval.updatedState
+
+                        val accepted = eval.acceptedTarget
+                        if (accepted != null && !settled) {
+                            settled = true
+                            _pendingFriendChallenge.value = null
+                            _socialFeedback.value = "${accepted.displayName} accepted! Opening lobby..."
+                            if (ownsStandby || sessionManager.activeRoom.value?.id != room.id) {
+                                onBeforeEnterCommonLobby()
+                                sessionManager.attachStandbyRoomAsHost(
+                                    createdRoom = room,
+                                    profile = profile,
+                                    initialRules = defaultRules
+                                )
+                            } else {
+                                onAlreadyInLobbyNavigate()
+                            }
+                            return@collect
+                        }
+
+                        if (eval.allDeclined && !settled) {
+                            settled = true
+                            allDeclined = true
+                            _pendingFriendChallenge.value = eval.updatedState.copy(
+                                phase = PendingChallengePhase.ALL_DECLINED
+                            )
+                            if (ownsStandby) {
+                                withContext(NonCancellable) {
+                                    sessionManager.discardStandbyChallengeRoom(room.id)
+                                }
+                            }
+                            return@collect
+                        }
+                    }
+                } catch (e: Exception) {
+                    rethrowIfScopeCancellation(e)
+                }
+            }
+
+            // 60-second countdown ticking in 200ms slices so acceptance exits promptly
+            var elapsedMs = 0L
+            val totalMs = 60_000L
+            while (isActive && !settled && elapsedMs < totalMs) {
+                delay(200L)
+                if (settled) break
+                elapsedMs += 200L
+                val newSecondsLeft = ((totalMs - elapsedMs + 999L) / 1_000L).toInt().coerceIn(0, 60)
+                val current = _pendingFriendChallenge.value
+                if (current != null &&
+                    current.challengeId == challengeId &&
+                    current.phase == PendingChallengePhase.WAITING &&
+                    current.remainingSeconds != newSecondsLeft
+                ) {
+                    _pendingFriendChallenge.value = current.copy(remainingSeconds = newSecondsLeft)
+                }
+            }
+
+            observerJob.cancel()
+
+            if (!settled) {
+                val timedOutState = _pendingFriendChallenge.value
+                if (timedOutState != null && timedOutState.challengeId == challengeId) {
+                    _pendingFriendChallenge.value = timedOutState.copy(
+                        remainingSeconds = 0,
+                        phase = PendingChallengePhase.TIMED_OUT
+                    )
+                    withContext(NonCancellable) {
+                        cleanupChallengeResources(timedOutState)
+                    }
+                    delay(3_000L)
+                    if (_pendingFriendChallenge.value?.challengeId == challengeId) {
+                        _pendingFriendChallenge.value = null
+                    }
+                }
+            } else if (allDeclined) {
+                delay(3_000L)
+                if (_pendingFriendChallenge.value?.challengeId == challengeId) {
+                    _pendingFriendChallenge.value = null
+                }
+            }
+        }
+    }
+
+    fun cancelPendingFriendChallenge() {
+        val current = _pendingFriendChallenge.value
+        _pendingFriendChallenge.value = null
+        pendingChallengeJob?.cancel()
+        pendingChallengeJob = null
+        if (current != null) {
+            viewModelScope.launch(NonCancellable) {
+                cleanupChallengeResources(current)
+            }
+        }
+    }
+
+    private suspend fun cleanupChallengeResources(state: PendingFriendChallengeState) {
+        state.targets
+            .filter { it.response == ChallengeInviteResponse.PENDING && it.inviteId.isNotBlank() }
+            .forEach { target ->
+                friendsRepository.expireSessionInvite(target.inviteId)
+            }
+        if (state.ownsStandbyRoom && state.roomId.isNotBlank()) {
+            sessionManager.discardStandbyChallengeRoom(state.roomId)
+        }
+    }
+
     fun clearSocialFeedback() {
         _socialFeedback.value = null
     }
@@ -765,6 +1036,13 @@ class OnlineViewModel(
 
     suspend fun cleanupBeforeSignOut() {
         presenceHeartbeatJob?.cancel()
+        pendingChallengeJob?.cancel()
+        pendingChallengeJob = null
+        val activeChallenge = _pendingFriendChallenge.value
+        _pendingFriendChallenge.value = null
+        if (activeChallenge != null) {
+            cleanupChallengeResources(activeChallenge)
+        }
         friendshipsJob?.cancel()
         friendCircleEntriesJob?.cancel()
         invitesJob?.cancel()
@@ -772,17 +1050,28 @@ class OnlineViewModel(
         roomsSubscriptionJob?.cancel()
         leaderboardSubscriptionJob?.cancel()
         friendsRepository.setOfflinePresence(latestKnownProfile)
+        friendOnlineTracker.reset()
+        _friendOnlineAlerts.value = emptyList()
         sessionManager.leaveCurrentRoomInternal()
     }
 
     suspend fun deleteAllCloudDataBeforeAccountRemoval() {
         presenceHeartbeatJob?.cancel()
+        pendingChallengeJob?.cancel()
+        pendingChallengeJob = null
+        val activeChallenge = _pendingFriendChallenge.value
+        _pendingFriendChallenge.value = null
+        if (activeChallenge != null) {
+            cleanupChallengeResources(activeChallenge)
+        }
         friendshipsJob?.cancel()
         friendCircleEntriesJob?.cancel()
         invitesJob?.cancel()
         leaderboardNotifsJob?.cancel()
         roomsSubscriptionJob?.cancel()
         leaderboardSubscriptionJob?.cancel()
+        friendOnlineTracker.reset()
+        _friendOnlineAlerts.value = emptyList()
         sessionManager.leaveCurrentRoomInternal()
         repository.deleteAllUserRaceAndLeaderboardData()
         friendsRepository.deleteAllUserSocialData()
@@ -791,6 +1080,8 @@ class OnlineViewModel(
     override fun onCleared() {
         super.onCleared()
         presenceHeartbeatJob?.cancel()
+        pendingChallengeJob?.cancel()
+        _pendingFriendChallenge.value = null
         friendshipsJob?.cancel()
         friendCircleEntriesJob?.cancel()
         invitesJob?.cancel()

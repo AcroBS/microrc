@@ -313,6 +313,142 @@ class OnlineRaceSessionManager(
         }
     }
 
+    /**
+     * Prepares a private cloud room in Firestore while the local player keeps playing their
+     * current Solo/Offline game uninterrupted, waiting for a challenged friend to accept.
+     */
+    suspend fun createStandbyChallengeRoom(
+        profile: PlayerProfile,
+        roomName: String,
+        maxPlayers: Int,
+        initialRules: RaceRulesSettings
+    ): Result<OnlineRoomDoc> {
+        val cleanMax = maxPlayers.coerceIn(2, 4)
+        val cleanRoomName = roomName.trim().take(40).ifEmpty { "${profile.name.take(14)}'s Challenge" }
+        val cleanHostName = profile.name.trim().take(24).ifEmpty { "Host" }
+        val concreteMode = when (initialRules.gameModeEnum) {
+            GameMode.HYBRID -> WifiP2pRaceManager.resolveHybridStageMode(initialRules, 0, null)
+            else -> initialRules.gameModeEnum
+        }
+        val seedTrackId = when (concreteMode) {
+            GameMode.ARENA -> ArenaShape.SQUARE.themeTrackId.name
+            GameMode.STUNTS -> StuntVariant.LONG_JUMP.themeTrackId.name
+            else -> TrackId.LIVING_ROOM_GP.name
+        }
+        val initialHostPlayer = LobbyPlayer(
+            id = currentUserId,
+            name = cleanHostName,
+            isHost = true,
+            isBot = false,
+            isReady = true,
+            carType = profile.carType.name,
+            primaryColorArgb = profile.primaryColorArgb,
+            accentColorArgb = profile.accentColorArgb
+        )
+        val seedPayload = LobbyStatePayload(
+            hostId = currentUserId,
+            lobbyName = cleanRoomName,
+            hostIp = "CLOUD ROOM",
+            tcpPort = cleanMax,
+            udpPort = 0,
+            trackId = seedTrackId,
+            arenaShape = ArenaShape.SQUARE.name,
+            stuntVariant = StuntVariant.LONG_JUMP.name,
+            totalLaps = initialRules.totalLaps.coerceIn(1, 9),
+            players = listOf(initialHostPlayer),
+            chatHistory = emptyList(),
+            inRace = false,
+            rules = initialRules,
+            activeCustomTrack = null
+        )
+        val lobbyJson = lobbyAdapter.toJson(seedPayload)
+        return repository.createOnlineRoom(
+            profile = profile,
+            roomName = cleanRoomName,
+            maxPlayers = cleanMax,
+            discoverable = false,
+            rawPassword = "",
+            gameMode = initialRules.gameModeEnum,
+            trackId = seedTrackId,
+            initialLobbyJson = lobbyJson
+        )
+    }
+
+    /**
+     * Activates a prepared standby room as Host once at least one challenged friend accepts,
+     * bringing the local player immediately into the shared multiplayer lobby.
+     */
+    fun attachStandbyRoomAsHost(
+        createdRoom: OnlineRoomDoc,
+        profile: PlayerProfile,
+        initialRules: RaceRulesSettings
+    ) {
+        scope.launch {
+            if (activeRoomId != null && activeRoomId != createdRoom.id) {
+                leaveCurrentRoomInternal()
+            }
+            configureInitialMode(initialRules, null)
+            maxRoomPlayers = createdRoom.maxPlayers.toInt().coerceIn(2, 4)
+            roomDisplayName = createdRoom.roomName.take(40).ifEmpty { "${profile.name.take(14)}'s Challenge" }
+            roomCodeDisplay = createdRoom.roomCode
+            activeRoomId = createdRoom.id
+            _activeRoom.value = createdRoom
+            _role.value = SessionRole.OnlineHost
+            inRace = false
+            botPlayers.clear()
+            sessionPointsByPlayer.clear()
+            winsByPlayer.clear()
+            latestHumanPlayers.clear()
+
+            val cleanHostName = profile.name.trim().take(24).ifEmpty { "Host" }
+            val initialHostPlayer = LobbyPlayer(
+                id = currentUserId,
+                name = cleanHostName,
+                isHost = true,
+                isBot = false,
+                isReady = true,
+                carType = profile.carType.name,
+                primaryColorArgb = profile.primaryColorArgb,
+                accentColorArgb = profile.accentColorArgb
+            )
+            latestHumanPlayers[currentUserId] = OnlineRoomPlayerDoc(
+                id = currentUserId,
+                roomId = createdRoom.id,
+                userId = currentUserId,
+                name = cleanHostName,
+                carType = profile.carType.name,
+                primaryColorArgb = profile.primaryColorArgb,
+                accentColorArgb = profile.accentColorArgb,
+                ready = true,
+                host = true,
+                rematchVote = "",
+                joinToken = createdRoom.passwordHash
+            )
+            synchronized(latestChatHistory) {
+                latestChatHistory.clear()
+            }
+            _lobbyState.value = buildHostLobbyPayload(
+                roomCode = createdRoom.roomCode,
+                playersOverride = listOf(initialHostPlayer)
+            )
+            startHostObservers(createdRoom.id)
+            _navEvents.tryEmit(RaceNavEvent.EnterLobby)
+
+            repository.sendRoomChat(
+                roomId = createdRoom.id,
+                senderName = "Race Control",
+                text = "Challenge accepted! Room ${createdRoom.roomCode} ready to configure your joint challenge.",
+                systemMessage = true
+            )
+        }
+    }
+
+    suspend fun discardStandbyChallengeRoom(roomId: String) {
+        if (roomId.isBlank()) return
+        if (activeRoomId == roomId) return
+        repository.leaveOnlineRoom(roomId = roomId, isHost = true)
+    }
+
     fun joinOnlineRoom(
         roomId: String,
         profile: PlayerProfile,

@@ -211,3 +211,182 @@ object DriverFriendCode {
         }
     }
 }
+
+data class FriendOnlineAlert(
+    val friendUid: String,
+    val displayName: String,
+    val carType: RcCarType = RcCarType.VOLT_BUGGY,
+    val primaryColorArgb: Long = 0xFF00E5FF,
+    val accentColorArgb: Long = 0xFFFFD54F,
+    val activeRoomCode: String = "",
+    val activeRoomName: String = "",
+    val activityStatus: String = "ONLINE",
+    val detectedAtMs: Long = System.currentTimeMillis()
+) {
+    val hasJoinableLobby: Boolean
+        get() = activeRoomCode.isNotBlank() && activityStatus == "IN_LOBBY"
+}
+
+/**
+ * Tracks accepted friends' online transitions so the app only notifies when a friend
+ * transitions from offline -> online (avoiding noise from friends already online on app launch)
+ * and keeps any active alert synchronized with the friend's latest lobby/offline state.
+ */
+class FriendPresenceTransitionTracker(
+    private val cooldownMs: Long = 180_000L
+) {
+    private val knownOnlineByUid = LinkedHashMap<String, Boolean>()
+    private val lastAlertedAtMsByUid = LinkedHashMap<String, Long>()
+    private val activeAlerts = mutableListOf<FriendOnlineAlert>()
+
+    fun onFriendsUpdated(
+        friends: List<FriendUiModel>,
+        nowMs: Long = System.currentTimeMillis()
+    ): List<FriendOnlineAlert> {
+        val byUid = friends.associateBy { it.friendUid }
+
+        // Remove alerts for friends who went offline or are no longer in the list
+        activeAlerts.removeAll { alert ->
+            val current = byUid[alert.friendUid]
+            current == null || !current.effectivelyOnline
+        }
+
+        // Update existing alerts in-place (e.g. friend opened/entered a lobby)
+        for (i in activeAlerts.indices) {
+            val existing = activeAlerts[i]
+            val current = byUid[existing.friendUid] ?: continue
+            activeAlerts[i] = existing.copy(
+                displayName = current.displayName,
+                carType = current.carType,
+                primaryColorArgb = current.primaryColorArgb,
+                accentColorArgb = current.accentColorArgb,
+                activeRoomCode = current.activeRoomCode,
+                activeRoomName = current.activeRoomName,
+                activityStatus = current.activityStatus
+            )
+        }
+
+        for (friend in friends) {
+            val uid = friend.friendUid
+            if (uid.isBlank()) continue
+
+            val previousOnline = knownOnlineByUid[uid]
+            val nowOnline = friend.effectivelyOnline
+            knownOnlineByUid[uid] = nowOnline
+
+            // Only notify when a friend we already observed as offline transitions to online
+            if (previousOnline == false && nowOnline) {
+                val lastAt = lastAlertedAtMsByUid[uid]
+                if ((lastAt == null || nowMs - lastAt >= cooldownMs) &&
+                    activeAlerts.none { it.friendUid == uid }
+                ) {
+                    lastAlertedAtMsByUid[uid] = nowMs
+                    activeAlerts.add(
+                        FriendOnlineAlert(
+                            friendUid = uid,
+                            displayName = friend.displayName,
+                            carType = friend.carType,
+                            primaryColorArgb = friend.primaryColorArgb,
+                            accentColorArgb = friend.accentColorArgb,
+                            activeRoomCode = friend.activeRoomCode,
+                            activeRoomName = friend.activeRoomName,
+                            activityStatus = friend.activityStatus,
+                            detectedAtMs = nowMs
+                        )
+                    )
+                }
+            }
+        }
+
+        // Drop state for removed friends so re-adding works cleanly
+        knownOnlineByUid.keys.retainAll(byUid.keys)
+        return activeAlerts.toList()
+    }
+
+    fun dismiss(friendUid: String): List<FriendOnlineAlert> {
+        activeAlerts.removeAll { it.friendUid == friendUid }
+        return activeAlerts.toList()
+    }
+
+    fun reset() {
+        knownOnlineByUid.clear()
+        lastAlertedAtMsByUid.clear()
+        activeAlerts.clear()
+    }
+}
+
+enum class ChallengeInviteResponse {
+    PENDING,
+    ACCEPTED,
+    DECLINED,
+    EXPIRED
+}
+
+data class ChallengedFriendStatus(
+    val friendUid: String,
+    val displayName: String,
+    val carType: RcCarType = RcCarType.VOLT_BUGGY,
+    val primaryColorArgb: Long = 0xFF00E5FF,
+    val inviteId: String = "",
+    val response: ChallengeInviteResponse = ChallengeInviteResponse.PENDING
+)
+
+enum class PendingChallengePhase {
+    SENDING,
+    WAITING,
+    TIMED_OUT,
+    ALL_DECLINED
+}
+
+data class PendingFriendChallengeState(
+    val challengeId: String,
+    val roomId: String,
+    val roomCode: String,
+    val ownsStandbyRoom: Boolean,
+    val targets: List<ChallengedFriendStatus>,
+    val totalSeconds: Int = 60,
+    val remainingSeconds: Int = 60,
+    val phase: PendingChallengePhase = PendingChallengePhase.SENDING
+)
+
+object ChallengeProgressEvaluator {
+    data class EvaluationResult(
+        val updatedState: PendingFriendChallengeState,
+        val acceptedTarget: ChallengedFriendStatus? = null,
+        val allDeclined: Boolean = false
+    )
+
+    fun applyInviteUpdates(
+        state: PendingFriendChallengeState,
+        invites: List<SessionInviteDoc>
+    ): EvaluationResult {
+        val byId = invites.associateBy { it.id }
+        val updatedTargets = state.targets.map { target ->
+            val doc = byId[target.inviteId] ?: return@map target
+            val mapped = when (doc.status) {
+                "ACCEPTED" -> ChallengeInviteResponse.ACCEPTED
+                "DECLINED" -> ChallengeInviteResponse.DECLINED
+                "EXPIRED" -> ChallengeInviteResponse.EXPIRED
+                else -> ChallengeInviteResponse.PENDING
+            }
+            target.copy(response = mapped)
+        }
+        val accepted = updatedTargets.firstOrNull { it.response == ChallengeInviteResponse.ACCEPTED }
+        val allDeclined = accepted == null &&
+            updatedTargets.isNotEmpty() &&
+            updatedTargets.all { it.response == ChallengeInviteResponse.DECLINED }
+
+        val nextPhase = when {
+            allDeclined -> PendingChallengePhase.ALL_DECLINED
+            else -> state.phase
+        }
+
+        return EvaluationResult(
+            updatedState = state.copy(targets = updatedTargets, phase = nextPhase),
+            acceptedTarget = accepted,
+            allDeclined = allDeclined
+        )
+    }
+}
+
+
