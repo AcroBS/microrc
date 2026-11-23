@@ -93,7 +93,7 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("editor_save_button").assertIsDisplayed()
         composeTestRule.onNodeWithTag("editor_save_button").performClick()
         composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("editor_saved_banner").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("editor_saved_banner").performScrollTo().assertIsDisplayed()
 
         // Return to Play tab via bottom navigation bar
         composeTestRule.onNodeWithTag("nav_tab_play").performClick()
@@ -734,11 +734,16 @@ class ExampleRobolectricTest {
         )
 
         // Driver tag + active car card stays at top above Streak & Standings
-        val driverTop = composeTestRule.onNodeWithTag("open_garage_button").performScrollTo()
-            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot.top
-        val standingsTop = composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo()
-            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot.top
-        assertTrue("Driver + car card must stay above streak & standings", driverTop < standingsTop)
+        composeTestRule.onNodeWithTag("open_garage_button").performScrollTo().assertIsDisplayed()
+        val driverTop = composeTestRule.onNodeWithTag("open_garage_button")
+            .fetchSemanticsNode().boundsInRoot.top
+        val standingsTopSameScroll = composeTestRule.onNodeWithTag("home_streak_standings_card")
+            .fetchSemanticsNode().boundsInRoot.top
+        assertTrue(
+            "Driver + car card must stay above streak & standings ($driverTop < $standingsTopSameScroll)",
+            driverTop < standingsTopSameScroll
+        )
+        composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().assertIsDisplayed()
 
         // 2. Online (Standard) is default: Challenges & Rankings (most used) + Live Online Multiplayer are clearly separated,
         //    while Offline (Wi-Fi) is optional and hidden until selected
