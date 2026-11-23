@@ -222,24 +222,37 @@ object SessionNotificationHelper {
     private const val LEADERBOARD_CHANNEL_ID = "microrc_leaderboard_alerts"
     private const val NOTIF_PREFS_NAME = "microrc_notif_prefs"
     private const val KEY_DELIVERED_LB_IDS = "delivered_leaderboard_notif_ids"
+    private const val KEY_DELIVERED_INVITE_IDS = "delivered_session_invite_ids"
 
     private val deliveredLock = Any()
 
     /**
      * Atomically marks a friend leaderboard notification ID as delivered across both
-     * foreground Firestore observers and periodic background receivers.
+     * foreground/background Firestore observers and periodic background WorkManager/alarm syncs.
      */
     internal fun claimLeaderboardNotificationDelivery(context: Context, notifId: String): Boolean {
+        return claimNotificationDelivery(context, KEY_DELIVERED_LB_IDS, notifId)
+    }
+
+    /**
+     * Atomically marks a friend session invite notification ID as delivered across both
+     * live Firestore observers and background sync workers.
+     */
+    internal fun claimSessionInviteNotificationDelivery(context: Context, inviteId: String): Boolean {
+        return claimNotificationDelivery(context, KEY_DELIVERED_INVITE_IDS, inviteId)
+    }
+
+    private fun claimNotificationDelivery(context: Context, prefKey: String, notifId: String): Boolean {
         val cleanId = notifId.trim()
         if (cleanId.isEmpty()) return false
         synchronized(deliveredLock) {
             val prefs = context.applicationContext.getSharedPreferences(NOTIF_PREFS_NAME, Context.MODE_PRIVATE)
-            val existing = prefs.getStringSet(KEY_DELIVERED_LB_IDS, emptySet()).orEmpty()
+            val existing = prefs.getStringSet(prefKey, emptySet()).orEmpty()
             if (cleanId in existing) return false
             val updated = existing.toMutableList()
             updated.add(cleanId)
             val trimmed = if (updated.size > 120) updated.takeLast(120) else updated
-            prefs.edit().putStringSet(KEY_DELIVERED_LB_IDS, trimmed.toSet()).apply()
+            prefs.edit().putStringSet(prefKey, trimmed.toSet()).apply()
             return true
         }
     }
@@ -286,8 +299,10 @@ object SessionNotificationHelper {
         }
     }
 
-    fun showSessionInviteNotification(context: Context, invite: SessionInviteDoc) {
-        if (!hasNotificationPermission(context)) return
+    fun showSessionInviteNotification(context: Context, invite: SessionInviteDoc): Boolean {
+        if (!hasNotificationPermission(context)) return false
+        val dedupeKey = invite.id.ifBlank { "${invite.senderUid}_${invite.roomCode}_${invite.joinToken}" }
+        if (!claimSessionInviteNotificationDelivery(context, dedupeKey)) return false
         ensureChannel(context)
 
         val deepLinkUri = Uri.Builder()
@@ -311,7 +326,7 @@ object SessionNotificationHelper {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
 
-        val requestCode = invite.id.hashCode()
+        val requestCode = dedupeKey.hashCode()
         val pendingIntent = PendingIntent.getActivity(
             context,
             requestCode,
@@ -332,9 +347,10 @@ object SessionNotificationHelper {
             .setContentIntent(pendingIntent)
             .build()
 
-        runCatching {
+        return runCatching {
             NotificationManagerCompat.from(context).notify(requestCode, notification)
-        }
+            true
+        }.getOrDefault(false)
     }
 
     fun showDailyChallengeAvailableNotification(

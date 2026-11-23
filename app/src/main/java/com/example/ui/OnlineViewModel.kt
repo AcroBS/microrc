@@ -1,5 +1,6 @@
 package com.example.ui
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.DailyChallengeCatalog
@@ -32,6 +33,7 @@ import com.example.network.CompletedSoloRunSummary
 import com.example.network.OnlineRaceSessionManager
 import com.example.network.RaceNavEvent
 import com.example.network.SessionRole
+import com.example.util.SessionNotificationHelper
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -49,7 +51,8 @@ import kotlinx.coroutines.launch
 class OnlineViewModel(
     val repository: OnlineRaceRepository,
     val friendsRepository: FriendsRepository,
-    val currentUserId: String
+    val currentUserId: String,
+    private val appContext: Context? = null
 ) : ViewModel() {
 
     val sessionManager = OnlineRaceSessionManager(
@@ -109,6 +112,9 @@ class OnlineViewModel(
     val incomingLeaderboardNotifications: StateFlow<List<LeaderboardNotificationDoc>> =
         _incomingLeaderboardNotifications.asStateFlow()
 
+    private val _friendCircleEntries = MutableStateFlow<List<LeaderboardEntryDoc>>(emptyList())
+    val friendCircleEntries: StateFlow<List<LeaderboardEntryDoc>> = _friendCircleEntries.asStateFlow()
+
     private val _socialFeedback = MutableStateFlow<String?>(null)
     val socialFeedback: StateFlow<String?> = _socialFeedback.asStateFlow()
 
@@ -120,11 +126,13 @@ class OnlineViewModel(
     private var friendshipsJob: Job? = null
     private var invitesJob: Job? = null
     private var leaderboardNotifsJob: Job? = null
+    private var friendCircleEntriesJob: Job? = null
     private var presenceHeartbeatJob: Job? = null
 
     init {
         startObservingOpenRooms()
         startObservingFriendsAndPresence()
+        startObservingFriendCircleEntries()
         startObservingSessionInvites()
         startObservingLeaderboardNotifications()
         startPresenceLoop()
@@ -214,12 +222,47 @@ class OnlineViewModel(
         }
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun startObservingFriendCircleEntries() {
+        friendCircleEntriesJob?.cancel()
+        friendCircleEntriesJob = viewModelScope.launch {
+            try {
+                _friendsList
+                    .map { friends ->
+                        (listOf(currentUserId) + friends.map { it.friendUid })
+                            .filter { it.isNotBlank() }
+                            .distinct()
+                            .sorted()
+                    }
+                    .distinctUntilChanged()
+                    .flatMapLatest { trackedUids ->
+                        repository.observeLeaderboardEntriesForUsers(trackedUids)
+                    }
+                    .collect { entries ->
+                        _friendCircleEntries.value = entries
+                    }
+            } catch (e: Exception) {
+                rethrowIfScopeCancellation(e)
+            }
+        }
+    }
+
     private fun startObservingSessionInvites() {
         invitesJob?.cancel()
         invitesJob = viewModelScope.launch {
             try {
                 friendsRepository.observeIncomingSessionInvites(currentUserId).collect { invites ->
                     _incomingSessionInvites.value = invites
+                    val ctx = appContext?.applicationContext
+                    if (ctx != null) {
+                        val currentRoomCode = activeRoom.value?.roomCode
+                        invites.forEach { inv ->
+                            val alreadyInThatRoom = !currentRoomCode.isNullOrBlank() && currentRoomCode == inv.roomCode
+                            if (!alreadyInThatRoom) {
+                                SessionNotificationHelper.showSessionInviteNotification(ctx, inv)
+                            }
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 rethrowIfScopeCancellation(e)
@@ -236,6 +279,12 @@ class OnlineViewModel(
             try {
                 friendsRepository.observeIncomingLeaderboardNotifications(currentUserId).collect { list ->
                     _incomingLeaderboardNotifications.value = list
+                    val ctx = appContext?.applicationContext
+                    if (ctx != null) {
+                        list.forEach { notif ->
+                            SessionNotificationHelper.showFriendLeaderboardRecordNotification(ctx, notif)
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 rethrowIfScopeCancellation(e)
@@ -717,6 +766,7 @@ class OnlineViewModel(
     suspend fun cleanupBeforeSignOut() {
         presenceHeartbeatJob?.cancel()
         friendshipsJob?.cancel()
+        friendCircleEntriesJob?.cancel()
         invitesJob?.cancel()
         leaderboardNotifsJob?.cancel()
         roomsSubscriptionJob?.cancel()
@@ -728,6 +778,7 @@ class OnlineViewModel(
     suspend fun deleteAllCloudDataBeforeAccountRemoval() {
         presenceHeartbeatJob?.cancel()
         friendshipsJob?.cancel()
+        friendCircleEntriesJob?.cancel()
         invitesJob?.cancel()
         leaderboardNotifsJob?.cancel()
         roomsSubscriptionJob?.cancel()
@@ -741,6 +792,7 @@ class OnlineViewModel(
         super.onCleared()
         presenceHeartbeatJob?.cancel()
         friendshipsJob?.cancel()
+        friendCircleEntriesJob?.cancel()
         invitesJob?.cancel()
         leaderboardNotifsJob?.cancel()
         roomsSubscriptionJob?.cancel()

@@ -93,6 +93,9 @@ class PreferencesRepository(context: Context) {
         val DAILY_NOTIFICATIONS_ENABLED = booleanPreferencesKey("daily_notifications_enabled")
         val NOTIFICATION_PERMISSION_PROMPTED = booleanPreferencesKey("notification_permission_prompted")
         val DISMISSED_UPDATE_TAG = stringPreferencesKey("dismissed_update_tag")
+        val STREAK_CURRENT_DAYS = intPreferencesKey("streak_current_days")
+        val STREAK_BEST_DAYS = intPreferencesKey("streak_best_days")
+        val STREAK_LAST_DATE_KEY = stringPreferencesKey("streak_last_date_key")
     }
 
     val profileFlow: Flow<PlayerProfile> = dataStore.data.map { prefs ->
@@ -191,6 +194,14 @@ class PreferencesRepository(context: Context) {
         prefs[Keys.DISMISSED_UPDATE_TAG]
     }
 
+    val playStreakFlow: Flow<PlayStreakState> = dataStore.data.map { prefs ->
+        PlayStreakCalculator.resolveForDisplay(
+            storedCurrent = prefs[Keys.STREAK_CURRENT_DAYS] ?: 0,
+            storedBest = prefs[Keys.STREAK_BEST_DAYS] ?: 0,
+            lastDateKey = prefs[Keys.STREAK_LAST_DATE_KEY]
+        )
+    }
+
     suspend fun getLastNotifiedDailyKey(): String? {
         return dataStore.data.map { it[Keys.LAST_NOTIFIED_DAILY_KEY] }.first()
     }
@@ -220,6 +231,23 @@ class PreferencesRepository(context: Context) {
 
     suspend fun clearDismissedUpdateTag() {
         dataStore.edit { it.remove(Keys.DISMISSED_UPDATE_TAG) }
+    }
+
+    suspend fun recordPlayStreakActivity(epochMillis: Long = System.currentTimeMillis()): PlayStreakState {
+        var nextState = PlayStreakState()
+        val todayKey = PlayStreakCalculator.localDateKey(epochMillis)
+        dataStore.edit { prefs ->
+            nextState = PlayStreakCalculator.recordActivity(
+                storedCurrent = prefs[Keys.STREAK_CURRENT_DAYS] ?: 0,
+                storedBest = prefs[Keys.STREAK_BEST_DAYS] ?: 0,
+                lastDateKey = prefs[Keys.STREAK_LAST_DATE_KEY],
+                todayKey = todayKey
+            )
+            prefs[Keys.STREAK_CURRENT_DAYS] = nextState.currentStreakDays
+            prefs[Keys.STREAK_BEST_DAYS] = nextState.bestStreakDays
+            prefs[Keys.STREAK_LAST_DATE_KEY] = nextState.lastActiveDateKey
+        }
+        return nextState
     }
 
     suspend fun ensurePlayerId(): String {

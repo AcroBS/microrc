@@ -33,7 +33,7 @@ class MainActivity : ComponentActivity() {
         DailyChallengeScheduler.scheduleLeaderboardSync(this)
         lifecycleScope.launch {
             DailyChallengeScheduler.ensureDailyNotificationPostedIfNewDay(this@MainActivity)
-            DailyChallengeScheduler.syncPendingFriendLeaderboardNotifications(this@MainActivity)
+            DailyChallengeScheduler.syncPendingFriendNotifications(this@MainActivity)
         }
         handleIncomingIntent(intent)
         enableEdgeToEdge()
@@ -54,7 +54,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         lifecycleScope.launch {
-            DailyChallengeScheduler.syncPendingFriendLeaderboardNotifications(this@MainActivity)
+            DailyChallengeScheduler.syncPendingFriendNotifications(this@MainActivity)
         }
     }
 

@@ -37,12 +37,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Hub
+import androidx.compose.material.icons.filled.Leaderboard
+import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Public
@@ -91,12 +94,20 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.data.FriendBoardStandingItem
+import com.example.data.FriendStandingsSummary
+import com.example.data.PlayStreakState
 import com.example.model.ControlMode
+import com.example.model.GameMode
 import com.example.model.PlayerProfile
 import com.example.ui.components.drawRcCar
+import com.example.ui.theme.adaptiveGoldColor
 import com.example.ui.theme.adaptiveOnlineColor
 import com.example.util.AppUpdateUiState
 import com.example.util.GitHubReleaseInfo
+import com.example.util.SessionNotificationHelper
+import java.util.Locale
+import kotlin.math.abs
 
 private enum class HomeModeScope(val label: String) {
     ALL("All Modes"),
@@ -122,6 +133,12 @@ fun HomeScreen(
     onlineFriendsCount: Int = 0,
     pendingRequestsCount: Int = 0,
     onOpenLeaderboards: () -> Unit = {},
+    onOpenStandingsBoard: (trackKey: String, gameMode: GameMode, isDaily: Boolean) -> Unit = { _, _, _ -> },
+    playStreak: PlayStreakState = PlayStreakState(),
+    isSignedIn: Boolean = false,
+    friendsCount: Int = 0,
+    localRecordsCount: Int = 0,
+    friendStandings: FriendStandingsSummary? = null,
     onOpenHybridSetup: () -> Unit = {},
     onOpenGarage: () -> Unit,
     onUpdateDriverName: (String) -> Unit,
@@ -400,6 +417,19 @@ fun HomeScreen(
                             }
                         }
                     }
+
+                    // 2b. Play Streak Counter + Personal vs. Friends Standings Overview
+                    HomeMomentumAndStandingsCard(
+                        playStreak = playStreak,
+                        isSignedIn = isSignedIn,
+                        friendsCount = friendsCount,
+                        localRecordsCount = localRecordsCount,
+                        standings = friendStandings,
+                        onlineAccent = onlineAccent,
+                        onOpenFriends = onOpenFriends,
+                        onOpenLeaderboards = onOpenLeaderboards,
+                        onOpenStandingsBoard = onOpenStandingsBoard
+                    )
 
                     // 3. Intuitive Entry Filter (Material 3 SingleChoiceSegmentedButtonRow)
                     SingleChoiceSegmentedButtonRow(
@@ -1066,6 +1096,392 @@ private fun HomeUpdateHintCard(
                     Text("Later", style = MaterialTheme.typography.labelLarge)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun HomeMomentumAndStandingsCard(
+    playStreak: PlayStreakState,
+    isSignedIn: Boolean,
+    friendsCount: Int,
+    localRecordsCount: Int,
+    standings: FriendStandingsSummary?,
+    onlineAccent: Color,
+    onOpenFriends: () -> Unit,
+    onOpenLeaderboards: () -> Unit,
+    onOpenStandingsBoard: (trackKey: String, gameMode: GameMode, isDaily: Boolean) -> Unit
+) {
+    val goldAccent = adaptiveGoldColor()
+    val summary = standings ?: FriendStandingsSummary(totalFriendsCount = friendsCount)
+    val streakActive = playStreak.currentStreakDays > 0
+
+    ElevatedCard(
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        ),
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("home_streak_standings_card")
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Top summary row: Play Streak Counter + Overall Friend-Crew Rank
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Streak tile
+                Surface(
+                    color = if (playStreak.activeToday) {
+                        MaterialTheme.colorScheme.tertiaryContainer
+                    } else if (streakActive) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHigh
+                    },
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("home_streak_badge")
+                ) {
+                    val streakFg = when {
+                        playStreak.activeToday -> MaterialTheme.colorScheme.onTertiaryContainer
+                        streakActive -> MaterialTheme.colorScheme.onPrimaryContainer
+                        else -> MaterialTheme.colorScheme.onSurface
+                    }
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LocalFireDepartment,
+                            contentDescription = "Daily Play Streak",
+                            tint = if (streakActive) goldAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Column {
+                            Text(
+                                text = when {
+                                    playStreak.currentStreakDays == 1 -> "1 Day Streak"
+                                    playStreak.currentStreakDays > 1 -> "${playStreak.currentStreakDays} Day Streak"
+                                    else -> "0 Day Streak"
+                                },
+                                style = MaterialTheme.typography.titleSmall,
+                                color = streakFg,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = when {
+                                    playStreak.activeToday -> "Active today • Best ${playStreak.bestStreakDays}d"
+                                    streakActive -> "Race today! • Best ${playStreak.bestStreakDays}d"
+                                    playStreak.bestStreakDays > 0 -> "Best ${playStreak.bestStreakDays}d • Race to start"
+                                    else -> "Finish any race today"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = streakFg.copy(alpha = 0.8f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                // Personal vs Friends Standing Summary tile
+                Surface(
+                    color = if (summary.myCrewRank == 1 && summary.leadingBoardsCount > 0) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHigh
+                    },
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(MaterialTheme.shapes.medium)
+                        .clickable {
+                            if (isSignedIn && friendsCount > 0) {
+                                onOpenLeaderboards()
+                            } else {
+                                onOpenFriends()
+                            }
+                        }
+                        .testTag("home_standings_rank_badge")
+                ) {
+                    val rankFg = if (summary.myCrewRank == 1 && summary.leadingBoardsCount > 0) {
+                        MaterialTheme.colorScheme.onSecondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    }
+                    val contestedTotal = summary.leadingBoardsCount + summary.trailingBoardsCount
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isSignedIn && friendsCount > 0) {
+                                Icons.Default.Leaderboard
+                            } else {
+                                Icons.Default.EmojiEvents
+                            },
+                            contentDescription = "Crew Standings",
+                            tint = if (summary.myCrewRank == 1 && summary.leadingBoardsCount > 0) {
+                                goldAccent
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            },
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Column {
+                            Text(
+                                text = when {
+                                    !isSignedIn -> if (localRecordsCount > 0) {
+                                        "$localRecordsCount Local PB${if (localRecordsCount == 1) "" else "s"}"
+                                    } else {
+                                        "Crew Rank"
+                                    }
+                                    friendsCount == 0 -> "No Friends Yet"
+                                    summary.myCrewRank > 0 && summary.crewSizeWithEntries > 1 ->
+                                        "#${summary.myCrewRank} of ${summary.crewSizeWithEntries} Crew"
+                                    summary.myCrewRank == 1 -> "1st in Crew"
+                                    else -> "Set First Time"
+                                },
+                                style = MaterialTheme.typography.titleSmall,
+                                color = rankFg,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = when {
+                                    !isSignedIn -> "Sign in to compare friends"
+                                    friendsCount == 0 -> "Add friends to compare"
+                                    contestedTotal > 0 ->
+                                        "Lead ${summary.leadingBoardsCount} • Chase ${summary.trailingBoardsCount}"
+                                    summary.soloOnlyBoardsCount > 0 ->
+                                        "${summary.soloOnlyBoardsCount} track record${if (summary.soloOnlyBoardsCount == 1) "" else "s"} set"
+                                    summary.unchallengedFriendBoardsCount > 0 ->
+                                        "${summary.unchallengedFriendBoardsCount} friend time${if (summary.unchallengedFriendBoardsCount == 1) "" else "s"} to beat"
+                                    else -> "Race a track to rank"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = rankFg.copy(alpha = 0.8f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Compact Friend-vs-Personal Standings List
+            if (isSignedIn && friendsCount > 0 && summary.highlightBoards.isNotEmpty()) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "YOUR TIMES VS. FRIENDS",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Tap track to challenge",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.testTag("home_standings_list")
+                ) {
+                    summary.highlightBoards.forEachIndexed { index, item ->
+                        HomeStandingBoardRow(
+                            item = item,
+                            index = index,
+                            onlineAccent = onlineAccent,
+                            goldAccent = goldAccent,
+                            onClick = {
+                                onOpenStandingsBoard(item.trackKey, item.gameMode, item.isDaily)
+                            }
+                        )
+                    }
+                }
+            } else {
+                // Helpful compact footer action for signed-out / no-friends / zero-records states
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = when {
+                            !isSignedIn -> "Sign in with Google to track head-to-head times & friend rankings."
+                            friendsCount == 0 -> "Add friends in Crew to compare track & Daily GP rankings."
+                            else -> "Set a track or Daily GP time to start ranking against friends."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextButton(
+                        onClick = if (!isSignedIn || friendsCount == 0) onOpenFriends else onOpenLeaderboards,
+                        modifier = Modifier
+                            .defaultMinSize(minHeight = 48.dp)
+                            .testTag("home_standings_cta_button")
+                    ) {
+                        Text(
+                            text = when {
+                                !isSignedIn -> "Sign In"
+                                friendsCount == 0 -> "Add Friends"
+                                else -> "Records"
+                            },
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeStandingBoardRow(
+    item: FriendBoardStandingItem,
+    index: Int,
+    onlineAccent: Color,
+    goldAccent: Color,
+    onClick: () -> Unit
+) {
+    val isStunts = item.gameMode == GameMode.STUNTS
+    val myRank = item.myRank
+    val hasMyEntry = myRank != null
+    val leading = myRank == 1 && item.topFriendName != null
+
+    val myMetric = if (hasMyEntry) {
+        if (isStunts) "${item.myScore} PTS" else SessionNotificationHelper.formatNotifTimeMs(item.myTimeMs)
+    } else {
+        "Unset"
+    }
+    val friendMetric = if (item.topFriendName != null) {
+        val raw = if (isStunts) "${item.topFriendScore} PTS" else SessionNotificationHelper.formatNotifTimeMs(item.topFriendTimeMs)
+        "${item.topFriendName}: $raw"
+    } else {
+        "No friend time yet"
+    }
+
+    val deltaText: String? = when {
+        item.deltaVsTopFriendMs != null -> {
+            val absSec = abs(item.deltaVsTopFriendMs) / 1000.0
+            if (item.deltaVsTopFriendMs <= 0L) {
+                String.format(Locale.US, "-%.2fs", absSec)
+            } else {
+                String.format(Locale.US, "+%.2fs", absSec)
+            }
+        }
+        item.deltaVsTopFriendScore != null -> {
+            if (item.deltaVsTopFriendScore >= 0) "+${item.deltaVsTopFriendScore}" else "${item.deltaVsTopFriendScore}"
+        }
+        else -> null
+    }
+    val isAhead = when {
+        item.deltaVsTopFriendMs != null -> item.deltaVsTopFriendMs <= 0L
+        item.deltaVsTopFriendScore != null -> item.deltaVsTopFriendScore >= 0
+        else -> false
+    }
+
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 48.dp)
+            .clip(MaterialTheme.shapes.small)
+            .clickable(onClick = onClick)
+            .testTag("home_standings_board_row_$index")
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Surface(
+                color = when {
+                    leading -> goldAccent.copy(alpha = 0.2f)
+                    hasMyEntry -> MaterialTheme.colorScheme.primaryContainer
+                    else -> MaterialTheme.colorScheme.tertiaryContainer
+                },
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    text = if (hasMyEntry) "#$myRank/${item.totalDriversOnBoard}" else "BEAT",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = when {
+                        leading -> goldAccent
+                        hasMyEntry -> MaterialTheme.colorScheme.onPrimaryContainer
+                        else -> MaterialTheme.colorScheme.onTertiaryContainer
+                    },
+                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                )
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (item.isDaily || isStunts) {
+                        item.trackName
+                    } else {
+                        "${item.trackName} • ${item.totalLaps}L"
+                    },
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "You: $myMetric  •  $friendMetric",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            if (deltaText != null) {
+                Surface(
+                    color = if (isAhead) {
+                        onlineAccent.copy(alpha = 0.16f)
+                    } else {
+                        MaterialTheme.colorScheme.errorContainer
+                    },
+                    shape = RoundedCornerShape(50)
+                ) {
+                    Text(
+                        text = deltaText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isAhead) onlineAccent else MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
+
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = "Open leaderboard for ${item.trackName}",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
 }

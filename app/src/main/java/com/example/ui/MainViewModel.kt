@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
 import com.example.audio.RaceAudioEngine
 import com.example.data.DailyChallengeCatalog
+import com.example.data.PlayStreakState
 import com.example.data.PreferencesRepository
 import com.example.data.TrackCatalog
 import com.example.model.ActiveGhostCarState
@@ -83,6 +84,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         initialValue = emptyList()
     )
 
+    val playStreak: StateFlow<PlayStreakState> = prefsRepo.playStreakFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = PlayStreakState()
+    )
+
     val discoveredLobbies: StateFlow<List<DiscoveredLobby>> = raceManager.discovery.discoveredLobbies
     val sessionRole: StateFlow<SessionRole> = raceManager.role
     val lobbyState: StateFlow<LobbyStatePayload?> = raceManager.lobbyState
@@ -153,7 +160,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     encodedGhostFrames = summary.encodedGhostFrames
                 )
                 _lastRunWasPersonalBest.value = improved
+                prefsRepo.recordPlayStreakActivity()
             }
+        }
+        viewModelScope.launch {
+            raceManager.lastResults.collect { results ->
+                if (results != null && results.phase == com.example.model.RacePhase.FINISHED.name) {
+                    prefsRepo.recordPlayStreakActivity()
+                }
+            }
+        }
+    }
+
+    fun recordCompletedRaceStreak() {
+        viewModelScope.launch {
+            prefsRepo.recordPlayStreakActivity()
         }
     }
 

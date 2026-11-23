@@ -61,10 +61,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.data.DailyChallengeCatalog
+import com.example.data.FriendStandingsCalculator
 import com.example.data.FriendsRepository
 import com.example.data.OnlineRaceRepository
 import com.example.model.GameMode
 import com.example.model.OnlineRoomDoc
+import com.example.model.RacePhase
 import com.example.network.RaceNavEvent
 import com.example.network.SessionRole
 import com.example.ui.auth.GoogleAuthManager
@@ -86,11 +88,11 @@ import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.TrackEditorScreen
 import com.example.ui.theme.adaptiveGoldColor
 import com.example.util.AppUpdateUiState
+import com.example.util.DailyChallengeScheduler
 import com.example.util.GitHubUpdateChecker
 import com.example.util.PendingDailyChallengeRoute
 import com.example.util.PendingLeaderboardRoute
 import com.example.util.PendingLobbyInvite
-import com.example.util.SessionNotificationHelper
 import com.google.firebase.Firebase
 import com.google.firebase.FirebaseApp
 import com.google.firebase.auth.auth
@@ -138,8 +140,6 @@ fun MicroRCApp(
 
     var globalLockedRoomPrompt by remember { mutableStateOf<OnlineRoomDoc?>(null) }
     var globalLockedPasswordDraft by remember { mutableStateOf("") }
-    val notifiedInviteIds = remember { mutableSetOf<String>() }
-    val notifiedLeaderboardIds = remember { mutableSetOf<String>() }
     var leaderboardInitialDaily by remember { mutableStateOf(false) }
     var leaderboardInitialMode by remember { mutableStateOf<GameMode?>(null) }
     var leaderboardInitialTrackKey by remember { mutableStateOf<String?>(null) }
@@ -156,6 +156,7 @@ fun MicroRCApp(
     val audioSettings by viewModel.audioSettings.collectAsState()
     val customTracks by viewModel.customTracks.collectAsState()
     val localLeaderboard by viewModel.localLeaderboard.collectAsState()
+    val playStreak by viewModel.playStreak.collectAsState()
     val discoveredLobbies by viewModel.discoveredLobbies.collectAsState()
     val offlineRole by viewModel.sessionRole.collectAsState()
     val offlineLobby by viewModel.lobbyState.collectAsState()
@@ -197,7 +198,8 @@ fun MicroRCApp(
                         OnlineViewModel(
                             repository = OnlineRaceRepository(appContext),
                             friendsRepository = FriendsRepository(appContext),
-                            currentUserId = uid
+                            currentUserId = uid,
+                            appContext = appContext
                         )
                     }
                 }
@@ -205,6 +207,11 @@ fun MicroRCApp(
             activeOnlineVm = onlineVm
             signOutCleanupAction = { onlineVm.cleanupBeforeSignOut() }
             deleteAccountCleanupAction = { onlineVm.deleteAllCloudDataBeforeAccountRemoval() }
+
+            LaunchedEffect(uid) {
+                DailyChallengeScheduler.scheduleLeaderboardSync(appContext)
+                DailyChallengeScheduler.triggerImmediateBackgroundSync(appContext)
+            }
 
             LaunchedEffect(onlineVm) {
                 viewModel.latestCompletedSoloRun.collect { summary ->
@@ -276,6 +283,7 @@ fun MicroRCApp(
                 Lifecycle.Event.ON_STOP -> {
                     viewModel.audioEngine.setAppForeground(false)
                     latestOnlineVm?.setAppForeground(false)
+                    DailyChallengeScheduler.scheduleLeaderboardSync(appContext)
                 }
                 else -> Unit
             }
@@ -364,30 +372,34 @@ fun MicroRCApp(
     val socialFeedback = activeOnlineVm?.let { it.socialFeedback.collectAsState().value }
 
     val onlineFriendsCount = remember(friendsList) { friendsList.count { it.effectivelyOnline } }
+    val friendCircleEntries = activeOnlineVm?.let { it.friendCircleEntries.collectAsState().value }.orEmpty()
+    val friendStandings = remember(
+        currentUser?.uid,
+        profile.name,
+        friendsList,
+        friendCircleEntries,
+        localLeaderboard
+    ) {
+        FriendStandingsCalculator.compute(
+            myUid = currentUser?.uid,
+            myName = profile.name,
+            friends = friendsList,
+            cloudEntries = friendCircleEntries,
+            localRecords = localLeaderboard
+        )
+    }
+
+    LaunchedEffect(isOnlineSession, onlineResults?.phase, onlineResults?.raceTimeMs) {
+        if (isOnlineSession && onlineResults?.phase == RacePhase.FINISHED.name) {
+            viewModel.recordCompletedRaceStreak()
+        }
+    }
+
     val knownFriendUids = remember(friendsList, incomingFriendRequests, outgoingFriendRequests) {
         buildSet {
             friendsList.forEach { add(it.friendUid) }
             incomingFriendRequests.forEach { add(it.requesterUid) }
             outgoingFriendRequests.forEach { add(it.receiverUid) }
-        }
-    }
-
-    // Trigger Android system notification for newly arrived friend session invites
-    LaunchedEffect(incomingSessionInvites) {
-        incomingSessionInvites.forEach { inv ->
-            val alreadyInThatRoom = onlineRoom?.roomCode == inv.roomCode
-            if (inv.id.isNotBlank() && notifiedInviteIds.add(inv.id) && !alreadyInThatRoom) {
-                SessionNotificationHelper.showSessionInviteNotification(context, inv)
-            }
-        }
-    }
-
-    // Trigger Android system notification when friends post new leaderboard records
-    LaunchedEffect(incomingLeaderboardNotifications) {
-        incomingLeaderboardNotifications.forEach { notif ->
-            if (notif.id.isNotBlank() && notifiedLeaderboardIds.add(notif.id)) {
-                SessionNotificationHelper.showFriendLeaderboardRecordNotification(context, notif)
-            }
         }
     }
 
@@ -554,6 +566,17 @@ fun MicroRCApp(
                         leaderboardInitialTrackKey = null
                         navController.navigate(Routes.LEADERBOARD)
                     },
+                    onOpenStandingsBoard = { trackKey, gameMode, isDaily ->
+                        leaderboardInitialDaily = isDaily
+                        leaderboardInitialMode = gameMode
+                        leaderboardInitialTrackKey = trackKey.takeIf { it.isNotBlank() }
+                        navController.navigate(Routes.LEADERBOARD)
+                    },
+                    playStreak = playStreak,
+                    isSignedIn = currentUser != null && activeOnlineVm != null,
+                    friendsCount = friendsList.size,
+                    localRecordsCount = localLeaderboard.size,
+                    friendStandings = friendStandings,
                     onOpenHybridSetup = { navController.navigate(Routes.HYBRID_SETUP) },
                     onOpenGarage = { navController.navigate(Routes.GARAGE) },
                     onUpdateDriverName = viewModel::updateDriverName,

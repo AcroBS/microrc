@@ -25,6 +25,8 @@ import com.google.firebase.firestore.Source
 import com.google.firebase.firestore.snapshots
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withTimeoutOrNull
@@ -659,6 +661,35 @@ open class OnlineRaceRepository(
                 handleFirestoreError(e, OperationType.LIST, "leaderboardEntries")
                 throw e
             }
+    }
+
+    open fun observeLeaderboardEntriesForUsers(uids: List<String>): Flow<List<LeaderboardEntryDoc>> {
+        val cleanUids = uids.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(30)
+        if (cleanUids.isEmpty()) return flowOf(emptyList())
+
+        val flows = cleanUids.map { targetUid ->
+            db.collection("leaderboardEntries")
+                .whereEqualTo("publicEntry", true)
+                .whereEqualTo("userId", targetUid)
+                .snapshots()
+                .map { snap ->
+                    snap.documents.mapNotNull { doc ->
+                        doc.toObject(
+                            LeaderboardEntryDoc::class.java,
+                            DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                        )
+                    }
+                }
+                .catch { e ->
+                    rethrowIfRealCancellation(e)
+                    handleFirestoreError(e, OperationType.LIST, "leaderboardEntries")
+                    emit(emptyList())
+                }
+        }
+
+        return combine(flows) { lists ->
+            lists.flatMap { it }
+        }
     }
 
     suspend fun submitPersonalBestAndGhost(
