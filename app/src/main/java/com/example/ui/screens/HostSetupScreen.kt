@@ -29,7 +29,6 @@ import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Hub
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SportsScore
@@ -657,24 +656,6 @@ fun HostSetupScreen(
                     checked = draft.randomConditionsEnabled,
                     testTag = "setup_random_conditions_switch",
                     onCheckedChange = { draft = draft.copy(randomConditionsEnabled = it) }
-                )
-
-                SetupSwitchCard(
-                    icon = Icons.Default.Speed,
-                    title = "Automatic Acceleration",
-                    description = "Cars accelerate automatically; touch controls focus on steering and Brake/Reverse.",
-                    checked = draft.autoAccelerate,
-                    testTag = "setup_auto_accel_switch",
-                    onCheckedChange = { draft = draft.copy(autoAccelerate = it) }
-                )
-
-                SetupSwitchCard(
-                    icon = Icons.Default.Shield,
-                    title = "Bounce Off Walls",
-                    description = "Solid outer guardrails keep cars bouncing inside the circuit or arena.",
-                    checked = draft.hardTrackBoundary,
-                    testTag = "setup_hard_boundary_switch",
-                    onCheckedChange = { draft = draft.copy(hardTrackBoundary = it) }
                 )
 
                 SetupSwitchCard(

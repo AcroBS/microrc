@@ -52,7 +52,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -69,6 +68,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
@@ -96,7 +96,6 @@ fun GarageScreen(
     var selectedControlMode by remember(profile.controlMode) { mutableStateOf(profile.controlMode) }
     var tiltSensitivity by remember(profile.tiltSensitivity) { mutableFloatStateOf(profile.tiltSensitivity) }
     var sliderSensitivity by remember(profile.sliderSensitivity) { mutableFloatStateOf(profile.sliderSensitivity) }
-    var autoGasTilt by remember(profile.autoGasInTilt) { mutableStateOf(profile.autoGasInTilt) }
 
     var showCustomHue by remember { mutableStateOf(false) }
     var customHue by remember { mutableFloatStateOf(16f) }
@@ -334,10 +333,15 @@ fun GarageScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             if (isSelected) {
+                                val swatchCheckTint = if (Color(preset.primaryArgb).luminance() > 0.45f) {
+                                    Color(0xFF0B0E14)
+                                } else {
+                                    Color.White
+                                }
                                 Icon(
                                     Icons.Default.Check,
                                     contentDescription = preset.name,
-                                    tint = Color(0xFF0B0E14),
+                                    tint = swatchCheckTint,
                                     modifier = Modifier.size(22.dp)
                                 )
                             }
@@ -392,7 +396,7 @@ fun GarageScreen(
                                 .clickable {
                                     selectedControlMode = mode
                                     if (mode != ControlMode.SPRING_SLIDER) previewSliderSteer = 0f
-                                    onSaveControlSettings(mode, tiltSensitivity, autoGasTilt, sliderSensitivity)
+                                    onSaveControlSettings(mode, tiltSensitivity, true, sliderSensitivity)
                                 }
                                 .testTag("control_mode_${mode.name}")
                         ) {
@@ -486,7 +490,7 @@ fun GarageScreen(
                                 value = sliderSensitivity,
                                 onValueChange = {
                                     sliderSensitivity = it
-                                    onSaveControlSettings(selectedControlMode, tiltSensitivity, autoGasTilt, it)
+                                    onSaveControlSettings(selectedControlMode, tiltSensitivity, true, it)
                                 },
                                 valueRange = 0.7f..2.6f,
                                 modifier = Modifier.testTag("garage_slider_sensitivity")
@@ -552,31 +556,10 @@ fun GarageScreen(
                                 onValueChange = {
                                     tiltSensitivity = it
                                     tiltController.setSensitivity(it)
-                                    onSaveControlSettings(selectedControlMode, it, autoGasTilt, sliderSensitivity)
+                                    onSaveControlSettings(selectedControlMode, it, true, sliderSensitivity)
                                 },
                                 valueRange = 0.6f..2.2f
                             )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Auto-Throttle in Tilt Mode", style = MaterialTheme.typography.titleMedium)
-                                    Text(
-                                        "Automatically accelerate while tilting to steer",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                Switch(
-                                    checked = autoGasTilt,
-                                    onCheckedChange = {
-                                        autoGasTilt = it
-                                        onSaveControlSettings(selectedControlMode, tiltSensitivity, it, sliderSensitivity)
-                                    }
-                                )
-                            }
                         }
                     }
                 }

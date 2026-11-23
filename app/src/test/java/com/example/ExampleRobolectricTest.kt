@@ -56,17 +56,22 @@ class ExampleRobolectricTest {
         // Switch to Settings & About bottom tab
         composeTestRule.onNodeWithTag("open_settings_button").performClick()
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("settings_theme_SYSTEM").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("settings_theme_LIGHT").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("settings_theme_DARK").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setting_music_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setting_sfx_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setting_haptics_switch").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setting_daily_notifications_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("settings_speed_FAST").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("setting_auto_accel_switch").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("setting_hard_boundary_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setting_random_jumps_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setting_random_conditions_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setting_show_player_names_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("settings_about_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("settings_app_update_card").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setting_auto_accel_switch").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("setting_hard_boundary_switch").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("settings_mode_RACE").assertDoesNotExist()
 
         // Switch directly to Track Studio bottom tab
         composeTestRule.onNodeWithTag("open_track_editor_button").performClick()
@@ -263,7 +268,8 @@ class ExampleRobolectricTest {
             composeTestRule.onNodeWithTag("slider_left_arrow_overlay", useUnmergedTree = true).assertIsDisplayed()
             composeTestRule.onNodeWithTag("slider_right_arrow_overlay", useUnmergedTree = true).assertIsDisplayed()
             composeTestRule.onNodeWithTag("drop_mine_button").assertIsDisplayed()
-            composeTestRule.onNodeWithTag("auto_gas_badge").assertIsDisplayed()
+            composeTestRule.onNodeWithTag("brake_button").assertIsDisplayed()
+            composeTestRule.onNodeWithTag("auto_gas_badge").assertDoesNotExist()
             composeTestRule.onNodeWithTag("race_pause_button").performClick()
             composeTestRule.mainClock.advanceTimeBy(100L)
             composeTestRule.onNodeWithTag("pause_mode_SPRING_SLIDER").assertIsDisplayed()
@@ -727,6 +733,13 @@ class ExampleRobolectricTest {
                 .fetchSemanticsNodes().size
         )
 
+        // Driver tag + active car card stays at top above Streak & Standings
+        val driverTop = composeTestRule.onNodeWithTag("open_garage_button").performScrollTo()
+            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot.top
+        val standingsTop = composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo()
+            .assertIsDisplayed().fetchSemanticsNode().boundsInRoot.top
+        assertTrue("Driver + car card must stay above streak & standings", driverTop < standingsTop)
+
         // 2. Online (Standard) is default: Challenges & Rankings (most used) + Live Online Multiplayer are clearly separated,
         //    while Offline (Wi-Fi) is optional and hidden until selected
         composeTestRule.onNodeWithTag("home_scope_online").performScrollTo().assertIsDisplayed()
@@ -734,7 +747,7 @@ class ExampleRobolectricTest {
 
         composeTestRule.onNodeWithTag("home_challenges_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("daily_challenge_button").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("home_individual_tracks_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_individual_tracks_button").assertDoesNotExist()
         composeTestRule.onNodeWithTag("pure_solo_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("leaderboards_button").performScrollTo().assertIsDisplayed()
 

@@ -155,6 +155,7 @@ fun MicroRCApp(
     val latestProfile by rememberUpdatedState(profile)
     val rules by viewModel.rules.collectAsState()
     val audioSettings by viewModel.audioSettings.collectAsState()
+    val themeSettings by viewModel.themeSettings.collectAsState()
     val customTracks by viewModel.customTracks.collectAsState()
     val localLeaderboard by viewModel.localLeaderboard.collectAsState()
     val playStreak by viewModel.playStreak.collectAsState()
@@ -555,12 +556,6 @@ fun MicroRCApp(
                         leaderboardInitialTrackKey = null
                         navController.navigate(Routes.LEADERBOARD)
                     },
-                    onOpenIndividualTracks = {
-                        leaderboardInitialDaily = false
-                        leaderboardInitialMode = GameMode.RACE
-                        leaderboardInitialTrackKey = null
-                        navController.navigate(Routes.LEADERBOARD)
-                    },
                     dailyChallengeTitle = DailyChallengeCatalog.resolveTrackDisplayName(
                         DailyChallengeCatalog.trackIdForDate(todayKey)
                     ),
@@ -848,6 +843,7 @@ fun MicroRCApp(
                 SettingsScreen(
                     rules = effectiveRules,
                     audioSettings = audioSettings,
+                    themeSettings = themeSettings,
                     dailyNotificationsEnabled = dailyNotificationsEnabled,
                     canEditRules = canEdit,
                     inSession = sessionRole != SessionRole.None,
@@ -859,6 +855,7 @@ fun MicroRCApp(
                         viewModel.updateRaceRules(updatedRules)
                     },
                     onUpdateAudio = viewModel::updateAudioSettings,
+                    onUpdateThemeSettings = viewModel::updateThemeSettings,
                     onToggleDailyNotifications = viewModel::setDailyNotificationsEnabled,
                     updateState = appUpdateState,
                     isPlayStoreInstall = viewModel.isPlayStoreInstall,

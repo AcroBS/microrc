@@ -28,20 +28,22 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.BrightnessAuto
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.NotificationsActive
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RestartAlt
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Thunderstorm
@@ -51,6 +53,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -58,6 +61,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -68,26 +74,32 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.BuildConfig
+import com.example.model.AppThemeMode
 import com.example.model.AudioSettings
 import com.example.model.CarSpeedPreset
 import com.example.model.GameMode
 import com.example.model.RaceRulesSettings
+import com.example.model.ThemeSettings
 import com.example.model.WinCondition
 import com.example.util.AppUpdateUiState
 import com.example.util.SessionNotificationHelper
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     rules: RaceRulesSettings,
     audioSettings: AudioSettings = AudioSettings(),
+    themeSettings: ThemeSettings = ThemeSettings(),
     dailyNotificationsEnabled: Boolean = true,
     canEditRules: Boolean,
     inSession: Boolean,
     hasBottomNav: Boolean = false,
     onUpdateRules: (RaceRulesSettings) -> Unit,
     onUpdateAudio: (AudioSettings) -> Unit = {},
+    onUpdateThemeSettings: (ThemeSettings) -> Unit = {},
     onToggleDailyNotifications: (Boolean) -> Unit = {},
     appVersionName: String = BuildConfig.VERSION_NAME,
     appVersionCode: Int = BuildConfig.VERSION_CODE,
@@ -141,7 +153,7 @@ fun SettingsScreen(
                     }
                 }
                 Text(
-                    text = if (inSession) "Match Rules & Audio" else "Settings & About",
+                    text = if (inSession) "Match Rules" else "Settings",
                     style = MaterialTheme.typography.headlineMedium,
                     color = MaterialTheme.colorScheme.onBackground
                 )
@@ -155,426 +167,249 @@ fun SettingsScreen(
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Surface(
-                    color = if (canEditRules) {
-                        MaterialTheme.colorScheme.secondaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.tertiaryContainer
-                    },
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                if (!inSession) {
+                    // 1. Appearance (Light / Dark / System + Material You Dynamic Accent)
+                    Text(
+                        text = "APPEARANCE",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(
-                            imageVector = if (canEditRules) Icons.Default.Tune else Icons.Default.Lock,
-                            contentDescription = null,
-                            tint = if (canEditRules) {
-                                MaterialTheme.colorScheme.onSecondaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.onTertiaryContainer
-                            }
-                        )
-                        Column {
-                            Text(
-                                text = when {
-                                    !canEditRules -> "Host-Controlled Match Rules"
-                                    inSession -> "Active Lobby & Solo Rules"
-                                    else -> "Host & Solo Default Rules"
-                                },
-                                style = MaterialTheme.typography.titleMedium,
-                                color = if (canEditRules) {
-                                    MaterialTheme.colorScheme.onSecondaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onTertiaryContainer
-                                }
-                            )
-                            Text(
-                                text = if (canEditRules) {
-                                    "Changes apply to all players when you host or race solo."
-                                } else {
-                                    "Only the host can edit match rules. Audio toggles below stay local to your phone."
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (canEditRules) {
-                                    MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f)
-                                } else {
-                                    MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f)
-                                }
-                            )
-                        }
-                    }
-                }
-
-                // Local Audio & Haptics Section
-                Text(
-                    text = "AUDIO & HAPTICS (THIS DEVICE)",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                RuleToggleCard(
-                    icon = Icons.Default.MusicNote,
-                    accent = MaterialTheme.colorScheme.primary,
-                    title = "Menu & Race Music",
-                    description = "Calm semi-electronic menu ambience and realistic groove soundtracks randomized each run.",
-                    checked = audioSettings.musicEnabled,
-                    enabled = true,
-                    switchTestTag = "setting_music_switch",
-                    onCheckedChange = {
-                        onUpdateAudio(audioSettings.copy(musicEnabled = it))
-                    }
-                )
-
-                RuleToggleCard(
-                    icon = Icons.Default.DirectionsCar,
-                    accent = MaterialTheme.colorScheme.secondary,
-                    title = "RC Car Motor Sounds",
-                    description = "Subtle speed-reactive electric RC motor sound per car on track.",
-                    checked = audioSettings.carSfxEnabled,
-                    enabled = true,
-                    switchTestTag = "setting_sfx_switch",
-                    onCheckedChange = {
-                        onUpdateAudio(audioSettings.copy(carSfxEnabled = it))
-                    }
-                )
-
-                RuleToggleCard(
-                    icon = Icons.Default.Vibration,
-                    accent = MaterialTheme.colorScheme.tertiary,
-                    title = "Haptic Vibration Feedback",
-                    description = "Tactile vibration pulses on car collisions, mine blasts, power-up activations & portal warps.",
-                    checked = audioSettings.hapticsEnabled,
-                    enabled = true,
-                    switchTestTag = "setting_haptics_switch",
-                    onCheckedChange = {
-                        onUpdateAudio(audioSettings.copy(hapticsEnabled = it))
-                    }
-                )
-
-                RuleToggleCard(
-                    icon = Icons.Default.NotificationsActive,
-                    accent = MaterialTheme.colorScheme.secondary,
-                    title = "Daily Challenge Notifications",
-                    description = "Get notified when each day's new fixed Daily GP track is available.",
-                    checked = dailyNotificationsEnabled,
-                    enabled = true,
-                    switchTestTag = "setting_daily_notifications_switch",
-                    onCheckedChange = { enabled ->
-                        if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                            !SessionNotificationHelper.hasNotificationPermission(context)
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        } else {
-                            onToggleDailyNotifications(enabled)
+                            Text(
+                                text = "Theme",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+
+                            SingleChoiceSegmentedButtonRow(
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                AppThemeMode.entries.forEachIndexed { index, modeOption ->
+                                    val icon = when (modeOption) {
+                                        AppThemeMode.SYSTEM -> Icons.Default.BrightnessAuto
+                                        AppThemeMode.LIGHT -> Icons.Default.LightMode
+                                        AppThemeMode.DARK -> Icons.Default.DarkMode
+                                    }
+                                    SegmentedButton(
+                                        selected = themeSettings.mode == modeOption,
+                                        onClick = {
+                                            onUpdateThemeSettings(themeSettings.copy(mode = modeOption))
+                                        },
+                                        shape = SegmentedButtonDefaults.itemShape(
+                                            index = index,
+                                            count = AppThemeMode.entries.size
+                                        ),
+                                        icon = {
+                                            if (themeSettings.mode != modeOption) {
+                                                Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            } else {
+                                                SegmentedButtonDefaults.Icon(active = true)
+                                            }
+                                        },
+                                        modifier = Modifier.testTag("settings_theme_${modeOption.name}")
+                                    ) {
+                                        Text(
+                                            text = modeOption.label,
+                                            style = MaterialTheme.typography.labelLarge,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                GroupedSwitchRow(
+                                    icon = Icons.Default.Palette,
+                                    accent = MaterialTheme.colorScheme.primary,
+                                    title = "Material You Accent",
+                                    subtitle = "Match your device wallpaper colors",
+                                    checked = themeSettings.dynamicColor,
+                                    enabled = true,
+                                    switchTestTag = "setting_dynamic_color_switch",
+                                    onCheckedChange = {
+                                        onUpdateThemeSettings(themeSettings.copy(dynamicColor = it))
+                                    }
+                                )
+                            }
                         }
                     }
-                )
 
-                // Match Rules Section
-                Text(
-                    text = "MATCH MODE & RULES",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                    // 2. Audio & Alerts (this device)
+                    Text(
+                        text = "AUDIO & ALERTS",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
 
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                    shape = RoundedCornerShape(18.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(
-                        modifier = Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(
-                            text = "Play Mode",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        GameMode.entries.chunked(2).forEach { rowModes ->
+                        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) {
+                            GroupedSwitchRow(
+                                icon = Icons.Default.MusicNote,
+                                accent = MaterialTheme.colorScheme.primary,
+                                title = "Music",
+                                subtitle = "Menu ambience & race soundtracks",
+                                checked = audioSettings.musicEnabled,
+                                enabled = true,
+                                switchTestTag = "setting_music_switch",
+                                onCheckedChange = { onUpdateAudio(audioSettings.copy(musicEnabled = it)) }
+                            )
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                            GroupedSwitchRow(
+                                icon = Icons.Default.DirectionsCar,
+                                accent = MaterialTheme.colorScheme.secondary,
+                                title = "Car Motor SFX",
+                                subtitle = "Speed-reactive RC motor audio",
+                                checked = audioSettings.carSfxEnabled,
+                                enabled = true,
+                                switchTestTag = "setting_sfx_switch",
+                                onCheckedChange = { onUpdateAudio(audioSettings.copy(carSfxEnabled = it)) }
+                            )
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                            GroupedSwitchRow(
+                                icon = Icons.Default.Vibration,
+                                accent = MaterialTheme.colorScheme.tertiary,
+                                title = "Haptic Vibration",
+                                subtitle = "Collisions, boosts & portal warps",
+                                checked = audioSettings.hapticsEnabled,
+                                enabled = true,
+                                switchTestTag = "setting_haptics_switch",
+                                onCheckedChange = { onUpdateAudio(audioSettings.copy(hapticsEnabled = it)) }
+                            )
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                            GroupedSwitchRow(
+                                icon = Icons.Default.NotificationsActive,
+                                accent = MaterialTheme.colorScheme.secondary,
+                                title = "Daily & Friend Alerts",
+                                subtitle = "Daily GP drops & new friend records",
+                                checked = dailyNotificationsEnabled,
+                                enabled = true,
+                                switchTestTag = "setting_daily_notifications_switch",
+                                onCheckedChange = { enabled ->
+                                    if (enabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                                        !SessionNotificationHelper.hasNotificationPermission(context)
+                                    ) {
+                                        notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                    } else {
+                                        onToggleDailyNotifications(enabled)
+                                    }
+                                }
+                            )
+                        }
+                    }
+
+                    // 3. Whole-Game Defaults (PvP match setup lives in Host Setup / active lobby)
+                    Text(
+                        text = "GAMEPLAY DEFAULTS",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Speed,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "General Car Speed",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Text(
+                                text = rules.carSpeedEnum.subtitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                rowModes.forEach { mode ->
+                                CarSpeedPreset.entries.forEach { preset ->
                                     FilterChip(
-                                        selected = rules.gameModeEnum == mode,
-                                        enabled = canEditRules,
-                                        onClick = { onUpdateRules(rules.copy(gameMode = mode.name)) },
-                                        label = { Text(mode.displayName, style = MaterialTheme.typography.labelMedium) },
+                                        selected = rules.carSpeedEnum == preset,
+                                        enabled = true,
+                                        onClick = { onUpdateRules(rules.copy(carSpeed = preset.name)) },
+                                        label = { Text(preset.displayName, style = MaterialTheme.typography.labelMedium) },
                                         modifier = Modifier
                                             .weight(1f)
-                                            .testTag("settings_mode_${mode.name}")
+                                            .testTag("settings_speed_${preset.name}")
                                     )
                                 }
                             }
-                        }
 
-                        when (rules.gameModeEnum) {
-                            GameMode.ARENA -> {
-                                Text(
-                                    text = "Flag Hold Target: ${rules.arenaTargetMinutes} min",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    listOf(1, 2, 3, 5).forEach { mins ->
-                                        FilterChip(
-                                            selected = rules.arenaTargetMinutes == mins,
-                                            enabled = canEditRules,
-                                            onClick = { onUpdateRules(rules.copy(arenaTargetMinutes = mins)) },
-                                            label = { Text("${mins}m", style = MaterialTheme.typography.labelSmall) },
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .testTag("settings_arena_min_$mins")
-                                        )
-                                    }
-                                }
-                            }
-                            GameMode.STUNTS -> {
-                                Text(
-                                    text = "Turn-based 4-stunt gauntlet (Long Jump, Goal Strike, 9-Pin Bowling & RC Golf) — 1x starting Nitro every turn.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            GameMode.HYBRID -> {
-                                val enabledCount = listOf(
-                                    rules.hybridIncludeCircuit,
-                                    rules.hybridIncludeArena,
-                                    rules.hybridIncludeStunts
-                                ).count { it }
-                                Text(
-                                    text = "Included Hybrid Event Types:",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    FilterChip(
-                                        selected = rules.hybridIncludeCircuit,
-                                        enabled = canEditRules,
-                                        onClick = {
-                                            if (!rules.hybridIncludeCircuit || enabledCount > 1) {
-                                                onUpdateRules(rules.copy(hybridIncludeCircuit = !rules.hybridIncludeCircuit))
-                                            }
-                                        },
-                                        label = { Text("Circuit", style = MaterialTheme.typography.labelSmall) },
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    FilterChip(
-                                        selected = rules.hybridIncludeArena,
-                                        enabled = canEditRules,
-                                        onClick = {
-                                            if (!rules.hybridIncludeArena || enabledCount > 1) {
-                                                onUpdateRules(rules.copy(hybridIncludeArena = !rules.hybridIncludeArena))
-                                            }
-                                        },
-                                        label = { Text("Arena", style = MaterialTheme.typography.labelSmall) },
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    FilterChip(
-                                        selected = rules.hybridIncludeStunts,
-                                        enabled = canEditRules,
-                                        onClick = {
-                                            if (!rules.hybridIncludeStunts || enabledCount > 1) {
-                                                onUpdateRules(rules.copy(hybridIncludeStunts = !rules.hybridIncludeStunts))
-                                            }
-                                        },
-                                        label = { Text("Stunts", style = MaterialTheme.typography.labelSmall) },
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
-                            GameMode.RACE -> {
-                            Text(
-                                text = "Winning Condition",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+
+                            GroupedSwitchRow(
+                                icon = Icons.Default.FlightTakeoff,
+                                accent = MaterialTheme.colorScheme.secondary,
+                                title = "Random Track Jumps",
+                                subtitle = "Launch ramps spawned on tracks",
+                                checked = rules.randomJumpsEnabled,
+                                enabled = true,
+                                switchTestTag = "setting_random_jumps_switch",
+                                onCheckedChange = { onUpdateRules(rules.copy(randomJumpsEnabled = it)) }
                             )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                WinCondition.entries.forEach { cond ->
-                                    val selected = rules.winConditionEnum == cond
-                                    FilterChip(
-                                        selected = selected,
-                                        enabled = canEditRules,
-                                        onClick = { onUpdateRules(rules.copy(winCondition = cond.name)) },
-                                        label = {
-                                            Text(
-                                                text = when (cond) {
-                                                    WinCondition.FIRST_TO_FINISH -> "Laps"
-                                                    WinCondition.TIME_TRIAL_DISTANCE -> "Max Time"
-                                                    WinCondition.CHAMPIONSHIP_POINTS -> "Points"
-                                                },
-                                                style = MaterialTheme.typography.labelSmall
-                                            )
-                                        },
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
-                            if (rules.winConditionEnum == WinCondition.TIME_TRIAL_DISTANCE) {
-                                Text(
-                                    text = "Max Driving Time: ${rules.timeLimitSec}s",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    listOf(60, 90, 120, 180, 300).forEach { secs ->
-                                        val label = if (secs >= 180 && secs % 60 == 0) "${secs / 60}m" else "${secs}s"
-                                        FilterChip(
-                                            selected = rules.timeLimitSec == secs,
-                                            enabled = canEditRules,
-                                            onClick = { onUpdateRules(rules.copy(timeLimitSec = secs)) },
-                                            label = { Text(label, style = MaterialTheme.typography.labelSmall) },
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
-                                }
-                            } else {
-                                Text(
-                                    text = "Number of Laps: ${rules.totalLaps}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    listOf(1, 2, 3, 5, 7).forEach { laps ->
-                                        FilterChip(
-                                            selected = rules.totalLaps == laps,
-                                            enabled = canEditRules,
-                                            onClick = { onUpdateRules(rules.copy(totalLaps = laps)) },
-                                            label = { Text("${laps}L", style = MaterialTheme.typography.labelSmall) },
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
-                                }
-                            }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "General Car Speed",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = rules.carSpeedEnum.subtitle,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            CarSpeedPreset.entries.forEach { preset ->
-                                FilterChip(
-                                    selected = rules.carSpeedEnum == preset,
-                                    enabled = canEditRules,
-                                    onClick = { onUpdateRules(rules.copy(carSpeed = preset.name)) },
-                                    label = { Text(preset.displayName, style = MaterialTheme.typography.labelMedium) },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("settings_speed_${preset.name}")
-                                )
-                            }
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                            GroupedSwitchRow(
+                                icon = Icons.Default.Thunderstorm,
+                                accent = MaterialTheme.colorScheme.secondary,
+                                title = "Random Ride Conditions",
+                                subtitle = "Rain puddles, tremors, wind & snow",
+                                checked = rules.randomConditionsEnabled,
+                                enabled = true,
+                                switchTestTag = "setting_random_conditions_switch",
+                                onCheckedChange = { onUpdateRules(rules.copy(randomConditionsEnabled = it)) }
+                            )
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                            GroupedSwitchRow(
+                                icon = Icons.Default.Badge,
+                                accent = MaterialTheme.colorScheme.primary,
+                                title = "Driver Name Tags",
+                                subtitle = "Show callsigns beside cars",
+                                checked = rules.showPlayerNames,
+                                enabled = true,
+                                switchTestTag = "setting_show_player_names_switch",
+                                onCheckedChange = { onUpdateRules(rules.copy(showPlayerNames = it)) }
+                            )
                         }
                     }
-                }
 
-                RuleToggleCard(
-                    icon = Icons.Default.Speed,
-                    accent = MaterialTheme.colorScheme.tertiary,
-                    title = "Automatic Acceleration",
-                    description = "All cars accelerate automatically during the race. Touch controls switch to Brake/Reverse & Steering.",
-                    checked = rules.autoAccelerate,
-                    enabled = canEditRules,
-                    switchTestTag = "setting_auto_accel_switch",
-                    onCheckedChange = {
-                        onUpdateRules(rules.copy(autoAccelerate = it))
-                    }
-                )
-
-                RuleToggleCard(
-                    icon = Icons.Default.Shield,
-                    accent = MaterialTheme.colorScheme.primary,
-                    title = "Hard Track Boundary",
-                    description = "Solid kerb guardrails bounce cars back inside the track instead of sliding off-road.",
-                    checked = rules.hardTrackBoundary,
-                    enabled = canEditRules,
-                    switchTestTag = "setting_hard_boundary_switch",
-                    onCheckedChange = {
-                        onUpdateRules(rules.copy(hardTrackBoundary = it))
-                    }
-                )
-
-                RuleToggleCard(
-                    icon = Icons.Default.FlightTakeoff,
-                    accent = MaterialTheme.colorScheme.secondary,
-                    title = "Random Track Jumps",
-                    description = "Spawn randomized launch ramps on tracks so RC cars catch air and clear obstacles.",
-                    checked = rules.randomJumpsEnabled,
-                    enabled = canEditRules,
-                    switchTestTag = "setting_random_jumps_switch",
-                    onCheckedChange = {
-                        onUpdateRules(rules.copy(randomJumpsEnabled = it))
-                    }
-                )
-
-                RuleToggleCard(
-                    icon = Icons.Default.Thunderstorm,
-                    accent = MaterialTheme.colorScheme.secondary,
-                    title = "Random Ride Conditions",
-                    description = "Occasional short-lived rain puddles, earthquakes, blowing crosswinds & icy snow skids.",
-                    checked = rules.randomConditionsEnabled,
-                    enabled = canEditRules,
-                    switchTestTag = "setting_random_conditions_switch",
-                    onCheckedChange = {
-                        onUpdateRules(rules.copy(randomConditionsEnabled = it))
-                    }
-                )
-
-                RuleToggleCard(
-                    icon = Icons.Default.Badge,
-                    accent = MaterialTheme.colorScheme.primary,
-                    title = "Player Names Next to Car",
-                    description = "Display driver callsigns next to each RC car during races (host/server controlled).",
-                    checked = rules.showPlayerNames,
-                    enabled = canEditRules,
-                    switchTestTag = "setting_show_player_names_switch",
-                    onCheckedChange = {
-                        onUpdateRules(rules.copy(showPlayerNames = it))
-                    }
-                )
-
-                if (canEditRules) {
-                    Spacer(modifier = Modifier.height(4.dp))
                     OutlinedButton(
                         onClick = { onUpdateRules(RaceRulesSettings()) },
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(50.dp)
+                            .height(48.dp)
                             .testTag("settings_reset_button")
                     ) {
                         Icon(
@@ -583,27 +418,380 @@ fun SettingsScreen(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Reset Standard Defaults", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Reset Gameplay Defaults", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+
+                    // 4. About & Version Section
+                    Text(
+                        text = "ABOUT & UPDATES",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    AboutAndVersionSection(
+                        appVersionName = appVersionName,
+                        appVersionCode = appVersionCode,
+                        dynamicAccentEnabled = themeSettings.dynamicColor,
+                        updateState = updateState,
+                        isPlayStoreInstall = isPlayStoreInstall,
+                        onCheckForUpdates = onCheckForUpdates,
+                        onOpenUpdateUrl = onOpenUpdateUrl
+                    )
+                } else {
+                    // In-session Match Rules & Local Audio (accessible from Lobby)
+                    Surface(
+                        color = if (canEditRules) {
+                            MaterialTheme.colorScheme.secondaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.tertiaryContainer
+                        },
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (canEditRules) Icons.Default.Tune else Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = if (canEditRules) {
+                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onTertiaryContainer
+                                }
+                            )
+                            Column {
+                                Text(
+                                    text = if (canEditRules) "Active Lobby Rules" else "Host-Controlled Match Rules",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = if (canEditRules) {
+                                        MaterialTheme.colorScheme.onSecondaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.onTertiaryContainer
+                                    }
+                                )
+                                Text(
+                                    text = if (canEditRules) {
+                                        "Changes sync to everyone in this lobby."
+                                    } else {
+                                        "Only the host can edit match rules. Audio toggles below stay local."
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (canEditRules) {
+                                        MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f)
+                                    } else {
+                                        MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f)
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = "MATCH MODE & RULES",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Play Mode",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            GameMode.entries.chunked(2).forEach { rowModes ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    rowModes.forEach { mode ->
+                                        FilterChip(
+                                            selected = rules.gameModeEnum == mode,
+                                            enabled = canEditRules,
+                                            onClick = { onUpdateRules(rules.copy(gameMode = mode.name)) },
+                                            label = { Text(mode.displayName, style = MaterialTheme.typography.labelMedium) },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag("settings_mode_${mode.name}")
+                                        )
+                                    }
+                                }
+                            }
+
+                            when (rules.gameModeEnum) {
+                                GameMode.ARENA -> {
+                                    Text(
+                                        text = "Flag Hold Target: ${rules.arenaTargetMinutes} min",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        listOf(1, 2, 3, 5).forEach { mins ->
+                                            FilterChip(
+                                                selected = rules.arenaTargetMinutes == mins,
+                                                enabled = canEditRules,
+                                                onClick = { onUpdateRules(rules.copy(arenaTargetMinutes = mins)) },
+                                                label = { Text("${mins}m", style = MaterialTheme.typography.labelSmall) },
+                                                modifier = Modifier
+                                                    .weight(1f)
+                                                    .testTag("settings_arena_min_$mins")
+                                            )
+                                        }
+                                    }
+                                }
+                                GameMode.STUNTS -> {
+                                    Text(
+                                        text = "Turn-based 4-stunt gauntlet — 1x starting Nitro every turn.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                GameMode.HYBRID -> {
+                                    val enabledCount = listOf(
+                                        rules.hybridIncludeCircuit,
+                                        rules.hybridIncludeArena,
+                                        rules.hybridIncludeStunts
+                                    ).count { it }
+                                    Text(
+                                        text = "Included Hybrid Event Types:",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        FilterChip(
+                                            selected = rules.hybridIncludeCircuit,
+                                            enabled = canEditRules,
+                                            onClick = {
+                                                if (!rules.hybridIncludeCircuit || enabledCount > 1) {
+                                                    onUpdateRules(rules.copy(hybridIncludeCircuit = !rules.hybridIncludeCircuit))
+                                                }
+                                            },
+                                            label = { Text("Circuit", style = MaterialTheme.typography.labelSmall) },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        FilterChip(
+                                            selected = rules.hybridIncludeArena,
+                                            enabled = canEditRules,
+                                            onClick = {
+                                                if (!rules.hybridIncludeArena || enabledCount > 1) {
+                                                    onUpdateRules(rules.copy(hybridIncludeArena = !rules.hybridIncludeArena))
+                                                }
+                                            },
+                                            label = { Text("Arena", style = MaterialTheme.typography.labelSmall) },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        FilterChip(
+                                            selected = rules.hybridIncludeStunts,
+                                            enabled = canEditRules,
+                                            onClick = {
+                                                if (!rules.hybridIncludeStunts || enabledCount > 1) {
+                                                    onUpdateRules(rules.copy(hybridIncludeStunts = !rules.hybridIncludeStunts))
+                                                }
+                                            },
+                                            label = { Text("Stunts", style = MaterialTheme.typography.labelSmall) },
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
+                                }
+                                GameMode.RACE -> {
+                                    Text(
+                                        text = "Winning Condition",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        WinCondition.entries.forEach { cond ->
+                                            val selected = rules.winConditionEnum == cond
+                                            FilterChip(
+                                                selected = selected,
+                                                enabled = canEditRules,
+                                                onClick = { onUpdateRules(rules.copy(winCondition = cond.name)) },
+                                                label = {
+                                                    Text(
+                                                        text = when (cond) {
+                                                            WinCondition.FIRST_TO_FINISH -> "Laps"
+                                                            WinCondition.TIME_TRIAL_DISTANCE -> "Max Time"
+                                                            WinCondition.CHAMPIONSHIP_POINTS -> "Points"
+                                                        },
+                                                        style = MaterialTheme.typography.labelSmall
+                                                    )
+                                                },
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                    }
+                                    if (rules.winConditionEnum == WinCondition.TIME_TRIAL_DISTANCE) {
+                                        Text(
+                                            text = "Max Driving Time: ${rules.timeLimitSec}s",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            listOf(60, 90, 120, 180, 300).forEach { secs ->
+                                                val label = if (secs >= 180 && secs % 60 == 0) "${secs / 60}m" else "${secs}s"
+                                                FilterChip(
+                                                    selected = rules.timeLimitSec == secs,
+                                                    enabled = canEditRules,
+                                                    onClick = { onUpdateRules(rules.copy(timeLimitSec = secs)) },
+                                                    label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        Text(
+                                            text = "Number of Laps: ${rules.totalLaps}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            listOf(1, 2, 3, 5, 7).forEach { laps ->
+                                                FilterChip(
+                                                    selected = rules.totalLaps == laps,
+                                                    enabled = canEditRules,
+                                                    onClick = { onUpdateRules(rules.copy(totalLaps = laps)) },
+                                                    label = { Text("${laps}L", style = MaterialTheme.typography.labelSmall) },
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "General Car Speed",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                CarSpeedPreset.entries.forEach { preset ->
+                                    FilterChip(
+                                        selected = rules.carSpeedEnum == preset,
+                                        enabled = canEditRules,
+                                        onClick = { onUpdateRules(rules.copy(carSpeed = preset.name)) },
+                                        label = { Text(preset.displayName, style = MaterialTheme.typography.labelMedium) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("settings_speed_${preset.name}")
+                                    )
+                                }
+                            }
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+
+                            GroupedSwitchRow(
+                                icon = Icons.Default.FlightTakeoff,
+                                accent = MaterialTheme.colorScheme.secondary,
+                                title = "Random Track Jumps",
+                                subtitle = "Launch ramps on tracks",
+                                checked = rules.randomJumpsEnabled,
+                                enabled = canEditRules,
+                                switchTestTag = "setting_random_jumps_switch",
+                                onCheckedChange = { onUpdateRules(rules.copy(randomJumpsEnabled = it)) }
+                            )
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                            GroupedSwitchRow(
+                                icon = Icons.Default.Thunderstorm,
+                                accent = MaterialTheme.colorScheme.secondary,
+                                title = "Random Ride Conditions",
+                                subtitle = "Rain, tremors, wind & snow",
+                                checked = rules.randomConditionsEnabled,
+                                enabled = canEditRules,
+                                switchTestTag = "setting_random_conditions_switch",
+                                onCheckedChange = { onUpdateRules(rules.copy(randomConditionsEnabled = it)) }
+                            )
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                            GroupedSwitchRow(
+                                icon = Icons.Default.Badge,
+                                accent = MaterialTheme.colorScheme.primary,
+                                title = "Driver Name Tags",
+                                subtitle = "Show callsigns beside cars",
+                                checked = rules.showPlayerNames,
+                                enabled = canEditRules,
+                                switchTestTag = "setting_show_player_names_switch",
+                                onCheckedChange = { onUpdateRules(rules.copy(showPlayerNames = it)) }
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "AUDIO & HAPTICS (THIS DEVICE)",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        shape = RoundedCornerShape(18.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) {
+                            GroupedSwitchRow(
+                                icon = Icons.Default.MusicNote,
+                                accent = MaterialTheme.colorScheme.primary,
+                                title = "Music",
+                                subtitle = "Menu ambience & race soundtracks",
+                                checked = audioSettings.musicEnabled,
+                                enabled = true,
+                                switchTestTag = "setting_music_switch",
+                                onCheckedChange = { onUpdateAudio(audioSettings.copy(musicEnabled = it)) }
+                            )
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                            GroupedSwitchRow(
+                                icon = Icons.Default.DirectionsCar,
+                                accent = MaterialTheme.colorScheme.secondary,
+                                title = "Car Motor SFX",
+                                subtitle = "Speed-reactive RC motor audio",
+                                checked = audioSettings.carSfxEnabled,
+                                enabled = true,
+                                switchTestTag = "setting_sfx_switch",
+                                onCheckedChange = { onUpdateAudio(audioSettings.copy(carSfxEnabled = it)) }
+                            )
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                            GroupedSwitchRow(
+                                icon = Icons.Default.Vibration,
+                                accent = MaterialTheme.colorScheme.tertiary,
+                                title = "Haptic Vibration",
+                                subtitle = "Collisions, boosts & portal warps",
+                                checked = audioSettings.hapticsEnabled,
+                                enabled = true,
+                                switchTestTag = "setting_haptics_switch",
+                                onCheckedChange = { onUpdateAudio(audioSettings.copy(hapticsEnabled = it)) }
+                            )
+                        }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                // Dedicated About & Version Section
-                Text(
-                    text = "ABOUT & VERSION",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                AboutAndVersionSection(
-                    appVersionName = appVersionName,
-                    appVersionCode = appVersionCode,
-                    updateState = updateState,
-                    isPlayStoreInstall = isPlayStoreInstall,
-                    onCheckForUpdates = onCheckForUpdates,
-                    onOpenUpdateUrl = onOpenUpdateUrl
-                )
 
                 Spacer(modifier = Modifier.height(8.dp))
             }
@@ -612,19 +800,67 @@ fun SettingsScreen(
 }
 
 @Composable
+private fun GroupedSwitchRow(
+    icon: ImageVector,
+    accent: Color,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    enabled: Boolean,
+    switchTestTag: String,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (checked) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(22.dp)
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            enabled = enabled,
+            modifier = Modifier.testTag(switchTestTag)
+        )
+    }
+}
+
+@Composable
 private fun AboutAndVersionSection(
     appVersionName: String,
     appVersionCode: Int,
+    dynamicAccentEnabled: Boolean,
     updateState: AppUpdateUiState,
     isPlayStoreInstall: Boolean,
     onCheckForUpdates: () -> Unit,
     onOpenUpdateUrl: (String) -> Unit
 ) {
     val hasUpdate = updateState is AppUpdateUiState.UpdateAvailable
-    val dynamicThemeLabel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        "Material You Dynamic Accent"
+    val dynamicThemeLabel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && dynamicAccentEnabled) {
+        "Material You Dynamic"
     } else {
-        "Adaptive Material 3"
+        "MicroRC Signature M3"
     }
     val channelLabel = if (isPlayStoreInstall) "Google Play" else "GitHub Release APK"
 
@@ -634,7 +870,6 @@ private fun AboutAndVersionSection(
             .testTag("settings_about_section"),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // App Info & Metadata Card
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -644,8 +879,8 @@ private fun AboutAndVersionSection(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -653,67 +888,36 @@ private fun AboutAndVersionSection(
                 ) {
                     Surface(
                         color = MaterialTheme.colorScheme.primaryContainer,
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.size(46.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.size(40.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = Icons.Default.Info,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.size(24.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "MicroRC",
-                            style = MaterialTheme.typography.titleLarge,
+                            text = "MicroRC v$appVersionName",
+                            style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Top-down RC racing, local Wi-Fi & online lobbies, Daily GP challenges, arenas, stunts & Track Studio.",
+                            text = "$channelLabel • Build $appVersionCode • $dynamicThemeLabel",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
-                }
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
-
-                AboutDetailRow(label = "Installed Version", value = "v$appVersionName (Build $appVersionCode)")
-                AboutDetailRow(label = "Distribution", value = channelLabel)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Palette,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "Color Palette",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Text(
-                        text = dynamicThemeLabel,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary
-                    )
                 }
             }
         }
 
-        // Software Update Check Card
         Card(
             colors = CardDefaults.cardColors(
                 containerColor = if (hasUpdate) {
@@ -738,43 +942,31 @@ private fun AboutAndVersionSection(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp),
+                    .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Surface(
-                        color = if (hasUpdate) {
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                    Icon(
+                        imageVector = if (updateState is AppUpdateUiState.UpToDate) {
+                            Icons.Default.CheckCircle
                         } else {
-                            MaterialTheme.colorScheme.surfaceContainerHigh
+                            Icons.Default.SystemUpdate
                         },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.size(44.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (updateState is AppUpdateUiState.UpToDate) {
-                                    Icons.Default.CheckCircle
-                                } else {
-                                    Icons.Default.SystemUpdate
-                                },
-                                contentDescription = null,
-                                tint = if (hasUpdate) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.primary
-                                },
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-                    }
+                        contentDescription = null,
+                        tint = if (hasUpdate) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.primary
+                        },
+                        modifier = Modifier.size(22.dp)
+                    )
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "App Updates",
-                            style = MaterialTheme.typography.titleMedium,
+                            style = MaterialTheme.typography.titleSmall,
                             color = if (hasUpdate) {
                                 MaterialTheme.colorScheme.onPrimaryContainer
                             } else {
@@ -782,14 +974,14 @@ private fun AboutAndVersionSection(
                             }
                         )
                         val subtitleText = when {
-                            isPlayStoreInstall -> "Updates are managed automatically via Google Play."
+                            isPlayStoreInstall -> "Updates managed via Google Play."
                             updateState is AppUpdateUiState.Checking -> "Checking latest GitHub release..."
                             updateState is AppUpdateUiState.UpdateAvailable ->
-                                "New version ${updateState.release.tagName} is available on GitHub."
+                                "New version ${updateState.release.tagName} available on GitHub."
                             updateState is AppUpdateUiState.UpToDate ->
-                                "Up to date (latest GitHub release: v${updateState.latestVersion})."
+                                "Up to date (v${updateState.latestVersion})."
                             updateState is AppUpdateUiState.Unavailable -> updateState.message
-                            else -> "Check GitHub Releases for newer MicroRC APK builds."
+                            else -> "Check GitHub Releases for newer builds."
                         }
                         Text(
                             text = subtitleText,
@@ -846,7 +1038,7 @@ private fun AboutAndVersionSection(
                                             .height(48.dp)
                                             .testTag("settings_update_release_page_button")
                                     ) {
-                                        Icon(Icons.Default.OpenInNew, contentDescription = "View Release Page", modifier = Modifier.size(18.dp))
+                                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "View Release Page", modifier = Modifier.size(18.dp))
                                     }
                                 }
                             }
@@ -862,98 +1054,12 @@ private fun AboutAndVersionSection(
                             ) {
                                 Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Check GitHub for Updates", style = MaterialTheme.typography.labelLarge)
+                                Text("Check for Updates", style = MaterialTheme.typography.labelLarge)
                             }
                         }
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun AboutDetailRow(label: String, value: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-    }
-}
-
-@Composable
-private fun RuleToggleCard(
-    icon: ImageVector,
-    accent: Color,
-    title: String,
-    description: String,
-    checked: Boolean,
-    enabled: Boolean,
-    switchTestTag: String,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        border = BorderStroke(
-            width = if (checked) 1.5.dp else 1.dp,
-            color = if (checked) accent.copy(alpha = 0.65f) else MaterialTheme.colorScheme.outlineVariant
-        ),
-        shape = RoundedCornerShape(18.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
-            Surface(
-                color = if (checked) accent.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surfaceContainerHigh,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.size(44.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = if (checked) accent else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.height(3.dp))
-                Text(
-                    text = description,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Switch(
-                checked = checked,
-                onCheckedChange = onCheckedChange,
-                enabled = enabled,
-                modifier = Modifier.testTag(switchTestTag)
-            )
         }
     }
 }

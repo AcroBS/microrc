@@ -1296,8 +1296,6 @@ class WifiP2pRaceManager(
                 }
             }
             add("Speed: ${rules.carSpeedEnum.displayName}")
-            if (rules.autoAccelerate) add("Auto-Gas")
-            if (rules.hardTrackBoundary) add("Bounce Walls")
             if (rules.randomJumpsEnabled && rules.gameModeEnum != GameMode.STUNTS) add("Jumps")
             if (rules.randomConditionsEnabled && rules.gameModeEnum != GameMode.STUNTS) add("Random Weather")
             if (rules.showPlayerNames) add("Name Tags")

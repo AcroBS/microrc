@@ -49,7 +49,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEvents
-import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -142,7 +141,6 @@ fun HomeScreen(
     onSoloRace: () -> Unit,
     onPureSoloRace: () -> Unit = {},
     onOpenDailyChallenge: () -> Unit = {},
-    onOpenIndividualTracks: () -> Unit = {},
     dailyChallengeTitle: String = "Daily GP",
     dailyChallengeSubtitle: String = "Fixed Portals • 1 Nitro/Lap • No Mines",
     dailyChallengeResetLabel: String = "",
@@ -211,11 +209,11 @@ fun HomeScreen(
                     modifier = Modifier.widthIn(max = if (isWideScreen) 860.dp else 640.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    // 1. Material You Hero Card
+                    // 1. Compact Material You Hero Banner
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(152.dp)
+                            .height(112.dp)
                             .clip(MaterialTheme.shapes.large)
                     ) {
                         Image(
@@ -239,22 +237,22 @@ fun HomeScreen(
                         Column(
                             modifier = Modifier
                                 .align(Alignment.BottomStart)
-                                .padding(18.dp)
+                                .padding(horizontal = 16.dp, vertical = 14.dp)
                         ) {
                             Text(
                                 text = "MicroRC",
-                                style = MaterialTheme.typography.displayLarge,
+                                style = MaterialTheme.typography.headlineLarge,
                                 color = Color.White
                             )
                             Text(
                                 text = "Top-down RC racing & arenas",
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = MaterialTheme.typography.bodySmall,
                                 color = Color.White.copy(alpha = 0.84f)
                             )
                         }
                     }
 
-                    // 1b. Non-overlapping Inline GitHub Update Hint Card (only shown when newer GitHub release is available)
+                    // 1b. Inline GitHub Update Hint Card (only shown when newer GitHub release is available)
                     if (availableUpdate != null) {
                         HomeUpdateHintCard(
                             update = availableUpdate,
@@ -263,143 +261,7 @@ fun HomeScreen(
                         )
                     }
 
-                    // 2. Play Streak Counter (with 5-day milestone welcome animation) + Overall Friends Ranking & Standings Overview
-                    HomeMomentumAndStandingsCard(
-                        playStreak = playStreak,
-                        isSignedIn = isSignedIn,
-                        friendsCount = friendsCount,
-                        localRecordsCount = localRecordsCount,
-                        standings = friendStandings,
-                        onlineAccent = onlineAccent,
-                        onOpenFriends = onOpenFriends,
-                        onOpenLeaderboards = onOpenLeaderboards,
-                        onOpenStandingsBoard = onOpenStandingsBoard
-                    )
-
-                    // 3. Gameplay Mode Switcher: Online (Standard Default) vs Optional Offline (Wi-Fi)
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "GAMEPLAY MODE",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = if (modeScope == HomeModeScope.ONLINE) {
-                                    "Online standard • Switch for local Wi-Fi"
-                                } else {
-                                    "Optional offline & local Wi-Fi mode"
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        SingleChoiceSegmentedButtonRow(
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            HomeModeScope.entries.forEachIndexed { index, scopeOption ->
-                                val icon = when (scopeOption) {
-                                    HomeModeScope.ONLINE -> Icons.Default.Public
-                                    HomeModeScope.OFFLINE -> Icons.Default.Wifi
-                                }
-                                SegmentedButton(
-                                    selected = modeScope == scopeOption,
-                                    onClick = { modeScope = scopeOption },
-                                    shape = SegmentedButtonDefaults.itemShape(
-                                        index = index,
-                                        count = HomeModeScope.entries.size
-                                    ),
-                                    icon = {
-                                        if (modeScope != scopeOption) {
-                                            Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
-                                        } else {
-                                            SegmentedButtonDefaults.Icon(active = true)
-                                        }
-                                    },
-                                    modifier = Modifier.testTag("home_scope_${scopeOption.name.lowercase()}")
-                                ) {
-                                    Text(
-                                        text = scopeOption.label,
-                                        style = MaterialTheme.typography.labelLarge,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // 4. Primary Content Area:
-                    //    - Standard Mode (Online):
-                    //        A) Challenges & Rankings (Daily Challenge, Individual Tracks, Rankings — most used)
-                    //        B) Live Online Gameplay (Live Lobbies & Crew Invites — clearly distinguished)
-                    //    - Optional Mode (Offline / Wi-Fi): Local Wi-Fi Host/Join, Hybrid Tour & Bot Practice
-                    if (modeScope == HomeModeScope.ONLINE) {
-                        if (isWideScreen) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                verticalAlignment = Alignment.Top
-                            ) {
-                                ChallengesAndRankingsSection(
-                                    modifier = Modifier.weight(1.1f),
-                                    onOpenDailyChallenge = onOpenDailyChallenge,
-                                    onOpenIndividualTracks = onOpenIndividualTracks,
-                                    onPureSoloRace = onPureSoloRace,
-                                    onOpenLeaderboards = onOpenLeaderboards,
-                                    dailyChallengeTitle = dailyChallengeTitle,
-                                    dailyChallengeSubtitle = dailyChallengeSubtitle,
-                                    dailyChallengeResetLabel = dailyChallengeResetLabel,
-                                    dailyBestTimeMs = dailyBestTimeMs
-                                )
-                                LiveOnlineGameplaySection(
-                                    modifier = Modifier.weight(0.9f),
-                                    onOpenOnlinePlay = onOpenOnlinePlay,
-                                    onOpenFriends = onOpenFriends,
-                                    onlineFriendsCount = onlineFriendsCount,
-                                    pendingRequestsCount = pendingRequestsCount,
-                                    onlineAccent = onlineAccent
-                                )
-                            }
-                        } else {
-                            ChallengesAndRankingsSection(
-                                modifier = Modifier.fillMaxWidth(),
-                                onOpenDailyChallenge = onOpenDailyChallenge,
-                                onOpenIndividualTracks = onOpenIndividualTracks,
-                                onPureSoloRace = onPureSoloRace,
-                                onOpenLeaderboards = onOpenLeaderboards,
-                                dailyChallengeTitle = dailyChallengeTitle,
-                                dailyChallengeSubtitle = dailyChallengeSubtitle,
-                                dailyChallengeResetLabel = dailyChallengeResetLabel,
-                                dailyBestTimeMs = dailyBestTimeMs
-                            )
-                            LiveOnlineGameplaySection(
-                                modifier = Modifier.fillMaxWidth(),
-                                onOpenOnlinePlay = onOpenOnlinePlay,
-                                onOpenFriends = onOpenFriends,
-                                onlineFriendsCount = onlineFriendsCount,
-                                pendingRequestsCount = pendingRequestsCount,
-                                onlineAccent = onlineAccent
-                            )
-                        }
-                    } else {
-                        AnimatedVisibility(visible = modeScope == HomeModeScope.OFFLINE) {
-                            OfflineEntrySection(
-                                modifier = Modifier.fillMaxWidth(),
-                                onHostRace = onHostRace,
-                                onJoinRace = onJoinRace,
-                                onPureSoloRace = onPureSoloRace,
-                                onSoloRace = onSoloRace,
-                                onOpenHybridSetup = onOpenHybridSetup
-                            )
-                        }
-                    }
-
-                    // 5. Driver Tag + Active RC Car Garage Card
+                    // 2. Driver Tag + Active RC Car Card (compact at top)
                     ElevatedCard(
                         colors = CardDefaults.elevatedCardColors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -409,9 +271,8 @@ fun HomeScreen(
                     ) {
                         Column(
                             modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            // Driver Callsign & Steering Control Chip Row
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
@@ -428,14 +289,14 @@ fun HomeScreen(
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .size(38.dp)
+                                            .size(36.dp)
                                             .clip(CircleShape)
                                             .background(driverBadgeBg),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
                                             text = profile.name.take(1).uppercase(),
-                                            style = MaterialTheme.typography.titleLarge,
+                                            style = MaterialTheme.typography.titleMedium,
                                             color = driverBadgeFg
                                         )
                                     }
@@ -499,14 +360,14 @@ fun HomeScreen(
 
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
 
-                            // Active Car Turntable + Stats + Garage Action
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(84.dp)
+                                        .size(64.dp)
                                         .clip(MaterialTheme.shapes.medium)
                                         .background(MaterialTheme.colorScheme.surfaceContainerHigh),
                                     contentAlignment = Alignment.Center
@@ -519,25 +380,18 @@ fun HomeScreen(
                                             carType = profile.carType,
                                             primaryColor = Color(profile.primaryColorArgb),
                                             accentColor = Color(profile.accentColorArgb),
-                                            scale = 1.35f
+                                            scale = 1.05f
                                         )
                                     }
                                 }
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
+                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                     Text(
                                         text = profile.carType.displayName,
-                                        style = MaterialTheme.typography.titleLarge,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = profile.carType.tagline,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                    Spacer(modifier = Modifier.height(8.dp))
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                         MiniStatBadge(
                                             label = "SPD ${profile.carType.topSpeedStat}",
@@ -556,20 +410,128 @@ fun HomeScreen(
                                         )
                                     }
                                 }
+                                FilledTonalButton(
+                                    onClick = onOpenGarage,
+                                    shape = MaterialTheme.shapes.medium,
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .testTag("open_garage_button")
+                                ) {
+                                    Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Garage", style = MaterialTheme.typography.labelLarge)
+                                }
                             }
+                        }
+                    }
 
-                            FilledTonalButton(
-                                onClick = onOpenGarage,
-                                shape = MaterialTheme.shapes.medium,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(48.dp)
-                                    .testTag("open_garage_button")
-                            ) {
-                                Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("Garage, Colors & Controls")
+                    // 3. Play Streak Counter (with 5-day milestone welcome animation) + Overall Friends Ranking & Standings Overview
+                    HomeMomentumAndStandingsCard(
+                        playStreak = playStreak,
+                        isSignedIn = isSignedIn,
+                        friendsCount = friendsCount,
+                        localRecordsCount = localRecordsCount,
+                        standings = friendStandings,
+                        onlineAccent = onlineAccent,
+                        onOpenFriends = onOpenFriends,
+                        onOpenStandingsBoard = onOpenStandingsBoard
+                    )
+
+                    // 4. Gameplay Mode Switcher: Online (Standard) vs Optional Offline (Wi-Fi)
+                    SingleChoiceSegmentedButtonRow(
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        HomeModeScope.entries.forEachIndexed { index, scopeOption ->
+                            val icon = when (scopeOption) {
+                                HomeModeScope.ONLINE -> Icons.Default.Public
+                                HomeModeScope.OFFLINE -> Icons.Default.Wifi
                             }
+                            SegmentedButton(
+                                selected = modeScope == scopeOption,
+                                onClick = { modeScope = scopeOption },
+                                shape = SegmentedButtonDefaults.itemShape(
+                                    index = index,
+                                    count = HomeModeScope.entries.size
+                                ),
+                                icon = {
+                                    if (modeScope != scopeOption) {
+                                        Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    } else {
+                                        SegmentedButtonDefaults.Icon(active = true)
+                                    }
+                                },
+                                modifier = Modifier.testTag("home_scope_${scopeOption.name.lowercase()}")
+                            ) {
+                                Text(
+                                    text = scopeOption.label,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+
+                    // 5. Mode Content:
+                    //    - Standard (Online): Challenges & Rankings + Live Online Multiplayer
+                    //    - Optional (Offline / Wi-Fi): Local Wi-Fi Host/Join, Hybrid Tour & Bot Practice
+                    if (modeScope == HomeModeScope.ONLINE) {
+                        if (isWideScreen) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                verticalAlignment = Alignment.Top
+                            ) {
+                                ChallengesAndRankingsSection(
+                                    modifier = Modifier.weight(1.1f),
+                                    onOpenDailyChallenge = onOpenDailyChallenge,
+                                    onPureSoloRace = onPureSoloRace,
+                                    onOpenLeaderboards = onOpenLeaderboards,
+                                    dailyChallengeTitle = dailyChallengeTitle,
+                                    dailyChallengeSubtitle = dailyChallengeSubtitle,
+                                    dailyChallengeResetLabel = dailyChallengeResetLabel,
+                                    dailyBestTimeMs = dailyBestTimeMs
+                                )
+                                LiveOnlineGameplaySection(
+                                    modifier = Modifier.weight(0.9f),
+                                    onOpenOnlinePlay = onOpenOnlinePlay,
+                                    onOpenFriends = onOpenFriends,
+                                    onlineFriendsCount = onlineFriendsCount,
+                                    pendingRequestsCount = pendingRequestsCount,
+                                    onlineAccent = onlineAccent
+                                )
+                            }
+                        } else {
+                            ChallengesAndRankingsSection(
+                                modifier = Modifier.fillMaxWidth(),
+                                onOpenDailyChallenge = onOpenDailyChallenge,
+                                onPureSoloRace = onPureSoloRace,
+                                onOpenLeaderboards = onOpenLeaderboards,
+                                dailyChallengeTitle = dailyChallengeTitle,
+                                dailyChallengeSubtitle = dailyChallengeSubtitle,
+                                dailyChallengeResetLabel = dailyChallengeResetLabel,
+                                dailyBestTimeMs = dailyBestTimeMs
+                            )
+                            LiveOnlineGameplaySection(
+                                modifier = Modifier.fillMaxWidth(),
+                                onOpenOnlinePlay = onOpenOnlinePlay,
+                                onOpenFriends = onOpenFriends,
+                                onlineFriendsCount = onlineFriendsCount,
+                                pendingRequestsCount = pendingRequestsCount,
+                                onlineAccent = onlineAccent
+                            )
+                        }
+                    } else {
+                        AnimatedVisibility(visible = modeScope == HomeModeScope.OFFLINE) {
+                            OfflineEntrySection(
+                                modifier = Modifier.fillMaxWidth(),
+                                onHostRace = onHostRace,
+                                onJoinRace = onJoinRace,
+                                onPureSoloRace = onPureSoloRace,
+                                onSoloRace = onSoloRace,
+                                onOpenHybridSetup = onOpenHybridSetup
+                            )
                         }
                     }
 
@@ -615,7 +577,6 @@ fun HomeScreen(
 private fun ChallengesAndRankingsSection(
     modifier: Modifier = Modifier,
     onOpenDailyChallenge: () -> Unit,
-    onOpenIndividualTracks: () -> Unit,
     onPureSoloRace: () -> Unit,
     onOpenLeaderboards: () -> Unit,
     dailyChallengeTitle: String,
@@ -634,7 +595,6 @@ private fun ChallengesAndRankingsSection(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Section Header: Clearly marks Asynchronous Solo/Daily Challenges & Rankings
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -643,45 +603,25 @@ private fun ChallengesAndRankingsSection(
                 Surface(
                     color = MaterialTheme.colorScheme.tertiaryContainer,
                     shape = MaterialTheme.shapes.small,
-                    modifier = Modifier.size(38.dp)
+                    modifier = Modifier.size(36.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Default.EmojiEvents,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "CHALLENGES & RANKINGS",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Daily circuits, individual tracks & leaderboards",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Surface(
-                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                    shape = RoundedCornerShape(50)
-                ) {
-                    Text(
-                        text = "TOP HUB",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                    )
-                }
+                Text(
+                    text = "CHALLENGES & RANKINGS",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             }
 
-            // 1. Daily Challenge Card (Primary Featured Challenge)
+            // 1. Daily Challenge Card
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.tertiaryContainer
@@ -703,7 +643,7 @@ private fun ChallengesAndRankingsSection(
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(42.dp)
+                            .size(40.dp)
                             .clip(MaterialTheme.shapes.small)
                             .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.18f)),
                         contentAlignment = Alignment.Center
@@ -712,7 +652,7 @@ private fun ChallengesAndRankingsSection(
                             Icons.Default.Today,
                             contentDescription = "Daily Challenge",
                             tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                            modifier = Modifier.size(22.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                     Column(modifier = Modifier.weight(1f)) {
@@ -767,13 +707,13 @@ private fun ChallengesAndRankingsSection(
                 }
             }
 
-            // 2. Individual Track Trials & Track Rankings
+            // 2. Consolidated Track Leaderboards & Solo Time Trial
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 FilledTonalButton(
-                    onClick = onOpenIndividualTracks,
+                    onClick = onOpenLeaderboards,
                     shape = MaterialTheme.shapes.medium,
                     colors = ButtonDefaults.filledTonalButtonColors(
                         containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -782,14 +722,14 @@ private fun ChallengesAndRankingsSection(
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .height(60.dp)
-                        .testTag("home_individual_tracks_button")
+                        .height(58.dp)
+                        .testTag("leaderboards_button")
                 ) {
-                    Icon(Icons.Default.Flag, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Leaderboard, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(7.dp))
                     Column {
-                        Text("Individual Tracks", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("Records & ghosts", style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("Tracks & Ghosts", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("Rankings & records", style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
 
@@ -799,7 +739,7 @@ private fun ChallengesAndRankingsSection(
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .height(60.dp)
+                        .height(58.dp)
                         .testTag("pure_solo_button")
                 ) {
                     Icon(Icons.Default.Timer, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -809,20 +749,6 @@ private fun ChallengesAndRankingsSection(
                         Text("Quick track run", style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
-            }
-
-            // 3. Full Leaderboards & Friend Rankings CTA
-            OutlinedButton(
-                onClick = onOpenLeaderboards,
-                shape = MaterialTheme.shapes.medium,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .testTag("leaderboards_button")
-            ) {
-                Icon(Icons.Default.Leaderboard, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("All Rankings, Records & Ghosts", style = MaterialTheme.typography.labelLarge, maxLines = 1)
             }
         }
     }
@@ -849,7 +775,6 @@ private fun LiveOnlineGameplaySection(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Section Header: Clearly separates Live Multi-Player Lobbies from Solo/Daily Challenges
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -858,45 +783,24 @@ private fun LiveOnlineGameplaySection(
                 Surface(
                     color = MaterialTheme.colorScheme.secondaryContainer,
                     shape = MaterialTheme.shapes.small,
-                    modifier = Modifier.size(38.dp)
+                    modifier = Modifier.size(36.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Default.Groups,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "LIVE ONLINE MULTIPLAYER",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Real-time 2–4P lobbies, room codes & crew invites",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Surface(
-                    color = onlineAccent.copy(alpha = 0.16f),
-                    shape = RoundedCornerShape(50)
-                ) {
-                    Text(
-                        text = "LIVE",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = onlineAccent,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                    )
-                }
+                Text(
+                    text = "LIVE ONLINE MULTIPLAYER",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             }
 
-            // Live Online Lobby Entry (2-4P)
             Button(
                 onClick = onOpenOnlinePlay,
                 colors = ButtonDefaults.buttonColors(
@@ -906,7 +810,7 @@ private fun LiveOnlineGameplaySection(
                 shape = MaterialTheme.shapes.medium,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(62.dp)
+                    .height(58.dp)
                     .testTag("online_play_button")
             ) {
                 Row(
@@ -918,11 +822,11 @@ private fun LiveOnlineGameplaySection(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(22.dp))
+                        Icon(Icons.Default.Public, contentDescription = null, modifier = Modifier.size(20.dp))
                         Column {
                             Text("Online Lobbies (2–4P)", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                text = "Host or join live rooms & enter room codes",
+                                text = "Host or join live rooms",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSecondary.copy(alpha = 0.85f)
                             )
@@ -936,13 +840,12 @@ private fun LiveOnlineGameplaySection(
                 }
             }
 
-            // Crew, Friends & Live Invites
             FilledTonalButton(
                 onClick = onOpenFriends,
                 shape = MaterialTheme.shapes.medium,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(54.dp)
+                    .height(52.dp)
                     .testTag("home_friends_button")
             ) {
                 Row(
@@ -962,7 +865,7 @@ private fun LiveOnlineGameplaySection(
                                 text = when {
                                     onlineFriendsCount > 0 -> "$onlineFriendsCount online • Invite to live lobby"
                                     pendingRequestsCount > 0 -> "$pendingRequestsCount friend request waiting"
-                                    else -> "Friend codes, online status & live alerts"
+                                    else -> "Friend codes & crew status"
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 maxLines = 1,
@@ -1013,7 +916,6 @@ private fun OfflineEntrySection(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Section Header
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1022,42 +924,22 @@ private fun OfflineEntrySection(
                 Surface(
                     color = MaterialTheme.colorScheme.primaryContainer,
                     shape = MaterialTheme.shapes.small,
-                    modifier = Modifier.size(38.dp)
+                    modifier = Modifier.size(36.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Default.Wifi,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "OFFLINE (WI-FI) GAMEPLAY",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Optional local Wi-Fi lobbies, Hybrid Tour & bot practice",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    shape = RoundedCornerShape(50)
-                ) {
-                    Text(
-                        text = "OPTIONAL",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                    )
-                }
+                Text(
+                    text = "OFFLINE (WI-FI) GAMEPLAY",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
             }
 
             // Wi-Fi Lobby Entry Points
@@ -1286,7 +1168,6 @@ private fun HomeMomentumAndStandingsCard(
     standings: FriendStandingsSummary?,
     onlineAccent: Color,
     onOpenFriends: () -> Unit,
-    onOpenLeaderboards: () -> Unit,
     onOpenStandingsBoard: (trackKey: String, gameMode: GameMode, isDaily: Boolean) -> Unit
 ) {
     val goldAccent = adaptiveGoldColor()
@@ -1429,13 +1310,12 @@ private fun HomeMomentumAndStandingsCard(
                 }
             }
 
-            // Top summary row: Play Streak Counter + Overall All-Friends Rank
+            // Top summary row: Play Streak Counter + Informational Overall All-Friends Rank
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Streak tile
                 Surface(
                     color = if (playStreak.activeToday) {
                         MaterialTheme.colorScheme.tertiaryContainer
@@ -1481,7 +1361,7 @@ private fun HomeMomentumAndStandingsCard(
                                 text = when {
                                     playStreak.activeToday -> "Active today • Best ${playStreak.bestStreakDays}d"
                                     streakActive -> "Race today! • Best ${playStreak.bestStreakDays}d"
-                                    playStreak.bestStreakDays > 0 -> "Best ${playStreak.bestStreakDays}d • Race to start"
+                                    playStreak.bestStreakDays > 0 -> "Best ${playStreak.bestStreakDays}d"
                                     else -> "Finish any race today"
                                 },
                                 style = MaterialTheme.typography.labelSmall,
@@ -1493,7 +1373,8 @@ private fun HomeMomentumAndStandingsCard(
                     }
                 }
 
-                // Overall Ranking Across All Friends tile
+                // Overall Friends Rank summary badge (informational when signed in with friends)
+                val needsFriendSetup = !isSignedIn || friendsCount == 0
                 Surface(
                     color = if (summary.myCrewRank == 1 && summary.leadingBoardsCount > 0) {
                         MaterialTheme.colorScheme.secondaryContainer
@@ -1504,13 +1385,9 @@ private fun HomeMomentumAndStandingsCard(
                     modifier = Modifier
                         .weight(1f)
                         .clip(MaterialTheme.shapes.medium)
-                        .clickable {
-                            if (isSignedIn && friendsCount > 0) {
-                                onOpenLeaderboards()
-                            } else {
-                                onOpenFriends()
-                            }
-                        }
+                        .then(
+                            if (needsFriendSetup) Modifier.clickable(onClick = onOpenFriends) else Modifier
+                        )
                         .testTag("home_standings_rank_badge")
                 ) {
                     val rankFg = if (summary.myCrewRank == 1 && summary.leadingBoardsCount > 0) {
@@ -1579,7 +1456,7 @@ private fun HomeMomentumAndStandingsCard(
                 }
             }
 
-            // Overall Ranking Across All Friends (includes every friend in the roster)
+            // Overall Ranking Across All Friends
             if (isSignedIn && friendsCount > 0 && summary.crewLeaderboard.isNotEmpty()) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
@@ -1642,26 +1519,15 @@ private fun HomeMomentumAndStandingsCard(
                 }
             }
 
-            // Today's Daily & Track-by-Track Standings List (yesterday's Daily GP already filtered out)
+            // Today's Daily & Track-by-Track Standings List
             if (isSignedIn && friendsCount > 0 && summary.highlightBoards.isNotEmpty()) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "TRACK & TODAY'S DAILY TIMES",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "Tap track to challenge",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
+                Text(
+                    text = "TRACK & TODAY'S DAILY TIMES",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
                 Column(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -1679,18 +1545,17 @@ private fun HomeMomentumAndStandingsCard(
                         )
                     }
                 }
-            } else if (!isSignedIn || friendsCount == 0 || summary.highlightBoards.isEmpty()) {
-                // Helpful compact footer action for signed-out / no-friends / zero-records states
+            } else if (!isSignedIn || friendsCount == 0) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = when {
-                            !isSignedIn -> "Sign in with Google to track head-to-head times & overall friend rankings."
-                            friendsCount == 0 -> "Add friends in Crew to unlock overall & track rankings."
-                            else -> "Set a track or Today's Daily GP time to start ranking against friends."
+                        text = if (!isSignedIn) {
+                            "Sign in to rank your times against friends."
+                        } else {
+                            "Add friends to unlock overall standings."
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1700,17 +1565,13 @@ private fun HomeMomentumAndStandingsCard(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     TextButton(
-                        onClick = if (!isSignedIn || friendsCount == 0) onOpenFriends else onOpenLeaderboards,
+                        onClick = onOpenFriends,
                         modifier = Modifier
                             .defaultMinSize(minHeight = 48.dp)
                             .testTag("home_standings_cta_button")
                     ) {
                         Text(
-                            text = when {
-                                !isSignedIn -> "Sign In"
-                                friendsCount == 0 -> "Add Friends"
-                                else -> "Records"
-                            },
+                            text = if (!isSignedIn) "Sign In" else "Add Friends",
                             style = MaterialTheme.typography.labelLarge
                         )
                     }

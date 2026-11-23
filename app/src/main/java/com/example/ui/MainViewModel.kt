@@ -27,6 +27,7 @@ import com.example.model.RaceSnapshot
 import com.example.model.RcCarType
 import com.example.model.RematchCountdownState
 import com.example.model.StuntVariant
+import com.example.model.ThemeSettings
 import com.example.model.TrackDefinition
 import com.example.model.TrackId
 import com.example.model.WinCondition
@@ -70,6 +71,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = AudioSettings()
+    )
+
+    val themeSettings: StateFlow<ThemeSettings> = prefsRepo.themeSettingsFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = ThemeSettings()
     )
 
     val customTracks: StateFlow<List<CustomTrackData>> = prefsRepo.customTracksFlow.stateIn(
@@ -241,10 +248,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun updateRaceRules(newRules: RaceRulesSettings) {
+        val standardized = newRules.copy(autoAccelerate = true, hardTrackBoundary = true)
         viewModelScope.launch {
-            prefsRepo.updateRaceRules(newRules)
+            prefsRepo.updateRaceRules(standardized)
             if (sessionRole.value == SessionRole.Host || sessionRole.value == SessionRole.Solo) {
-                raceManager.updateRules(newRules)
+                raceManager.updateRules(standardized)
             }
         }
     }
@@ -254,6 +262,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             prefsRepo.updateAudioSettings(newAudio)
             audioEngine.updateAudioSettings(newAudio)
             hapticController.enabled = newAudio.hapticsEnabled
+        }
+    }
+
+    fun updateThemeSettings(newTheme: ThemeSettings) {
+        viewModelScope.launch {
+            prefsRepo.updateThemeSettings(newTheme)
         }
     }
 

@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import com.example.model.AppThemeMode
 import com.example.model.AudioSettings
 import com.example.model.CarSpeedPreset
 import com.example.model.ControlMode
@@ -20,6 +21,7 @@ import com.example.model.PlayerProfile
 import com.example.model.RaceRulesSettings
 import com.example.model.RcCarType
 import com.example.model.RcColorPresets
+import com.example.model.ThemeSettings
 import com.example.model.WinCondition
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
@@ -87,6 +89,8 @@ class PreferencesRepository(context: Context) {
         val AUDIO_MUSIC_ENABLED = booleanPreferencesKey("audio_music_enabled")
         val AUDIO_SFX_ENABLED = booleanPreferencesKey("audio_sfx_enabled")
         val AUDIO_HAPTICS_ENABLED = booleanPreferencesKey("audio_haptics_enabled")
+        val THEME_MODE = stringPreferencesKey("theme_mode")
+        val DYNAMIC_COLOR_ENABLED = booleanPreferencesKey("dynamic_color_enabled")
         val CUSTOM_TRACKS_JSON = stringPreferencesKey("custom_tracks_json")
         val LOCAL_LEADERBOARD_JSON = stringPreferencesKey("local_leaderboard_json")
         val LAST_NOTIFIED_DAILY_KEY = stringPreferencesKey("last_notified_daily_key")
@@ -111,7 +115,6 @@ class PreferencesRepository(context: Context) {
         }.getOrDefault(ControlMode.TOUCH_OVERLAY)
         val sensitivity = prefs[Keys.TILT_SENSITIVITY] ?: 1.25f
         val sliderSensitivity = (prefs[Keys.SLIDER_SENSITIVITY] ?: 1.45f).coerceIn(0.7f, 2.6f)
-        val autoGas = prefs[Keys.AUTO_GAS_TILT] ?: false
 
         PlayerProfile(
             playerId = id,
@@ -121,7 +124,7 @@ class PreferencesRepository(context: Context) {
             accentColorArgb = accent,
             controlMode = controlMode,
             tiltSensitivity = sensitivity,
-            autoGasInTilt = autoGas,
+            autoGasInTilt = true,
             sliderSensitivity = sliderSensitivity
         )
     }
@@ -138,8 +141,8 @@ class PreferencesRepository(context: Context) {
         }.getOrDefault(CarSpeedPreset.FAST)
         RaceRulesSettings(
             gameMode = mode.name,
-            autoAccelerate = prefs[Keys.RULE_AUTO_ACCEL] ?: true,
-            hardTrackBoundary = prefs[Keys.RULE_HARD_BOUNDARY] ?: true,
+            autoAccelerate = true,
+            hardTrackBoundary = true,
             randomJumpsEnabled = prefs[Keys.RULE_RANDOM_JUMPS] ?: true,
             randomConditionsEnabled = prefs[Keys.RULE_RANDOM_CONDITIONS] ?: true,
             showPlayerNames = prefs[Keys.RULE_SHOW_PLAYER_NAMES] ?: true,
@@ -161,6 +164,16 @@ class PreferencesRepository(context: Context) {
             musicEnabled = prefs[Keys.AUDIO_MUSIC_ENABLED] ?: true,
             carSfxEnabled = prefs[Keys.AUDIO_SFX_ENABLED] ?: true,
             hapticsEnabled = prefs[Keys.AUDIO_HAPTICS_ENABLED] ?: true
+        )
+    }
+
+    val themeSettingsFlow: Flow<ThemeSettings> = dataStore.data.map { prefs ->
+        val mode = runCatching {
+            AppThemeMode.valueOf(prefs[Keys.THEME_MODE] ?: AppThemeMode.SYSTEM.name)
+        }.getOrDefault(AppThemeMode.SYSTEM)
+        ThemeSettings(
+            mode = mode,
+            dynamicColor = prefs[Keys.DYNAMIC_COLOR_ENABLED] ?: true
         )
     }
 
@@ -286,7 +299,7 @@ class PreferencesRepository(context: Context) {
         dataStore.edit {
             it[Keys.CONTROL_MODE] = controlMode.name
             it[Keys.TILT_SENSITIVITY] = tiltSensitivity.coerceIn(0.6f, 2.2f)
-            it[Keys.AUTO_GAS_TILT] = autoGasInTilt
+            it[Keys.AUTO_GAS_TILT] = true
             it[Keys.SLIDER_SENSITIVITY] = sliderSensitivity.coerceIn(0.7f, 2.6f)
         }
     }
@@ -294,8 +307,8 @@ class PreferencesRepository(context: Context) {
     suspend fun updateRaceRules(rules: RaceRulesSettings) {
         dataStore.edit {
             it[Keys.RULE_GAME_MODE] = rules.gameMode
-            it[Keys.RULE_AUTO_ACCEL] = rules.autoAccelerate
-            it[Keys.RULE_HARD_BOUNDARY] = rules.hardTrackBoundary
+            it[Keys.RULE_AUTO_ACCEL] = true
+            it[Keys.RULE_HARD_BOUNDARY] = true
             it[Keys.RULE_RANDOM_JUMPS] = rules.randomJumpsEnabled
             it[Keys.RULE_RANDOM_CONDITIONS] = rules.randomConditionsEnabled
             it[Keys.RULE_SHOW_PLAYER_NAMES] = rules.showPlayerNames
@@ -317,6 +330,13 @@ class PreferencesRepository(context: Context) {
             it[Keys.AUDIO_MUSIC_ENABLED] = audio.musicEnabled
             it[Keys.AUDIO_SFX_ENABLED] = audio.carSfxEnabled
             it[Keys.AUDIO_HAPTICS_ENABLED] = audio.hapticsEnabled
+        }
+    }
+
+    suspend fun updateThemeSettings(settings: ThemeSettings) {
+        dataStore.edit {
+            it[Keys.THEME_MODE] = settings.mode.name
+            it[Keys.DYNAMIC_COLOR_ENABLED] = settings.dynamicColor
         }
     }
 

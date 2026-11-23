@@ -341,4 +341,23 @@ class StreakAndStandingsUnitTest {
         assertNotNull(stuntsItem)
         assertEquals(300, stuntsItem!!.deltaVsTopFriendScore)
     }
+
+    @Test
+    fun themeSettingsAndStandardGameplayDefaults_areConfiguredCorrectly() {
+        val defaultTheme = com.example.model.ThemeSettings()
+        assertEquals(com.example.model.AppThemeMode.SYSTEM, defaultTheme.mode)
+        assertTrue(defaultTheme.dynamicColor)
+        assertEquals(
+            listOf(
+                com.example.model.AppThemeMode.SYSTEM,
+                com.example.model.AppThemeMode.LIGHT,
+                com.example.model.AppThemeMode.DARK
+            ),
+            com.example.model.AppThemeMode.entries
+        )
+
+        val defaultRules = com.example.model.RaceRulesSettings()
+        assertTrue(defaultRules.autoAccelerate)
+        assertTrue(defaultRules.hardTrackBoundary)
+    }
 }

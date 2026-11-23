@@ -415,12 +415,6 @@ fun LobbyScreen(
                                 onOpenSettings
                             )
                         }
-                        if (activeRules.autoAccelerate) {
-                            item { LobbyRuleBadge("AUTO-GAS", MaterialTheme.colorScheme.tertiary, onOpenSettings) }
-                        }
-                        if (activeRules.hardTrackBoundary) {
-                            item { LobbyRuleBadge("BOUNCE WALLS", MaterialTheme.colorScheme.primary, onOpenSettings) }
-                        }
                         if (activeRules.randomJumpsEnabled && !isStuntsMode) {
                             item { LobbyRuleBadge("JUMPS", MaterialTheme.colorScheme.secondary, onOpenSettings) }
                         }

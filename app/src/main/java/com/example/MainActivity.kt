@@ -1,14 +1,22 @@
 package com.example
 
 import android.content.Intent
+import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.model.AppThemeMode
+import com.example.ui.MainViewModel
 import com.example.ui.MicroRCApp
 import com.example.ui.auth.GoogleAuthManager
 import com.example.ui.theme.MicroRCTheme
@@ -38,8 +46,32 @@ class MainActivity : ComponentActivity() {
         handleIncomingIntent(intent)
         enableEdgeToEdge()
         setContent {
-            MicroRCTheme {
+            val viewModel: MainViewModel = viewModel()
+            val themeSettings by viewModel.themeSettings.collectAsState()
+            val darkTheme = when (themeSettings.mode) {
+                AppThemeMode.SYSTEM -> isSystemInDarkTheme()
+                AppThemeMode.DARK -> true
+                AppThemeMode.LIGHT -> false
+            }
+
+            LaunchedEffect(darkTheme) {
+                val barStyle = if (darkTheme) {
+                    SystemBarStyle.dark(AndroidColor.TRANSPARENT)
+                } else {
+                    SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT)
+                }
+                enableEdgeToEdge(
+                    statusBarStyle = barStyle,
+                    navigationBarStyle = barStyle
+                )
+            }
+
+            MicroRCTheme(
+                darkTheme = darkTheme,
+                dynamicColor = themeSettings.dynamicColor
+            ) {
                 MicroRCApp(
+                    viewModel = viewModel,
                     pendingInvite = pendingInviteState,
                     onConsumePendingInvite = { pendingInviteState = null },
                     pendingDailyRoute = pendingDailyRouteState,

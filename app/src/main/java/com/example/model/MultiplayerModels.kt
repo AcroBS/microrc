@@ -159,6 +159,17 @@ data class AudioSettings(
     val hapticsEnabled: Boolean = true
 )
 
+enum class AppThemeMode(val label: String) {
+    SYSTEM("System"),
+    LIGHT("Light"),
+    DARK("Dark")
+}
+
+data class ThemeSettings(
+    val mode: AppThemeMode = AppThemeMode.SYSTEM,
+    val dynamicColor: Boolean = true
+)
+
 @JsonClass(generateAdapter = true)
 data class DiscoveredLobby(
     val hostId: String,

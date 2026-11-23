@@ -168,7 +168,6 @@ fun RaceScreen(
     var steerLeftPressed by remember { mutableStateOf(false) }
     var steerRightPressed by remember { mutableStateOf(false) }
     var sliderSteer by remember { mutableFloatStateOf(0f) }
-    var gasPressed by remember { mutableStateOf(false) }
     var brakePressed by remember { mutableStateOf(false) }
 
     val tiltSteer by tiltController.steerValue.collectAsState()
@@ -206,12 +205,9 @@ fun RaceScreen(
 
     LaunchedEffect(
         profile.controlMode,
-        profile.autoGasInTilt,
-        rules.autoAccelerate,
         steerLeftPressed,
         steerRightPressed,
         sliderSteer,
-        gasPressed,
         brakePressed,
         tiltSteer,
         isLocalActiveStuntDriver,
@@ -226,13 +222,7 @@ fun RaceScreen(
             ControlMode.SPRING_SLIDER -> sliderSteer
             ControlMode.TOUCH_OVERLAY -> (if (steerRightPressed) 1f else 0f) - (if (steerLeftPressed) 1f else 0f)
         }
-        val throttle = when {
-            brakePressed -> -1f
-            rules.autoAccelerate -> 1f
-            gasPressed -> 1f
-            profile.controlMode == ControlMode.TILT_SENSOR && profile.autoGasInTilt -> 0.92f
-            else -> 0f
-        }
+        val throttle = if (brakePressed) -1f else 1f
         onUpdateControlInput(throttle, steer)
     }
 
@@ -433,7 +423,7 @@ fun RaceScreen(
                         hazards = snapshot?.hazards.orEmpty(),
                         racers = racersToDraw,
                         animTimeSec = animTimeSec,
-                        hardBoundary = rules.hardTrackBoundary,
+                        hardBoundary = true,
                         rainPuddles = snapshot?.rainPuddles.orEmpty(),
                         activeEvent = activeEvent,
                         showPlayerNames = rules.showPlayerNames,
@@ -461,7 +451,7 @@ fun RaceScreen(
                         hazards = snapshot?.hazards.orEmpty(),
                         racers = racersToDraw,
                         animTimeSec = animTimeSec,
-                        hardBoundary = rules.hardTrackBoundary,
+                        hardBoundary = true,
                         rainPuddles = snapshot?.rainPuddles.orEmpty(),
                         activeEvent = activeEvent,
                         showPlayerNames = rules.showPlayerNames,
@@ -1014,21 +1004,6 @@ fun RaceScreen(
                 horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally),
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                if (rules.autoAccelerate && isLocalActiveStuntDriver) {
-                    Surface(
-                        color = colorScheme.tertiaryContainer.copy(alpha = 0.88f),
-                        shape = RoundedCornerShape(50),
-                        border = BorderStroke(1.dp, tertiaryAccent.copy(alpha = 0.7f)),
-                        modifier = Modifier.testTag("auto_gas_badge")
-                    ) {
-                        Text(
-                            text = "AUTO GAS",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = colorScheme.onTertiaryContainer,
-                            modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp)
-                        )
-                    }
-                }
                 if (isArenaMode && arenaFlagToDraw?.carrierId == localRacer?.playerId) {
                     StatusChip("CARRYING FLAG!", goldAccent)
                 }
@@ -1366,47 +1341,17 @@ fun RaceScreen(
                         }
                     }
 
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (rules.autoAccelerate) {
-                            HoldControlPad(
-                                label = "BRAKE",
-                                icon = null,
-                                contentDesc = "Brake or Reverse",
-                                activeColor = errorAccent,
-                                onActiveColor = colorScheme.onError,
-                                modifier = Modifier
-                                    .size(width = 116.dp, height = controlHeight)
-                                    .testTag("brake_button"),
-                                onPressedChange = { brakePressed = it }
-                            )
-                        } else {
-                            HoldControlPad(
-                                label = "BRK",
-                                icon = null,
-                                contentDesc = "Brake or Reverse",
-                                activeColor = errorAccent,
-                                onActiveColor = colorScheme.onError,
-                                modifier = Modifier
-                                    .size(width = 68.dp, height = controlHeight)
-                                    .testTag("brake_button"),
-                                onPressedChange = { brakePressed = it }
-                            )
-                            HoldControlPad(
-                                label = if (profile.controlMode == ControlMode.TILT_SENSOR && profile.autoGasInTilt) "AUTO" else "GAS",
-                                icon = null,
-                                contentDesc = "Accelerate",
-                                activeColor = tertiaryAccent,
-                                onActiveColor = colorScheme.onTertiary,
-                                modifier = Modifier
-                                    .size(width = 88.dp, height = controlHeight)
-                                    .testTag("gas_button"),
-                                onPressedChange = { gasPressed = it }
-                            )
-                        }
-                    }
+                    HoldControlPad(
+                        label = "BRAKE",
+                        icon = null,
+                        contentDesc = "Brake or Reverse",
+                        activeColor = errorAccent,
+                        onActiveColor = colorScheme.onError,
+                        modifier = Modifier
+                            .size(width = 116.dp, height = controlHeight)
+                            .testTag("brake_button"),
+                        onPressedChange = { brakePressed = it }
+                    )
                 }
             }
             }
@@ -1435,7 +1380,7 @@ fun RaceScreen(
                                     onSwitchControlMode(
                                         mode,
                                         profile.tiltSensitivity,
-                                        profile.autoGasInTilt,
+                                        true,
                                         profile.sliderSensitivity
                                     )
                                 },
@@ -1474,7 +1419,7 @@ fun RaceScreen(
                                     onSwitchControlMode(
                                         profile.controlMode,
                                         profile.tiltSensitivity,
-                                        profile.autoGasInTilt,
+                                        true,
                                         newSens
                                     )
                                 },
@@ -1543,30 +1488,12 @@ fun RaceScreen(
                                     onSwitchControlMode(
                                         profile.controlMode,
                                         newTiltSens,
-                                        profile.autoGasInTilt,
+                                        true,
                                         profile.sliderSensitivity
                                     )
                                 },
                                 valueRange = 0.6f..2.2f,
                                 modifier = Modifier.testTag("pause_tilt_sensitivity")
-                            )
-                        }
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Auto-Gas in Tilt Mode", style = MaterialTheme.typography.bodyMedium)
-                            Switch(
-                                checked = profile.autoGasInTilt,
-                                onCheckedChange = {
-                                    onSwitchControlMode(
-                                        profile.controlMode,
-                                        profile.tiltSensitivity,
-                                        it,
-                                        profile.sliderSensitivity
-                                    )
-                                }
                             )
                         }
                         OutlinedButton(
