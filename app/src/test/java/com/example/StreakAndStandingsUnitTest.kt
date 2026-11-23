@@ -103,16 +103,28 @@ class StreakAndStandingsUnitTest {
         assertEquals(1, restarted.currentStreakDays)
         assertEquals(3, restarted.bestStreakDays)
         assertTrue(restarted.activeToday)
+
+        // 7. 5-day streak milestone triggers welcome animation at multiples of 5 (5, 10, 15, ...)
+        assertFalse(day1.isFiveDayMilestone)
+        assertFalse(day3.isFiveDayMilestone)
+        assertTrue(com.example.data.PlayStreakState(currentStreakDays = 5).isFiveDayMilestone)
+        assertFalse(com.example.data.PlayStreakState(currentStreakDays = 6).isFiveDayMilestone)
+        assertTrue(com.example.data.PlayStreakState(currentStreakDays = 10).isFiveDayMilestone)
+        assertFalse(com.example.data.PlayStreakState(currentStreakDays = 0).isFiveDayMilestone)
     }
 
     @Test
-    fun friendStandingsCalculator_mergesLocalAndCloudAndRanksCrew() {
+    fun friendStandingsCalculator_excludesYesterdaysDailyAndRanksAllFriendsOverall() {
         val myUid = "uid_me"
         val friendAlexUid = "uid_alex"
         val friendSamUid = "uid_sam"
+        val friendNovaUid = "uid_nova"
         val todayDate = "20261123"
+        val yesterdayDate = "20261122"
         val dailyTrackKey = DailyChallengeCatalog.trackIdForDate(todayDate)
         val dailyBoardKey = DailyChallengeCatalog.boardKeyForDate(todayDate)
+        val yesterdayTrackKey = DailyChallengeCatalog.trackIdForDate(yesterdayDate)
+        val yesterdayBoardKey = DailyChallengeCatalog.boardKeyForDate(yesterdayDate)
 
         val friends = listOf(
             FriendUiModel(
@@ -144,11 +156,47 @@ class StreakAndStandingsUnitTest {
                 activeRoomCode = "",
                 activeRoomName = "",
                 statusLabel = "Offline"
+            ),
+            FriendUiModel(
+                friendshipId = "f_nova",
+                friendUid = friendNovaUid,
+                displayName = "NovaRacer",
+                friendCode = "RCNOVA33",
+                carType = RcCarType.VOLT_BUGGY,
+                primaryColorArgb = 0xFF4CAF50,
+                accentColorArgb = 0xFFFFFFFF,
+                effectivelyOnline = false,
+                activityStatus = "OFFLINE",
+                activeRoomId = "",
+                activeRoomCode = "",
+                activeRoomName = "",
+                statusLabel = "Offline"
             )
         )
 
         val cloudEntries = listOf(
-            // Daily GP: Friend Alex = 42_000ms (1st), Me in cloud = 43_500ms (2nd, +1.50s)
+            // Yesterday's Daily GP MUST be excluded from overview & crew stats
+            LeaderboardEntryDoc(
+                id = "${friendSamUid}_$yesterdayBoardKey",
+                userId = friendSamUid,
+                driverName = "DriftSam",
+                gameMode = GameMode.RACE.name,
+                trackKey = yesterdayTrackKey,
+                boardKey = yesterdayBoardKey,
+                totalLaps = 3L,
+                bestRaceTimeMs = 39_000L
+            ),
+            LeaderboardEntryDoc(
+                id = "${myUid}_$yesterdayBoardKey",
+                userId = myUid,
+                driverName = "MeDriver",
+                gameMode = GameMode.RACE.name,
+                trackKey = yesterdayTrackKey,
+                boardKey = yesterdayBoardKey,
+                totalLaps = 3L,
+                bestRaceTimeMs = 45_000L
+            ),
+            // Today's Daily GP: Friend Alex = 42_000ms (1st), Me in cloud = 43_500ms (2nd, +1.50s)
             LeaderboardEntryDoc(
                 id = "${friendAlexUid}_$dailyBoardKey",
                 userId = friendAlexUid,
@@ -223,6 +271,18 @@ class StreakAndStandingsUnitTest {
         )
 
         val localRecords = listOf(
+            // Local PB from yesterday's daily must also be ignored
+            LocalLeaderboardRecord(
+                boardKey = yesterdayBoardKey,
+                gameMode = GameMode.RACE.name,
+                trackKey = yesterdayTrackKey,
+                totalLaps = 3,
+                driverName = "MeDriver",
+                carType = RcCarType.VOLT_BUGGY.name,
+                primaryColorArgb = 0xFFFF5722,
+                accentColorArgb = 0xFFFFD54F,
+                bestRaceTimeMs = 44_000L
+            ),
             LocalLeaderboardRecord(
                 boardKey = "RACE_GP_APEX_3L",
                 gameMode = GameMode.RACE.name,
@@ -243,18 +303,26 @@ class StreakAndStandingsUnitTest {
             cloudEntries = cloudEntries,
             localRecords = localRecords,
             todayDateKey = todayDate,
-            maxHighlights = 3
+            maxHighlights = 5
         )
 
-        // Me won GP_APEX (via faster local PB) & STUNTS_GAUNTLET (2 contested wins), trailed Daily GP (1)
+        // Yesterday's Daily GP is excluded -> never present in highlightBoards or chase counts
+        assertFalse(summary.highlightBoards.any { it.boardKey == yesterdayBoardKey || it.trackKey == yesterdayTrackKey })
+
+        // Me won GP_APEX (via faster local PB) & STUNTS_GAUNTLET (2 contested wins), trailed Today's Daily GP (1)
         assertEquals(2, summary.leadingBoardsCount)
         assertEquals(1, summary.trailingBoardsCount)
         assertEquals(1, summary.unchallengedFriendBoardsCount)
+
+        // Overall crew ranking covers ALL friends (self + 3 friends = 4, including NovaRacer with 0 entries)
+        assertEquals(4, summary.totalCrewCount)
         assertEquals(3, summary.crewSizeWithEntries)
         assertEquals(1, summary.myCrewRank)
+        assertEquals("NovaRacer", summary.crewLeaderboard.last().displayName)
+        assertEquals(4, summary.crewLeaderboard.last().rank)
+        assertEquals(0, summary.crewLeaderboard.last().boardsEntered)
 
         // Highlight #0 must be today's Daily GP trailing TurboAlex by +1500ms
-        assertEquals(3, summary.highlightBoards.size)
         val firstHighlight = summary.highlightBoards.first()
         assertEquals(dailyBoardKey, firstHighlight.boardKey)
         assertEquals(2, firstHighlight.myRank)

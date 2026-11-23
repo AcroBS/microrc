@@ -174,14 +174,59 @@ class StreakAndStandingsTest {
         composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_streak_badge").assertIsDisplayed()
         composeTestRule.onNodeWithText("4 Day Streak").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_streak_milestone_banner").assertDoesNotExist()
         composeTestRule.onNodeWithTag("home_standings_rank_badge").assertIsDisplayed()
-        composeTestRule.onNodeWithText("#1 of 2 Crew").assertIsDisplayed()
+        composeTestRule.onNodeWithText("#1 of 2 Friends").assertIsDisplayed()
         composeTestRule.onNodeWithText("Lead 1 • Chase 0").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_overall_friends_ranking").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_overall_friend_rank_0").assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_standings_board_row_0").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("-1.50s").assertIsDisplayed()
 
-        composeTestRule.onNodeWithTag("home_standings_board_row_0").performClick()
+        composeTestRule.onNodeWithTag("home_challenges_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_offline_section").assertDoesNotExist()
+
+        composeTestRule.onNodeWithTag("home_standings_board_row_0").performScrollTo().performClick()
         assertEquals(Triple("GP_APEX", GameMode.RACE, false), openedBoard)
+    }
+
+    @Test
+    fun homeScreen_fiveDayStreakShowsWelcomeMilestoneBannerAndOfflineIsOptional() {
+        composeTestRule.setContent {
+            MicroRCTheme {
+                HomeScreen(
+                    profile = PlayerProfile(playerId = "local", name = "Alex"),
+                    onHostRace = {},
+                    onJoinRace = {},
+                    onSoloRace = {},
+                    onOpenGarage = {},
+                    onUpdateDriverName = {},
+                    playStreak = PlayStreakState(
+                        currentStreakDays = 5,
+                        bestStreakDays = 5,
+                        lastActiveDateKey = "20261123",
+                        activeToday = true
+                    ),
+                    isSignedIn = false,
+                    friendsCount = 0,
+                    localRecordsCount = 3,
+                    friendStandings = null
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("home_streak_milestone_banner").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Welcome! 5-Day Streak Milestone").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_challenges_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_offline_section").assertDoesNotExist()
+
+        composeTestRule.onNodeWithTag("home_scope_offline").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_offline_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_challenges_section").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("home_online_section").assertDoesNotExist()
     }
 
     @Test

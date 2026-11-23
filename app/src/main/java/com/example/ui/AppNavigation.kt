@@ -143,6 +143,7 @@ fun MicroRCApp(
     var leaderboardInitialDaily by remember { mutableStateOf(false) }
     var leaderboardInitialMode by remember { mutableStateOf<GameMode?>(null) }
     var leaderboardInitialTrackKey by remember { mutableStateOf<String?>(null) }
+    var currentUtcDateKey by remember { mutableStateOf(DailyChallengeCatalog.todayDateKey()) }
 
     LaunchedEffect(currentRoute) {
         if (currentRoute != null && currentRoute != Routes.RACE) {
@@ -277,6 +278,7 @@ fun MicroRCApp(
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START -> {
+                    currentUtcDateKey = DailyChallengeCatalog.todayDateKey()
                     viewModel.audioEngine.setAppForeground(true)
                     latestOnlineVm?.setAppForeground(true)
                 }
@@ -378,14 +380,16 @@ fun MicroRCApp(
         profile.name,
         friendsList,
         friendCircleEntries,
-        localLeaderboard
+        localLeaderboard,
+        currentUtcDateKey
     ) {
         FriendStandingsCalculator.compute(
             myUid = currentUser?.uid,
             myName = profile.name,
             friends = friendsList,
             cloudEntries = friendCircleEntries,
-            localRecords = localLeaderboard
+            localRecords = localLeaderboard,
+            todayDateKey = currentUtcDateKey
         )
     }
 
@@ -534,7 +538,7 @@ fun MicroRCApp(
                 )
         ) {
             composable(Routes.HOME) {
-                val todayKey = remember { DailyChallengeCatalog.todayDateKey() }
+                val todayKey = currentUtcDateKey
                 val todayBoardKey = remember(todayKey) { DailyChallengeCatalog.boardKeyForDate(todayKey) }
                 val todayPbTime = remember(localLeaderboard, todayBoardKey) {
                     localLeaderboard.find { it.boardKey == todayBoardKey }?.bestRaceTimeMs
@@ -547,6 +551,12 @@ fun MicroRCApp(
                     onPureSoloRace = { viewModel.startPureSolo() },
                     onOpenDailyChallenge = {
                         leaderboardInitialDaily = true
+                        leaderboardInitialMode = GameMode.RACE
+                        leaderboardInitialTrackKey = null
+                        navController.navigate(Routes.LEADERBOARD)
+                    },
+                    onOpenIndividualTracks = {
+                        leaderboardInitialDaily = false
                         leaderboardInitialMode = GameMode.RACE
                         leaderboardInitialTrackKey = null
                         navController.navigate(Routes.LEADERBOARD)

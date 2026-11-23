@@ -15,7 +15,10 @@ data class PlayStreakState(
     val bestStreakDays: Int = 0,
     val lastActiveDateKey: String = "",
     val activeToday: Boolean = false
-)
+) {
+    val isFiveDayMilestone: Boolean
+        get() = currentStreakDays >= 5 && currentStreakDays % 5 == 0
+}
 
 object PlayStreakCalculator {
     private val DATE_REGEX = Regex("""^\d{8}$""")
@@ -147,11 +150,13 @@ data class FriendCrewMemberRank(
     val contestedWins: Int,
     val totalLeads: Int,
     val h2hMatchupsWon: Int,
-    val boardsEntered: Int
+    val boardsEntered: Int,
+    val overallPoints: Int = 0
 )
 
 data class FriendStandingsSummary(
     val myCrewRank: Int = 0,
+    val totalCrewCount: Int = 0,
     val crewSizeWithEntries: Int = 0,
     val totalFriendsCount: Int = 0,
     val leadingBoardsCount: Int = 0,
@@ -175,6 +180,24 @@ private data class NormalizedStandingEntry(
 
 object FriendStandingsCalculator {
 
+    private val DAILY_BOARD_DATE_REGEX = Regex("""^RACE_daily_(\d{8})(?:_|$)""")
+
+    internal fun isExpiredDailyBoard(
+        trackKey: String,
+        boardKey: String,
+        todayDateKey: String
+    ): Boolean {
+        val dateFromTrack = DailyChallengeCatalog.extractDateKey(trackKey)
+        if (dateFromTrack != null) {
+            return dateFromTrack != todayDateKey
+        }
+        val boardMatch = DAILY_BOARD_DATE_REGEX.find(boardKey)
+        if (boardMatch != null) {
+            return boardMatch.groupValues[1] != todayDateKey
+        }
+        return false
+    }
+
     fun compute(
         myUid: String?,
         myName: String,
@@ -188,11 +211,12 @@ object FriendStandingsCalculator {
         val cleanMyUid = myUid?.takeIf { it.isNotBlank() } ?: "local_self"
         val cleanMyName = myName.trim().ifEmpty { "You" }
 
-        // 1. Collect valid cloud entries for self + friends, keeping the best record per (userId, boardKey)
+        // 1. Collect valid cloud entries for self + friends (excluding past/expired Daily Challenges)
         val mergedByUserAndBoard = LinkedHashMap<Pair<String, String>, NormalizedStandingEntry>()
         for (doc in cloudEntries) {
             if (doc.userId.isBlank() || doc.boardKey.isBlank()) continue
             if (doc.userId != cleanMyUid && doc.userId !in friendMap) continue
+            if (isExpiredDailyBoard(doc.trackKey, doc.boardKey, todayDateKey)) continue
             val mode = runCatching { GameMode.valueOf(doc.gameMode) }.getOrDefault(GameMode.RACE)
             val isStunts = mode == GameMode.STUNTS || doc.boardKey.startsWith("STUNTS_")
             val valid = if (isStunts) doc.bestScore > 0L else doc.bestRaceTimeMs > 0L
@@ -217,9 +241,10 @@ object FriendStandingsCalculator {
             mergedByUserAndBoard[key] = pickBetter(mergedByUserAndBoard[key], candidate, isStunts)
         }
 
-        // 2. Merge local solo PBs for self so un-synced or just-finished runs appear immediately
+        // 2. Merge local solo PBs for self (excluding past/expired Daily Challenges)
         for (rec in localRecords) {
             if (rec.boardKey.isBlank()) continue
+            if (isExpiredDailyBoard(rec.trackKey, rec.boardKey, todayDateKey)) continue
             val mode = runCatching { GameMode.valueOf(rec.gameMode) }.getOrDefault(GameMode.RACE)
             val isStunts = mode == GameMode.STUNTS || rec.boardKey.startsWith("STUNTS_")
             val valid = if (isStunts) rec.bestScore > 0 else rec.bestRaceTimeMs > 0L
@@ -239,10 +264,6 @@ object FriendStandingsCalculator {
             mergedByUserAndBoard[key] = pickBetter(mergedByUserAndBoard[key], candidate, isStunts)
         }
 
-        if (mergedByUserAndBoard.isEmpty()) {
-            return FriendStandingsSummary(totalFriendsCount = friends.size)
-        }
-
         // 3. Group by boardKey and rank drivers on every board
         val byBoard = mergedByUserAndBoard.values.groupBy { it.boardKey }
         val contestedWins = mutableMapOf<String, Int>()
@@ -251,7 +272,7 @@ object FriendStandingsCalculator {
         val boardsEntered = mutableMapOf<String, Int>()
         val crewNames = mutableMapOf<String, String>().apply {
             put(cleanMyUid, cleanMyName)
-            friends.forEach { put(it.friendUid, it.displayName) }
+            friends.forEach { put(it.friendUid, it.displayName.ifBlank { "Friend" }) }
         }
 
         var leadingBoardsCount = 0
@@ -343,9 +364,12 @@ object FriendStandingsCalculator {
             )
         }
 
-        // 4. Rank all crew drivers who have at least 1 entry
-        val activeUids = boardsEntered.keys.toList()
-        val sortedCrew = activeUids.sortedWith(
+        // 4. Overall ranking across ALL friends + yourself (including friends with 0 entries yet)
+        val allRosterUids = (listOf(cleanMyUid) + friends.map { it.friendUid } + boardsEntered.keys)
+            .filter { it.isNotBlank() }
+            .distinct()
+
+        val sortedCrew = allRosterUids.sortedWith(
             compareByDescending<String> { contestedWins[it] ?: 0 }
                 .thenByDescending { h2hWins[it] ?: 0 }
                 .thenByDescending { totalLeads[it] ?: 0 }
@@ -354,20 +378,27 @@ object FriendStandingsCalculator {
                 .thenBy { crewNames[it]?.lowercase(Locale.US).orEmpty() }
         )
         val crewLeaderboard = sortedCrew.mapIndexed { index, uid ->
+            val wins = contestedWins[uid] ?: 0
+            val h2h = h2hWins[uid] ?: 0
+            val leads = totalLeads[uid] ?: 0
+            val boards = boardsEntered[uid] ?: 0
+            val points = wins * 3 + h2h + boards
             FriendCrewMemberRank(
                 userId = uid,
                 displayName = crewNames[uid] ?: "Driver",
                 isSelf = uid == cleanMyUid,
                 rank = index + 1,
-                contestedWins = contestedWins[uid] ?: 0,
-                totalLeads = totalLeads[uid] ?: 0,
-                h2hMatchupsWon = h2hWins[uid] ?: 0,
-                boardsEntered = boardsEntered[uid] ?: 0
+                contestedWins = wins,
+                totalLeads = leads,
+                h2hMatchupsWon = h2h,
+                boardsEntered = boards,
+                overallPoints = points
             )
         }
-        val myCrewRank = crewLeaderboard.firstOrNull { it.isSelf }?.rank ?: 0
+        val myCrewRank = crewLeaderboard.firstOrNull { it.isSelf }?.rank ?: 1
+        val crewWithEntriesCount = boardsEntered.size
 
-        // 5. Prioritize the top highlights for HomeScreen:
+        // 5. Prioritize highlights for HomeScreen:
         //    Today's Daily GP > Shared tracks with friends > Unchallenged friend records > Personal PBs
         val highlighted = boardItems.sortedWith(
             compareByDescending<FriendBoardStandingItem> { it.boardKey == todayDailyBoardKey }
@@ -379,7 +410,8 @@ object FriendStandingsCalculator {
 
         return FriendStandingsSummary(
             myCrewRank = myCrewRank,
-            crewSizeWithEntries = crewLeaderboard.size,
+            totalCrewCount = crewLeaderboard.size,
+            crewSizeWithEntries = crewWithEntriesCount,
             totalFriendsCount = friends.size,
             leadingBoardsCount = leadingBoardsCount,
             trailingBoardsCount = trailingBoardsCount,

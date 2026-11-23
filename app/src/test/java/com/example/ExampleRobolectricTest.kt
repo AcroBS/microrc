@@ -38,10 +38,10 @@ class ExampleRobolectricTest {
     @Test
     fun homeScreen_displaysActionsAndNavigatesToGarage() {
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_challenges_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("daily_challenge_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("open_garage_button").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("host_race_button").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("join_race_button").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("solo_race_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("open_garage_button").performScrollTo().performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("car_option_APEX_FORMULA").performScrollTo().assertIsDisplayed()
@@ -93,11 +93,13 @@ class ExampleRobolectricTest {
         // Return to Play tab via bottom navigation bar
         composeTestRule.onNodeWithTag("nav_tab_play").performClick()
         composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("home_offline_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_challenges_section").performScrollTo().assertIsDisplayed()
     }
 
     @Test
     fun hostRace_opensHostSetupScreenAndLaunchesLobby() {
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_scope_offline").performScrollTo().performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("host_race_button").performScrollTo().performClick()
         composeTestRule.waitForIdle()
@@ -151,6 +153,8 @@ class ExampleRobolectricTest {
 
     @Test
     fun hostRace_selectsArenaModeAndDisplaysArenaShapesInLobby() {
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_scope_offline").performScrollTo().performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("host_race_button").performScrollTo().performClick()
         composeTestRule.waitForIdle()
@@ -238,6 +242,8 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("garage_done_button").performScrollTo().performClick()
         composeTestRule.waitForIdle()
 
+        composeTestRule.onNodeWithTag("home_scope_offline").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("solo_race_button").performScrollTo().performClick()
         composeTestRule.waitUntil(timeoutMillis = 5_000L) {
             runCatching {
@@ -395,6 +401,8 @@ class ExampleRobolectricTest {
     @Test
     fun hybridSetupScreen_configuresGameTypesAndOpensHybridLobby() {
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_scope_offline").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("home_hybrid_tour_button").performScrollTo().performClick()
         composeTestRule.waitForIdle()
 
@@ -422,6 +430,8 @@ class ExampleRobolectricTest {
 
     @Test
     fun hostSetup_selectsStuntsModeAndStartsTurnBasedStuntSession() {
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_scope_offline").performScrollTo().performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("host_race_button").performScrollTo().performClick()
         composeTestRule.waitForIdle()
@@ -717,41 +727,40 @@ class ExampleRobolectricTest {
                 .fetchSemanticsNodes().size
         )
 
-        // 2. Both Offline (Wi-Fi lobby + Solo) and Online (Lobby, Friends, Daily, Leaderboards) sections are present under All Modes
-        composeTestRule.onNodeWithTag("home_scope_all").performScrollTo().assertIsDisplayed()
+        // 2. Online (Standard) is default: Challenges & Rankings (most used) + Live Online Multiplayer are clearly separated,
+        //    while Offline (Wi-Fi) is optional and hidden until selected
+        composeTestRule.onNodeWithTag("home_scope_online").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_scope_offline").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("home_scope_online").assertIsDisplayed()
 
+        composeTestRule.onNodeWithTag("home_challenges_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("daily_challenge_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_individual_tracks_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("pure_solo_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("leaderboards_button").performScrollTo().assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("online_play_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_friends_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_offline_section").assertDoesNotExist()
+
+        // 3. Selecting optional Offline (Wi-Fi) mode shows Wi-Fi lobbies, Hybrid Tour & bot practice
+        composeTestRule.onNodeWithTag("home_scope_offline").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("home_offline_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("host_race_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("join_race_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("pure_solo_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("solo_race_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_hybrid_tour_button").performScrollTo().assertIsDisplayed()
-
-        composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("online_play_button").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("home_friends_button").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("daily_challenge_button").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("leaderboards_button").performScrollTo().assertIsDisplayed()
-
-        // 3. Filtering to Offline hides Online section and keeps Wi-Fi / Solo actions immediately visible
-        composeTestRule.onNodeWithTag("home_scope_offline").performScrollTo().performClick()
-        composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("home_offline_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_online_section").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("home_challenges_section").assertDoesNotExist()
 
-        // 4. Filtering to Online hides Offline section and keeps Online Lobby / Challenges / Leaderboards visible
+        // 4. Switching back to Online (Standard) restores Challenges & Rankings + Live Online Multiplayer
         composeTestRule.onNodeWithTag("home_scope_online").performScrollTo().performClick()
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_challenges_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_offline_section").assertDoesNotExist()
-
-        // 5. Restoring All Modes shows both entry pillars again
-        composeTestRule.onNodeWithTag("home_scope_all").performScrollTo().performClick()
-        composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("home_offline_section").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
     }
 
     @Test
