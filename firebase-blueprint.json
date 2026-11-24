@@ -798,6 +798,63 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "CustomTrack": {
+      "title": "CustomTrack",
+      "description": "Self-designed custom RC track synced to the cloud so accepted friends and challengers can see, race, and post ghost times on creator tracks.",
+      "type": "object",
+      "properties": {
+        "ownerUid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the track creator."
+        },
+        "ownerName": {
+          "type": "string",
+          "description": "Display callsign of the track creator (1..24 chars)."
+        },
+        "trackName": {
+          "type": "string",
+          "description": "Human-readable name of the custom track (1..32 chars)."
+        },
+        "themeId": {
+          "type": "string",
+          "enum": ["LIVING_ROOM_GP", "BACKYARD_DIRT", "NEON_ROOFTOP", "SANDBOX_DUNES", "WAREHOUSE_DRIFT"],
+          "description": "Surface visual theme identifier."
+        },
+        "roadHalfWidth": {
+          "type": "number",
+          "description": "Base road half-width in world units (80.0..150.0)."
+        },
+        "payloadData": {
+          "type": "string",
+          "description": "Compact pipe/semicolon encoded geometry payload (control points, boost pads, item spawns, ramps, props)."
+        },
+        "publicTrack": {
+          "type": "boolean",
+          "description": "True when discoverable to friends and leaderboard ghost challengers."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp written via FieldValue.serverTimestamp()."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last modified timestamp written via FieldValue.serverTimestamp()."
+        }
+      },
+      "required": [
+        "ownerUid",
+        "ownerName",
+        "trackName",
+        "themeId",
+        "roadHalfWidth",
+        "payloadData",
+        "publicTrack",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -840,6 +897,11 @@
     "/leaderboardNotifications/{notificationId}": {
       "schema": "LeaderboardNotification",
       "description": "Real-time notifications sent to friends when a new personal best is posted to a leaderboard."
+    },
+    "/customTracks/{trackId}": {
+      "schema": "CustomTrack",
+      "description": "Cloud-synced self-designed tracks created by players for friend time challenges, leaderboards, and online hosting."
     }
   }
 }
+

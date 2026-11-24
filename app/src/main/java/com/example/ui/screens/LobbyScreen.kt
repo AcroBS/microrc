@@ -1136,11 +1136,17 @@ fun LobbyScreen(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
+                                    val customSubLabel = if (cTrack.creatorName.isNotBlank()) {
+                                        "By ${cTrack.creatorName} • ${previewDef.ramps.size} Jumps"
+                                    } else {
+                                        "Custom • ${previewDef.ramps.size} Jumps"
+                                    }
                                     Text(
-                                        text = "Custom • ${previewDef.ramps.size} Jumps",
+                                        text = customSubLabel,
                                         style = MaterialTheme.typography.labelSmall,
                                         color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }

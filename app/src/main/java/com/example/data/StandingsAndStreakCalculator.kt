@@ -206,7 +206,8 @@ object FriendStandingsCalculator {
         cloudEntries: List<LeaderboardEntryDoc>,
         localRecords: List<LocalLeaderboardRecord>,
         todayDateKey: String = DailyChallengeCatalog.todayDateKey(),
-        maxHighlights: Int = 3
+        maxHighlights: Int = 3,
+        customTrackNames: Map<String, String> = emptyMap()
     ): FriendStandingsSummary {
         val friendMap = friends.associateBy { it.friendUid }
         val cleanMyUid = myUid?.takeIf { it.isNotBlank() } ?: "local_self"
@@ -349,11 +350,13 @@ object FriendStandingsCalculator {
             }
 
             val isDaily = DailyChallengeCatalog.isAnyDailyTrackId(sample.trackKey)
+            val resolvedTrackName = customTrackNames[sample.trackKey]?.takeIf { it.isNotBlank() }
+                ?: DailyChallengeCatalog.resolveTrackDisplayName(sample.trackKey)
             boardItems.add(
                 FriendBoardStandingItem(
                     boardKey = boardKey,
                     trackKey = sample.trackKey,
-                    trackName = DailyChallengeCatalog.resolveTrackDisplayName(sample.trackKey),
+                    trackName = resolvedTrackName,
                     gameMode = sample.gameMode,
                     totalLaps = sample.totalLaps,
                     isDaily = isDaily,

@@ -360,4 +360,70 @@ class StreakAndStandingsUnitTest {
         assertTrue(defaultRules.autoAccelerate)
         assertTrue(defaultRules.hardTrackBoundary)
     }
+
+    @Test
+    fun friendStandingsCalculator_resolvesSyncedCustomTrackNamesInHighlights() {
+        val myUid = "uid_me"
+        val friendUid = "uid_alex"
+        val customId = "custom_1760000000_a1b2"
+        val boardKey = com.example.model.LeaderboardBoardKey.build(GameMode.RACE, customId, 3)
+        assertTrue(boardKey.contains(customId))
+
+        val friends = listOf(
+            FriendUiModel(
+                friendshipId = "f_alex",
+                friendUid = friendUid,
+                displayName = "TurboAlex",
+                friendCode = "RCALEX11",
+                carType = RcCarType.APEX_FORMULA,
+                primaryColorArgb = 0xFFFF5722,
+                accentColorArgb = 0xFFFFD54F,
+                effectivelyOnline = true,
+                activityStatus = "ONLINE",
+                activeRoomId = "",
+                activeRoomCode = "",
+                activeRoomName = "",
+                statusLabel = "Online"
+            )
+        )
+        val cloudEntries = listOf(
+            LeaderboardEntryDoc(
+                id = "${friendUid}_$boardKey",
+                userId = friendUid,
+                driverName = "TurboAlex",
+                gameMode = GameMode.RACE.name,
+                trackKey = customId,
+                boardKey = boardKey,
+                totalLaps = 3L,
+                bestRaceTimeMs = 28_400L
+            ),
+            LeaderboardEntryDoc(
+                id = "${myUid}_$boardKey",
+                userId = myUid,
+                driverName = "MeDriver",
+                gameMode = GameMode.RACE.name,
+                trackKey = customId,
+                boardKey = boardKey,
+                totalLaps = 3L,
+                bestRaceTimeMs = 29_100L
+            )
+        )
+
+        val summary = FriendStandingsCalculator.compute(
+            myUid = myUid,
+            myName = "MeDriver",
+            friends = friends,
+            cloudEntries = cloudEntries,
+            localRecords = emptyList(),
+            todayDateKey = "20261124",
+            maxHighlights = 3,
+            customTrackNames = mapOf(customId to "Alex Hairpin")
+        )
+
+        assertEquals(1, summary.trailingBoardsCount)
+        val highlight = summary.highlightBoards.firstOrNull { it.trackKey == customId }
+        assertNotNull(highlight)
+        assertEquals("Alex Hairpin", highlight!!.trackName)
+        assertEquals(700L, highlight.deltaVsTopFriendMs)
+    }
 }

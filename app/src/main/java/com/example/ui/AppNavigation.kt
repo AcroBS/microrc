@@ -66,6 +66,7 @@ import com.example.data.DailyChallengeCatalog
 import com.example.data.FriendStandingsCalculator
 import com.example.data.FriendsRepository
 import com.example.data.OnlineRaceRepository
+import com.example.model.CustomTrackData
 import com.example.model.FriendUiModel
 import com.example.model.GameMode
 import com.example.model.OnlineRoomDoc
@@ -199,6 +200,60 @@ fun MicroRCApp(
     var signOutCleanupAction: (suspend () -> Unit)? = null
     var deleteAccountCleanupAction: (suspend () -> Unit)? = null
 
+    val cloudCustomTracks = activeOnlineVm?.let { it.cloudCustomTracks.collectAsState().value }.orEmpty()
+    val allAccessibleCustomTracks = remember(customTracks, cloudCustomTracks, currentUser?.uid, profile.name) {
+        val uid = currentUser?.uid
+        val merged = LinkedHashMap<String, CustomTrackData>()
+        customTracks.forEach { localTrack ->
+            val stamped = if (!uid.isNullOrBlank() && localTrack.creatorUid.isBlank()) {
+                localTrack.copy(
+                    creatorUid = uid,
+                    creatorName = profile.name.trim().take(24).ifEmpty { localTrack.creatorName }
+                )
+            } else {
+                localTrack
+            }
+            merged[stamped.id] = stamped
+        }
+        cloudCustomTracks.forEach { cloudTrack ->
+            if (!merged.containsKey(cloudTrack.id)) {
+                merged[cloudTrack.id] = cloudTrack
+            } else if (cloudTrack.creatorUid.isNotBlank() && cloudTrack.creatorUid != uid) {
+                merged[cloudTrack.id] = cloudTrack
+            }
+        }
+        merged.values.toList()
+    }
+    val ownCustomTracksForHosting = remember(customTracks, currentUser?.uid, profile.name) {
+        val uid = currentUser?.uid
+        customTracks
+            .filter { it.creatorUid.isBlank() || uid.isNullOrBlank() || it.creatorUid == uid }
+            .map { track ->
+                if (!uid.isNullOrBlank()) {
+                    track.copy(
+                        creatorUid = uid,
+                        creatorName = profile.name.trim().take(24).ifEmpty { track.creatorName }
+                    )
+                } else {
+                    track
+                }
+            }
+    }
+    val customTrackNames = remember(allAccessibleCustomTracks) {
+        allAccessibleCustomTracks.associate { it.id to it.name }
+    }
+    val latestCustomTrackNames by rememberUpdatedState(customTrackNames)
+    val friendCustomTracksByUid = remember(cloudCustomTracks, currentUser?.uid) {
+        val uid = currentUser?.uid
+        cloudCustomTracks
+            .filter { it.creatorUid.isNotBlank() && it.creatorUid != uid }
+            .groupBy { it.creatorUid }
+    }
+
+    LaunchedEffect(activeOnlineVm, customTracks, profile.name) {
+        activeOnlineVm?.syncLocalCustomTracksToCloud(profile, customTracks)
+    }
+
     if (currentUser != null) {
         val uid = currentUser!!.uid
         key(uid) {
@@ -226,7 +281,7 @@ fun MicroRCApp(
 
             LaunchedEffect(onlineVm) {
                 viewModel.latestCompletedSoloRun.collect { summary ->
-                    onlineVm.syncSoloRunToCloud(latestProfile, summary)
+                    onlineVm.syncSoloRunToCloud(latestProfile, summary, latestCustomTrackNames)
                 }
             }
 
@@ -400,7 +455,8 @@ fun MicroRCApp(
         friendsList,
         friendCircleEntries,
         localLeaderboard,
-        currentUtcDateKey
+        currentUtcDateKey,
+        customTrackNames
     ) {
         FriendStandingsCalculator.compute(
             myUid = currentUser?.uid,
@@ -408,7 +464,8 @@ fun MicroRCApp(
             friends = friendsList,
             cloudEntries = friendCircleEntries,
             localRecords = localLeaderboard,
-            todayDateKey = currentUtcDateKey
+            todayDateKey = currentUtcDateKey,
+            customTrackNames = customTrackNames
         )
     }
 
@@ -804,6 +861,7 @@ fun MicroRCApp(
                         myFriendCode = onlineVm.myFriendCode,
                         activeOnlineRoom = if (isOnlineSession) onlineRoom else null,
                         friends = friendsList,
+                        friendCustomTracksByUid = friendCustomTracksByUid,
                         incomingRequests = incomingFriendRequests,
                         outgoingRequests = outgoingFriendRequests,
                         searchResults = searchResults,
@@ -843,6 +901,15 @@ fun MicroRCApp(
                                 }
                             )
                         },
+                        onChallengeFriendCustomTrack = { cTrack ->
+                            leaderboardInitialDaily = false
+                            leaderboardInitialMode = GameMode.RACE
+                            leaderboardInitialTrackKey = cTrack.id
+                            navController.navigate(Routes.LEADERBOARD) {
+                                popUpTo(Routes.HOME)
+                                launchSingleTop = true
+                            }
+                        },
                         onOpenOnlineHub = {
                             if (isOnlineSession && onlineRoom != null) {
                                 navController.navigate(Routes.LOBBY) { launchSingleTop = true }
@@ -870,6 +937,7 @@ fun MicroRCApp(
                     isLoadingCloud = isLoadingCloud,
                     ghostLoadingId = ghostLoadingId,
                     cloudStatusMessage = cloudStatus,
+                    customTracks = allAccessibleCustomTracks,
                     initialTabDaily = leaderboardInitialDaily,
                     initialMode = leaderboardInitialMode,
                     initialTrackKey = leaderboardInitialTrackKey,
@@ -882,6 +950,10 @@ fun MicroRCApp(
                         onlineVm?.leaveRoom()
                         viewModel.startPureSoloForDriftTrack(driftTrack, laps, ghost)
                     },
+                    onStartPureSoloForCustomTrack = { customTrack, laps, ghost ->
+                        onlineVm?.leaveRoom()
+                        viewModel.startPureSoloForCustomTrack(customTrack, laps, ghost)
+                    },
                     onStartDailyChallenge = { dateKey, ghost ->
                         onlineVm?.leaveRoom()
                         viewModel.startDailyChallenge(dateKey = dateKey, customGhost = ghost)
@@ -891,9 +963,16 @@ fun MicroRCApp(
                         viewModel.startDailyDriftChallenge(dateKey = dateKey, customGhost = ghost)
                     },
                     onChallengeCloudGhost = { entry ->
-                        onlineVm?.loadGhostRunForChallenge(entry.ghostId) { playback ->
+                        onlineVm?.loadGhostAndTrackForChallenge(entry.ghostId, allAccessibleCustomTracks) { playback, resolvedCustomTrack ->
                             onlineVm.leaveRoom()
-                            viewModel.startGhostChallenge(playback)
+                            viewModel.startGhostChallenge(playback, resolvedCustomTrack)
+                        }
+                    },
+                    onOpenTrackEditor = {
+                        navController.navigate(Routes.TRACK_EDITOR) {
+                            popUpTo(Routes.HOME) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
                         }
                     },
                     onRequestSignIn = { navController.navigate(Routes.ONLINE_HUB) },
@@ -989,21 +1068,39 @@ fun MicroRCApp(
 
             composable(Routes.TRACK_EDITOR) {
                 val canApplyToLobby = sessionRole.isHostLike
+                val creatorUid = currentUser?.uid.orEmpty()
                 TrackEditorScreen(
                     initialTrack = lobbyState?.activeCustomTrack ?: customTracks.firstOrNull(),
                     savedTracks = customTracks,
                     canApplyToLobby = canApplyToLobby,
                     hasBottomNav = showBottomNav,
                     onSaveTrack = { track, apply ->
-                        viewModel.saveCustomTrack(track, apply && !isOnlineSession)
+                        val stamped = if (creatorUid.isNotBlank() && (track.creatorUid.isBlank() || track.creatorUid == creatorUid)) {
+                            track.copy(
+                                creatorUid = creatorUid,
+                                creatorName = profile.name.trim().take(24).ifEmpty { track.creatorName }
+                            )
+                        } else {
+                            track
+                        }
+                        viewModel.saveCustomTrack(
+                            track = stamped,
+                            applyToLobby = apply && !isOnlineSession,
+                            creatorUid = creatorUid,
+                            creatorName = profile.name
+                        )
+                        activeOnlineVm?.saveCustomTrackToCloud(profile, stamped)
                         if (apply && isOnlineSession) {
-                            activeOnlineVm?.selectCustomTrack(track)
+                            activeOnlineVm?.selectCustomTrack(stamped)
                         }
                         if (!showBottomNav) {
                             navController.popBackStack()
                         }
                     },
-                    onDeleteTrack = viewModel::deleteCustomTrack,
+                    onDeleteTrack = { trackId ->
+                        viewModel.deleteCustomTrack(trackId)
+                        activeOnlineVm?.deleteCustomTrackFromCloud(trackId)
+                    },
                     onBack = {
                         if (showBottomNav) {
                             navController.navigate(Routes.HOME) {
@@ -1049,11 +1146,18 @@ fun MicroRCApp(
                     4
                 }
 
+                val lobbySelectableCustomTracks = when {
+                    isOnlineSession && sessionRole.isHostLike -> ownCustomTracksForHosting
+                    isOnlineSession -> emptyList()
+                    sessionRole.isHostLike -> allAccessibleCustomTracks
+                    else -> emptyList()
+                }
+
                 LobbyScreen(
                     role = sessionRole,
                     localPlayerId = effectiveLocalId,
                     lobby = lobbyState,
-                    customTracks = customTracks,
+                    customTracks = lobbySelectableCustomTracks,
                     onlineRoom = if (isOnlineSession) onlineRoom else null,
                     onlineRoomCode = if (isOnlineSession) onlineRoom?.roomCode else null,
                     onlinePasswordProtected = if (isOnlineSession) onlineRoom?.passwordProtected == true else false,

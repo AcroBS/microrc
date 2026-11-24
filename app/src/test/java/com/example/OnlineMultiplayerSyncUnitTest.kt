@@ -355,4 +355,50 @@ class OnlineMultiplayerSyncUnitTest {
             movedDist > 120f && after.speed > 75f
         )
     }
+
+    @Test
+    fun customTrackCodec_andOnlineRematchOptions_preserveGeometryAndReplayOption() {
+        val base = TrackCatalog.defaultEditorOval().copy(
+            creatorUid = "uid_creator_1",
+            creatorName = "TrackMaker"
+        )
+        assertTrue(
+            "Default editor track id length must fit <= 36 chars for leaderboard keys (${base.id.length})",
+            base.id.length in 6..36
+        )
+        val encoded = com.example.model.CustomTrackCodec.encode(base)
+        val decoded = com.example.model.CustomTrackCodec.decode(
+            id = base.id,
+            name = base.name,
+            themeId = base.themeId,
+            roadHalfWidth = base.roadHalfWidth,
+            creatorUid = base.creatorUid,
+            creatorName = base.creatorName,
+            raw = encoded
+        )
+        assertNotNull(decoded)
+        assertEquals(base.id, decoded!!.id)
+        assertEquals(base.name, decoded.name)
+        assertEquals(base.controlPoints.size, decoded.controlPoints.size)
+        assertEquals(base.boostPads.size, decoded.boostPads.size)
+        assertEquals(base.ramps.size, decoded.ramps.size)
+        assertEquals(base.creatorUid, decoded.creatorUid)
+        assertEquals(base.creatorName, decoded.creatorName)
+
+        val generated = TrackCatalog.generateRandomTrack(seed = 123456L)
+        assertTrue(
+            "Generated random track id must be <= 36 chars (${generated.id.length})",
+            generated.id.length in 6..36
+        )
+
+        val voteOptions = com.example.network.WifiP2pRaceManager.buildRematchVoteOptions(
+            gameMode = com.example.model.GameMode.RACE,
+            currentTrackId = TrackId.NEON_ROOFTOP,
+            currentArenaShape = com.example.model.ArenaShape.entries.first(),
+            hasActiveCustomTrack = true,
+            activeCustomTrack = decoded,
+            random = Random(99L)
+        )
+        assertTrue(voteOptions.any { it.id == decoded.id && !it.isRandom })
+    }
 }

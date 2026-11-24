@@ -271,11 +271,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun saveCustomTrack(track: CustomTrackData, applyToLobby: Boolean) {
+    fun saveCustomTrack(
+        track: CustomTrackData,
+        applyToLobby: Boolean,
+        creatorUid: String = "",
+        creatorName: String = ""
+    ) {
+        val stamped = if (creatorUid.isNotBlank() && (track.creatorUid.isBlank() || track.creatorUid == creatorUid)) {
+            track.copy(
+                creatorUid = creatorUid,
+                creatorName = creatorName.trim().take(24).ifEmpty { track.creatorName }
+            )
+        } else {
+            track
+        }
         viewModelScope.launch {
-            prefsRepo.saveCustomTrack(track)
+            prefsRepo.saveCustomTrack(stamped)
             if (applyToLobby && (sessionRole.value == SessionRole.Host || sessionRole.value == SessionRole.Solo)) {
-                raceManager.selectCustomTrack(track)
+                raceManager.selectCustomTrack(stamped)
             }
         }
     }
@@ -414,7 +427,57 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         raceManager.startRace()
     }
 
-    fun startGhostChallenge(playback: GhostRunPlayback) {
+    fun startPureSoloForCustomTrack(
+        customTrack: CustomTrackData,
+        laps: Int = 3,
+        ghost: GhostRunPlayback? = null
+    ) {
+        _lastRunWasPersonalBest.value = false
+        val cleanLaps = laps.coerceIn(1, 9)
+        val setupRules = rules.value.copy(
+            gameMode = GameMode.RACE.name,
+            winCondition = WinCondition.FIRST_TO_FINISH.name,
+            totalLaps = cleanLaps,
+            randomJumpsEnabled = false
+        )
+        val boardKey = LeaderboardBoardKey.build(GameMode.RACE, customTrack.id, cleanLaps)
+        val ghostToUse = ghost ?: localLeaderboard.value.find { it.boardKey == boardKey }
+            ?.takeIf { it.ghostFramesData.isNotBlank() }
+            ?.let { rec ->
+                val frames = GhostCodec.decodeFrames(rec.ghostFramesData)
+                if (frames.size >= 2) {
+                    GhostRunPlayback(
+                        ghostId = "local_${rec.boardKey}",
+                        driverName = "${rec.driverName} (PB)",
+                        carType = rec.carType,
+                        primaryColorArgb = rec.primaryColorArgb,
+                        accentColorArgb = rec.accentColorArgb,
+                        boardKey = rec.boardKey,
+                        trackId = rec.trackKey,
+                        totalLaps = rec.totalLaps,
+                        finishTimeMs = rec.bestRaceTimeMs,
+                        bestLapMs = rec.bestLapTimeMs,
+                        frames = frames
+                    )
+                } else {
+                    null
+                }
+            }
+        raceManager.startSoloSession(
+            profile = profile.value,
+            initialRules = setupRules,
+            initialCustomTrack = customTrack,
+            includeBots = false,
+            challengeGhost = ghostToUse
+        )
+        raceManager.setTotalLaps(cleanLaps)
+        raceManager.startRace()
+    }
+
+    fun startGhostChallenge(
+        playback: GhostRunPlayback,
+        resolvedCustomTrack: CustomTrackData? = null
+    ) {
         val dailyDriftDate = com.example.drift.DriftDailyChallenge.extractDateKey(playback.trackId)
         if (dailyDriftDate != null) {
             startDailyDriftChallenge(dateKey = dailyDriftDate, customGhost = playback)
@@ -435,6 +498,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 return
             }
+        }
+        val customMatch = resolvedCustomTrack ?: customTracks.value.find { it.id == playback.trackId }
+        if (customMatch != null) {
+            startPureSoloForCustomTrack(
+                customTrack = customMatch,
+                laps = playback.totalLaps,
+                ghost = playback
+            )
+            return
         }
         val targetTrack = runCatching { TrackId.valueOf(playback.trackId) }
             .getOrDefault(TrackId.LIVING_ROOM_GP)
@@ -576,6 +648,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun selectCustomTrack(customTrack: CustomTrackData) {
         raceManager.setChallengeGhost(null)
         raceManager.selectCustomTrack(customTrack)
+        refreshDefaultLocalGhostIfMatching()
     }
     fun generateRandomTrackForLobby() {
         raceManager.setChallengeGhost(null)
@@ -614,8 +687,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val lobby = lobbyState.value ?: return
         if (lobby.players.any { it.isBot }) return
         val lobbyMode = lobby.rules.gameModeEnum
+        if (lobbyMode != GameMode.RACE && lobbyMode != GameMode.DRIFT) return
         val customId = lobby.activeCustomTrack?.id
-        if (lobbyMode != GameMode.DRIFT && customId != null) return
         val currentGhost = activeChallengeGhost.value
         if (currentGhost != null && !currentGhost.ghostId.startsWith("local_")) return
         val targetTrackKey = customId ?: lobby.trackId

@@ -2,6 +2,9 @@ package com.example.data
 
 import android.content.Context
 import com.example.R
+import com.example.model.CustomTrackCodec
+import com.example.model.CustomTrackData
+import com.example.model.CustomTrackDoc
 import com.example.model.GameMode
 import com.example.model.GhostRunDoc
 import com.example.model.GhostRunPlayback
@@ -14,6 +17,7 @@ import com.example.model.OnlineRoomDoc
 import com.example.model.OnlineRoomInputDoc
 import com.example.model.OnlineRoomPlayerDoc
 import com.example.model.PlayerProfile
+import com.example.model.TrackId
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
@@ -1019,10 +1023,170 @@ open class OnlineRaceRepository(
                     }
                 }
             }
+            runCatching {
+                withTimeoutOrNull(5_000L) {
+                    val customTracks = db.collection("customTracks")
+                        .whereEqualTo("ownerUid", uid)
+                        .get()
+                        .await()
+                    customTracks.documents.forEach { doc -> doc.reference.delete().await() }
+                }
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             rethrowIfRealCancellation(e)
             handleFirestoreError(e, OperationType.DELETE, "leaderboardEntries")
+            Result.failure(e)
+        }
+    }
+
+    // ========================================================================
+    // 3. Self-Designed Cloud Custom Tracks (/customTracks/{trackId})
+    // ========================================================================
+
+    fun sanitizeCustomTrackId(rawId: String): String =
+        LeaderboardBoardKey.sanitizeKeyToken(rawId, 36)
+
+    open fun observeCustomTracksForUsers(uids: List<String>): Flow<List<CustomTrackData>> {
+        val cleanUids = uids.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(30)
+        if (cleanUids.isEmpty()) return flowOf(emptyList())
+
+        val flows = cleanUids.map { targetUid ->
+            db.collection("customTracks")
+                .whereEqualTo("publicTrack", true)
+                .whereEqualTo("ownerUid", targetUid)
+                .snapshots()
+                .map { snap ->
+                    snap.documents.mapNotNull { doc ->
+                        val parsed = doc.toObject(
+                            CustomTrackDoc::class.java,
+                            DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                        ) ?: return@mapNotNull null
+                        val updatedSec = parsed.updatedAt?.seconds ?: 0L
+                        val decoded = CustomTrackCodec.fromDoc(parsed) ?: return@mapNotNull null
+                        updatedSec to decoded
+                    }
+                }
+                .catch { e ->
+                    rethrowIfRealCancellation(e)
+                    handleFirestoreError(e, OperationType.LIST, "customTracks")
+                    emit(emptyList())
+                }
+        }
+
+        return combine(flows) { lists ->
+            lists.flatMap { it }
+                .sortedByDescending { it.first }
+                .map { it.second }
+                .distinctBy { it.id }
+        }
+    }
+
+    open suspend fun upsertCustomTrack(
+        profile: PlayerProfile,
+        track: CustomTrackData
+    ): Result<Unit> {
+        var currentPath = "customTracks"
+        return try {
+            val uid = requireUserId()
+            // Never overwrite a track authored by a different user
+            if (track.creatorUid.isNotBlank() && track.creatorUid != uid) {
+                return Result.success(Unit)
+            }
+
+            val docId = sanitizeCustomTrackId(track.id)
+            currentPath = "customTracks/$docId"
+            val cleanOwnerName = profile.name.trim().take(24).ifEmpty { "Driver" }
+            val cleanTrackName = track.name.trim().take(32).ifEmpty { "Custom Circuit" }
+            val safeTheme = TrackId.entries.firstOrNull { it.name == track.themeId }?.name
+                ?: TrackId.NEON_ROOFTOP.name
+            val safeRoadHalfWidth = track.roadHalfWidth.toDouble().coerceIn(80.0, 150.0)
+            val encodedPayload = CustomTrackCodec.encode(track)
+            if (encodedPayload.length !in 10..25_000) {
+                return Result.failure(IllegalArgumentException("Custom track geometry is invalid."))
+            }
+
+            val docRef = db.collection("customTracks").document(docId)
+            withFirestoreTimeout(8_000L, "custom track sync server") {
+                val existingSnap = docRef.get().await()
+                if (existingSnap.exists()) {
+                    val existingOwner = existingSnap.getString("ownerUid").orEmpty()
+                    if (existingOwner.isNotBlank() && existingOwner != uid) {
+                        return@withFirestoreTimeout
+                    }
+                    docRef.update(
+                        mapOf(
+                            "ownerName" to cleanOwnerName,
+                            "trackName" to cleanTrackName,
+                            "themeId" to safeTheme,
+                            "roadHalfWidth" to safeRoadHalfWidth,
+                            "payloadData" to encodedPayload,
+                            "publicTrack" to true,
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                } else {
+                    docRef.set(
+                        mapOf(
+                            "ownerUid" to uid,
+                            "ownerName" to cleanOwnerName,
+                            "trackName" to cleanTrackName,
+                            "themeId" to safeTheme,
+                            "roadHalfWidth" to safeRoadHalfWidth,
+                            "payloadData" to encodedPayload,
+                            "publicTrack" to true,
+                            "createdAt" to FieldValue.serverTimestamp(),
+                            "updatedAt" to FieldValue.serverTimestamp()
+                        )
+                    ).await()
+                }
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            rethrowIfRealCancellation(e)
+            handleFirestoreError(e, OperationType.WRITE, currentPath)
+            Result.failure(e)
+        }
+    }
+
+    open suspend fun deleteCustomTrackFromCloud(trackId: String): Result<Unit> {
+        val docId = sanitizeCustomTrackId(trackId)
+        val path = "customTracks/$docId"
+        return try {
+            val uid = auth.currentUser?.uid ?: return Result.success(Unit)
+            val docRef = db.collection("customTracks").document(docId)
+            withTimeoutOrNull(6_000L) {
+                val snap = docRef.get().await()
+                if (snap.exists() && snap.getString("ownerUid") == uid) {
+                    docRef.delete().await()
+                }
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            rethrowIfRealCancellation(e)
+            handleFirestoreError(e, OperationType.DELETE, path)
+            Result.failure(e)
+        }
+    }
+
+    open suspend fun fetchCustomTrack(trackId: String): Result<CustomTrackData> {
+        val docId = sanitizeCustomTrackId(trackId)
+        val path = "customTracks/$docId"
+        return try {
+            requireUserId()
+            val snap = withFirestoreTimeout(8_000L, "custom track server") {
+                db.collection("customTracks").document(docId).get().await()
+            }
+            val doc = snap.toObject(
+                CustomTrackDoc::class.java,
+                DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+            ) ?: return Result.failure(IllegalArgumentException("Custom track not found on cloud."))
+            val decoded = CustomTrackCodec.fromDoc(doc)
+                ?: return Result.failure(IllegalStateException("Custom track data could not be decoded."))
+            Result.success(decoded)
+        } catch (e: Exception) {
+            rethrowIfRealCancellation(e)
+            handleFirestoreError(e, OperationType.GET, path)
             Result.failure(e)
         }
     }

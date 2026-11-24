@@ -134,6 +134,7 @@ class WifiP2pRaceManager(
             currentArenaShape: ArenaShape,
             currentStuntVariant: StuntVariant = StuntVariant.LONG_JUMP,
             hasActiveCustomTrack: Boolean = false,
+            activeCustomTrack: CustomTrackData? = null,
             random: Random = Random.Default
         ): List<RematchVoteOption> {
             return when (gameMode) {
@@ -198,28 +199,58 @@ class WifiP2pRaceManager(
                     )
                 }
                 else -> {
-                    val pool = if (hasActiveCustomTrack) {
-                        TrackId.entries.toList()
-                    } else {
-                        TrackId.entries.filter { it != currentTrackId }
-                    }
-                    val candidates = pool
-                        .shuffled(random)
-                        .take(2)
-                        .map { track ->
+                    if (activeCustomTrack != null) {
+                        val replayOption = RematchVoteOption(
+                            id = activeCustomTrack.id.take(64),
+                            displayName = activeCustomTrack.name.take(24),
+                            subtitle = "Custom Circuit • Replay",
+                            isRandom = false
+                        )
+                        val builtInPick = TrackId.entries
+                            .shuffled(random)
+                            .first()
+                            .let { track ->
+                                RematchVoteOption(
+                                    id = track.name,
+                                    displayName = track.displayName,
+                                    subtitle = "${track.surfaceLabel} • ${track.difficulty}",
+                                    isRandom = false
+                                )
+                            }
+                        listOf(
+                            replayOption,
+                            builtInPick,
                             RematchVoteOption(
-                                id = track.name,
-                                displayName = track.displayName,
-                                subtitle = "${track.surfaceLabel} • ${track.difficulty}",
-                                isRandom = false
+                                id = REMATCH_OPTION_RANDOM,
+                                displayName = "Random Circuit",
+                                subtitle = "Mystery circuit or generated layout",
+                                isRandom = true
                             )
+                        )
+                    } else {
+                        val pool = if (hasActiveCustomTrack) {
+                            TrackId.entries.toList()
+                        } else {
+                            TrackId.entries.filter { it != currentTrackId }
                         }
-                    candidates + RematchVoteOption(
-                        id = REMATCH_OPTION_RANDOM,
-                        displayName = "Random Circuit",
-                        subtitle = "Mystery circuit or generated layout",
-                        isRandom = true
-                    )
+                        val candidates = pool
+                            .shuffled(random)
+                            .take(2)
+                            .map { track ->
+                                RematchVoteOption(
+                                    id = track.name,
+                                    displayName = track.displayName,
+                                    subtitle = "${track.surfaceLabel} • ${track.difficulty}",
+                                    isRandom = false
+                                )
+                            }
+                        candidates + RematchVoteOption(
+                            id = REMATCH_OPTION_RANDOM,
+                            displayName = "Random Circuit",
+                            subtitle = "Mystery circuit or generated layout",
+                            isRandom = true
+                        )
+                    }
                 }
             }
         }
@@ -1930,7 +1961,8 @@ class WifiP2pRaceManager(
             currentTrackId = currentTrackId,
             currentArenaShape = currentArenaShape,
             currentStuntVariant = currentStuntVariant,
-            hasActiveCustomTrack = currentCustomTrack != null
+            hasActiveCustomTrack = currentCustomTrack != null,
+            activeCustomTrack = currentCustomTrack
         )
         rematchSecondsLeft = REMATCH_COUNTDOWN_SECONDS
         publishAndBroadcastRematchState()
@@ -2064,6 +2096,12 @@ class WifiP2pRaceManager(
                         _activeTrack.value = TrackCatalog.getTrack(nextTrack)
                         addSystemChat("Next circuit: ${nextTrack.displayName}!")
                     }
+                } else if (currentCustomTrack != null && winnerId == currentCustomTrack?.id) {
+                    val replayCustom = currentCustomTrack!!
+                    currentTrackId = runCatching { TrackId.valueOf(replayCustom.themeId) }
+                        .getOrDefault(TrackId.NEON_ROOFTOP)
+                    _activeTrack.value = TrackCatalog.buildCustomTrack(replayCustom)
+                    addSystemChat("Vote winner: ${replayCustom.name} (Replay)!")
                 } else {
                     val nextTrack = runCatching { TrackId.valueOf(winnerId) }.getOrDefault(currentTrackId)
                     currentTrackId = nextTrack

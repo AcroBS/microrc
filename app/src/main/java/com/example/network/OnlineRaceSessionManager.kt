@@ -1877,7 +1877,8 @@ class OnlineRaceSessionManager(
             currentTrackId = currentTrackId,
             currentArenaShape = currentArenaShape,
             currentStuntVariant = currentStuntVariant,
-            hasActiveCustomTrack = currentCustomTrack != null
+            hasActiveCustomTrack = currentCustomTrack != null,
+            activeCustomTrack = currentCustomTrack
         )
         rematchSecondsLeft = WifiP2pRaceManager.REMATCH_COUNTDOWN_SECONDS
         publishHostRematchState()
@@ -1997,6 +1998,11 @@ class OnlineRaceSessionManager(
                         currentCustomTrack = null
                         _activeTrack.value = TrackCatalog.getTrack(nextTrack)
                     }
+                } else if (currentCustomTrack != null && winnerId == currentCustomTrack?.id) {
+                    val replayCustom = currentCustomTrack!!
+                    currentTrackId = runCatching { TrackId.valueOf(replayCustom.themeId) }
+                        .getOrDefault(TrackId.NEON_ROOFTOP)
+                    _activeTrack.value = TrackCatalog.buildCustomTrack(replayCustom)
                 } else {
                     val nextTrack = runCatching { TrackId.valueOf(winnerId) }.getOrDefault(currentTrackId)
                     currentTrackId = nextTrack

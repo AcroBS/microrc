@@ -38,6 +38,10 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Public
@@ -71,6 +75,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.model.CustomTrackData
 import com.example.model.DriverProfileDoc
 import com.example.model.FriendUiModel
 import com.example.model.FriendshipDoc
@@ -90,6 +95,7 @@ fun FriendsScreen(
     myFriendCode: String,
     activeOnlineRoom: OnlineRoomDoc?,
     friends: List<FriendUiModel>,
+    friendCustomTracksByUid: Map<String, List<CustomTrackData>> = emptyMap(),
     incomingRequests: List<FriendshipDoc>,
     outgoingRequests: List<FriendshipDoc>,
     searchResults: List<DriverProfileDoc>,
@@ -104,6 +110,7 @@ fun FriendsScreen(
     onNotifyFriendToJoin: (FriendUiModel) -> Unit,
     onNotifyAllOnlineFriends: (List<FriendUiModel>) -> Unit,
     onJoinFriendLobby: (String) -> Unit,
+    onChallengeFriendCustomTrack: (CustomTrackData) -> Unit = {},
     onOpenOnlineHub: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -622,9 +629,11 @@ fun FriendsScreen(
                         friends.forEach { friend ->
                             FriendStatusCard(
                                 friend = friend,
+                                customTracks = friendCustomTracksByUid[friend.friendUid].orEmpty(),
                                 currentRoomCode = activeOnlineRoom?.roomCode,
                                 onNotifyToJoin = { onNotifyFriendToJoin(friend) },
                                 onJoinFriendLobby = { onJoinFriendLobby(friend.activeRoomCode) },
+                                onChallengeCustomTrack = onChallengeFriendCustomTrack,
                                 onRequestRemove = { friendToRemove = friend }
                             )
                         }
@@ -669,9 +678,11 @@ fun FriendsScreen(
 @Composable
 private fun FriendStatusCard(
     friend: FriendUiModel,
+    customTracks: List<CustomTrackData>,
     currentRoomCode: String?,
     onNotifyToJoin: () -> Unit,
     onJoinFriendLobby: () -> Unit,
+    onChallengeCustomTrack: (CustomTrackData) -> Unit,
     onRequestRemove: () -> Unit
 ) {
     val canJoinTheirRoom = friend.canJoinActiveLobby &&
@@ -838,6 +849,84 @@ private fun FriendStatusCard(
                             text = "Join #${friend.activeRoomCode}",
                             style = MaterialTheme.typography.labelMedium
                         )
+                    }
+                }
+            }
+
+            if (customTracks.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Map,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Text(
+                            text = "CUSTOM TRACKS BY ${friend.displayName.uppercase()} (${customTracks.size})",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
+                    if (customTracks.size == 1) {
+                        val soleTrack = customTracks.first()
+                        FilledTonalButton(
+                            onClick = { onChallengeCustomTrack(soleTrack) },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("challenge_friend_custom_track_${friend.friendUid}")
+                        ) {
+                            Icon(
+                                Icons.Default.EmojiEvents,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Challenge Time: ${soleTrack.name}",
+                                style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    } else {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(customTracks.indices.toList(), key = { idx -> customTracks[idx].id }) { idx ->
+                                val cTrack = customTracks[idx]
+                                FilledTonalButton(
+                                    onClick = { onChallengeCustomTrack(cTrack) },
+                                    shape = RoundedCornerShape(12.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    modifier = Modifier
+                                        .height(48.dp)
+                                        .testTag(
+                                            if (idx == 0) {
+                                                "challenge_friend_custom_track_${friend.friendUid}"
+                                            } else {
+                                                "challenge_friend_custom_track_${friend.friendUid}_${cTrack.id}"
+                                            }
+                                        )
+                                ) {
+                                    Icon(
+                                        Icons.Default.EmojiEvents,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = cTrack.name,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

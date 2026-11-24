@@ -205,7 +205,9 @@ data class CustomTrackData(
     val boostPads: List<BoostPad> = emptyList(),
     val itemSpawns: List<ItemBoxSpawn> = emptyList(),
     val ramps: List<TrackRamp> = emptyList(),
-    val props: List<TrackProp> = emptyList()
+    val props: List<TrackProp> = emptyList(),
+    val creatorUid: String = "",
+    val creatorName: String = ""
 )
 
 data class TrackDefinition(

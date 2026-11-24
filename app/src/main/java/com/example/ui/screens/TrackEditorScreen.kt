@@ -181,6 +181,22 @@ fun TrackEditorScreen(
                 )
                 OutlinedButton(
                     onClick = {
+                        draft = TrackCatalog.defaultEditorOval(selectedTheme)
+                        selectedNodeIdx = 0
+                        savedBannerName = null
+                    },
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    modifier = Modifier
+                        .height(48.dp)
+                        .testTag("editor_new_track_button")
+                ) {
+                    Icon(Icons.Default.AddCircleOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("New", style = MaterialTheme.typography.labelLarge)
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+                OutlinedButton(
+                    onClick = {
                         draft = TrackCatalog.generateRandomTrack(
                             seed = System.currentTimeMillis(),
                             preferredTheme = selectedTheme,
@@ -596,6 +612,12 @@ fun TrackEditorScreen(
                     }
                 }
 
+                Text(
+                    text = "Saved circuits sync automatically when signed in so friends can challenge your times & race live with you.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
                 if (savedTracks.isNotEmpty()) {
                     Text("SAVED CUSTOM TRACKS", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -671,8 +693,9 @@ fun TrackEditorScreen(
                     Button(
                         onClick = {
                             val cleanName = draft.name.trim().ifEmpty { "Custom Circuit" }
+                            val fallbackId = TrackCatalog.defaultEditorOval(selectedTheme).id
                             val finalTrack = draft.copy(
-                                id = draft.id.ifBlank { "custom_${System.currentTimeMillis()}" },
+                                id = draft.id.ifBlank { fallbackId }.take(36),
                                 name = cleanName
                             )
                             draft = finalTrack

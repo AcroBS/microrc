@@ -421,8 +421,9 @@ object TrackCatalog {
             TrackPoint(340f, 750f, w)
         )
         val spline = subdivideClosedSpline(ctrl, samplesPerSegment = 14)
+        val randSuffix = Random.nextInt(1000, 9999)
         return CustomTrackData(
-            id = "custom_${System.currentTimeMillis()}",
+            id = "custom_${System.currentTimeMillis()}_$randSuffix",
             name = "Custom Circuit",
             themeId = theme.name,
             roadHalfWidth = w,
@@ -514,8 +515,9 @@ object TrackCatalog {
             }
         }
 
+        val defaultId = "rand_${(seed and 0x7FFFFFFFFFFFFFFFL)}_${rng.nextInt(1000, 9999)}".take(36)
         return CustomTrackData(
-            id = trackIdOverride ?: "rand_$seed",
+            id = trackIdOverride ?: defaultId,
             name = trackName,
             themeId = theme.name,
             roadHalfWidth = roadHalfWidth,

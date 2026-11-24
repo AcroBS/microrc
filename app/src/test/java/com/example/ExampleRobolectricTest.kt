@@ -505,6 +505,7 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("leaderboards_button").performScrollTo().performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("leaderboard_mode_RACE").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("leaderboard_mode_CUSTOM").assertIsDisplayed()
         composeTestRule.onNodeWithTag("leaderboard_mode_STUNTS").assertIsDisplayed()
         composeTestRule.onNodeWithTag("leaderboard_start_solo_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("leaderboard_back_button").performClick()

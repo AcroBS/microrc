@@ -134,11 +134,15 @@ class OnlineViewModel(
     private val _friendCircleEntries = MutableStateFlow<List<LeaderboardEntryDoc>>(emptyList())
     val friendCircleEntries: StateFlow<List<LeaderboardEntryDoc>> = _friendCircleEntries.asStateFlow()
 
+    private val _cloudCustomTracks = MutableStateFlow<List<CustomTrackData>>(emptyList())
+    val cloudCustomTracks: StateFlow<List<CustomTrackData>> = _cloudCustomTracks.asStateFlow()
+
     private val _socialFeedback = MutableStateFlow<String?>(null)
     val socialFeedback: StateFlow<String?> = _socialFeedback.asStateFlow()
 
     private val _appInForeground = MutableStateFlow(true)
     private var latestKnownProfile: PlayerProfile = PlayerProfile(playerId = currentUserId)
+    private val syncedLocalTrackSignatures = mutableMapOf<String, Int>()
 
     private var roomsSubscriptionJob: Job? = null
     private var leaderboardSubscriptionJob: Job? = null
@@ -146,6 +150,7 @@ class OnlineViewModel(
     private var invitesJob: Job? = null
     private var leaderboardNotifsJob: Job? = null
     private var friendCircleEntriesJob: Job? = null
+    private var customTracksJob: Job? = null
     private var presenceHeartbeatJob: Job? = null
     private var pendingChallengeJob: Job? = null
 
@@ -153,6 +158,7 @@ class OnlineViewModel(
         startObservingOpenRooms()
         startObservingFriendsAndPresence()
         startObservingFriendCircleEntries()
+        startObservingCloudCustomTracks()
         startObservingSessionInvites()
         startObservingLeaderboardNotifications()
         startPresenceLoop()
@@ -265,6 +271,80 @@ class OnlineViewModel(
             } catch (e: Exception) {
                 rethrowIfScopeCancellation(e)
             }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun startObservingCloudCustomTracks() {
+        customTracksJob?.cancel()
+        customTracksJob = viewModelScope.launch {
+            try {
+                _friendsList
+                    .map { friends ->
+                        (listOf(currentUserId) + friends.map { it.friendUid })
+                            .filter { it.isNotBlank() }
+                            .distinct()
+                            .sorted()
+                    }
+                    .distinctUntilChanged()
+                    .flatMapLatest { trackedUids ->
+                        repository.observeCustomTracksForUsers(trackedUids)
+                    }
+                    .collect { tracks ->
+                        _cloudCustomTracks.value = tracks
+                    }
+            } catch (e: Exception) {
+                rethrowIfScopeCancellation(e)
+            }
+        }
+    }
+
+    fun syncLocalCustomTracksToCloud(
+        profile: PlayerProfile,
+        localTracks: List<CustomTrackData>
+    ) {
+        val ownTracks = localTracks.filter { track ->
+            track.id.isNotBlank() &&
+                !DailyChallengeCatalog.isAnyDailyTrackId(track.id) &&
+                !track.id.startsWith("drift_") &&
+                (track.creatorUid.isBlank() || track.creatorUid == currentUserId)
+        }
+        if (ownTracks.isEmpty()) return
+        viewModelScope.launch {
+            for (track in ownTracks) {
+                val signature = (31 * track.hashCode()) + profile.name.hashCode()
+                if (syncedLocalTrackSignatures[track.id] == signature) continue
+                val stamped = track.copy(
+                    creatorUid = currentUserId,
+                    creatorName = profile.name.trim().take(24).ifEmpty { "Driver" }
+                )
+                val res = repository.upsertCustomTrack(profile, stamped)
+                if (res.isSuccess) {
+                    syncedLocalTrackSignatures[track.id] = signature
+                }
+            }
+        }
+    }
+
+    fun saveCustomTrackToCloud(profile: PlayerProfile, track: CustomTrackData) {
+        if (track.creatorUid.isNotBlank() && track.creatorUid != currentUserId) return
+        viewModelScope.launch {
+            val stamped = track.copy(
+                creatorUid = currentUserId,
+                creatorName = profile.name.trim().take(24).ifEmpty { "Driver" }
+            )
+            val res = repository.upsertCustomTrack(profile, stamped)
+            res.onSuccess {
+                val signature = (31 * track.hashCode()) + profile.name.hashCode()
+                syncedLocalTrackSignatures[track.id] = signature
+            }
+        }
+    }
+
+    fun deleteCustomTrackFromCloud(trackId: String) {
+        syncedLocalTrackSignatures.remove(trackId)
+        viewModelScope.launch {
+            repository.deleteCustomTrackFromCloud(trackId)
         }
     }
 
@@ -896,7 +976,11 @@ class OnlineViewModel(
         }
     }
 
-    fun syncSoloRunToCloud(profile: PlayerProfile, summary: CompletedSoloRunSummary) {
+    fun syncSoloRunToCloud(
+        profile: PlayerProfile,
+        summary: CompletedSoloRunSummary,
+        customTrackNames: Map<String, String> = emptyMap()
+    ) {
         viewModelScope.launch {
             val res = repository.submitPersonalBestAndGhost(
                 profile = profile,
@@ -911,7 +995,12 @@ class OnlineViewModel(
             )
             res.onSuccess { submission ->
                 if (submission.isNewBoardRecord) {
-                    val trackName = DailyChallengeCatalog.resolveTrackDisplayName(summary.trackKey)
+                    val customName = customTrackNames[summary.trackKey]?.takeIf { it.isNotBlank() }
+                        ?: _cloudCustomTracks.value.firstOrNull { it.id == summary.trackKey }?.name
+                    val trackName = (customName ?: DailyChallengeCatalog.resolveTrackDisplayName(summary.trackKey))
+                        .trim()
+                        .take(48)
+                        .ifEmpty { "Custom Circuit" }
                     val isDaily = DailyChallengeCatalog.isAnyDailyTrackId(summary.trackKey)
                     val notifiedCount = friendsRepository.sendLeaderboardNotificationsToAllFriends(
                         senderProfile = profile,
@@ -940,14 +1029,44 @@ class OnlineViewModel(
         ghostId: String,
         onLoaded: (GhostRunPlayback) -> Unit
     ) {
+        loadGhostAndTrackForChallenge(
+            ghostId = ghostId,
+            knownCustomTracks = emptyList()
+        ) { playback, _ ->
+            onLoaded(playback)
+        }
+    }
+
+    fun loadGhostAndTrackForChallenge(
+        ghostId: String,
+        knownCustomTracks: List<CustomTrackData>,
+        onLoaded: (GhostRunPlayback, CustomTrackData?) -> Unit
+    ) {
         if (ghostId.isBlank() || _ghostLoadingId.value != null) return
         _ghostLoadingId.value = ghostId
         viewModelScope.launch {
             val res = repository.fetchGhostRunPlayback(ghostId)
-            _ghostLoadingId.value = null
             res.onSuccess { playback ->
-                onLoaded(playback)
+                val isBuiltInTrack = TrackId.entries.any { it.name == playback.trackId }
+                val isDailyTrack = DailyChallengeCatalog.isAnyDailyTrackId(playback.trackId)
+                val isDriftTrack = com.example.drift.DriftTrackCatalog.resolveCustomTrackByKey(playback.trackId) != null ||
+                    com.example.drift.DriftFeature.isDriftBoardKey(playback.boardKey)
+
+                val resolvedCustomTrack: CustomTrackData? = if (!isBuiltInTrack && !isDailyTrack && !isDriftTrack) {
+                    knownCustomTracks.firstOrNull { it.id == playback.trackId }
+                        ?: _cloudCustomTracks.value.firstOrNull { it.id == playback.trackId }
+                        ?: repository.fetchCustomTrack(playback.trackId).getOrNull()
+                } else {
+                    null
+                }
+                _ghostLoadingId.value = null
+                if (!isBuiltInTrack && !isDailyTrack && !isDriftTrack && resolvedCustomTrack == null) {
+                    _cloudStatusMessage.value = "Custom track layout is no longer available on cloud."
+                } else {
+                    onLoaded(playback, resolvedCustomTrack)
+                }
             }.onFailure { err ->
+                _ghostLoadingId.value = null
                 formatUserFacingOnlineErrorOrNull(err, "Could not load ghost run.")?.let {
                     _cloudStatusMessage.value = it
                 }
@@ -1053,6 +1172,7 @@ class OnlineViewModel(
         }
         friendshipsJob?.cancel()
         friendCircleEntriesJob?.cancel()
+        customTracksJob?.cancel()
         invitesJob?.cancel()
         leaderboardNotifsJob?.cancel()
         roomsSubscriptionJob?.cancel()
@@ -1074,6 +1194,7 @@ class OnlineViewModel(
         }
         friendshipsJob?.cancel()
         friendCircleEntriesJob?.cancel()
+        customTracksJob?.cancel()
         invitesJob?.cancel()
         leaderboardNotifsJob?.cancel()
         roomsSubscriptionJob?.cancel()
@@ -1092,6 +1213,7 @@ class OnlineViewModel(
         _pendingFriendChallenge.value = null
         friendshipsJob?.cancel()
         friendCircleEntriesJob?.cancel()
+        customTracksJob?.cancel()
         invitesJob?.cancel()
         leaderboardNotifsJob?.cancel()
         roomsSubscriptionJob?.cancel()

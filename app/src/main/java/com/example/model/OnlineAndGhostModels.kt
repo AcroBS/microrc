@@ -132,6 +132,21 @@ data class GhostRunDoc(
     @ServerTimestamp val updatedAt: Timestamp? = null
 )
 
+@Keep
+@IgnoreExtraProperties
+data class CustomTrackDoc(
+    @DocumentId val id: String = "",
+    val ownerUid: String = "",
+    val ownerName: String = "",
+    val trackName: String = "",
+    val themeId: String = TrackId.NEON_ROOFTOP.name,
+    val roadHalfWidth: Double = 112.0,
+    val payloadData: String = "",
+    val publicTrack: Boolean = true,
+    @ServerTimestamp val createdAt: Timestamp? = null,
+    @ServerTimestamp val updatedAt: Timestamp? = null
+)
+
 // ============================================================================
 // Online Race Start Metadata Payload (stored in OnlineRoomDoc.raceStartJson)
 // ============================================================================
@@ -386,5 +401,174 @@ object GhostCodec {
         while (a > pi) a -= twoPi
         while (a < -pi) a += twoPi
         return a
+    }
+}
+
+object CustomTrackCodec {
+    private const val VERSION_PREFIX = "V1"
+    private const val MAX_POINTS = 64
+    private const val MAX_BOOSTS = 24
+    private const val MAX_ITEMS = 24
+    private const val MAX_RAMPS = 24
+    private const val MAX_PROPS = 48
+
+    fun encode(track: CustomTrackData): String {
+        val hw = track.roadHalfWidth.coerceIn(80f, 150f)
+        val safePoints = if (track.controlPoints.size >= 4) {
+            track.controlPoints.take(MAX_POINTS)
+        } else {
+            listOf(
+                TrackPoint(520f, 340f, hw),
+                TrackPoint(1100f, 290f, hw),
+                TrackPoint(1680f, 340f, hw),
+                TrackPoint(1860f, 750f, hw)
+            )
+        }
+        val ptsStr = safePoints.joinToString(";") { p ->
+            String.format(Locale.US, "%.1f,%.1f,%.1f", p.x, p.y, p.halfWidth.coerceIn(80f, 150f))
+        }
+        val boostsStr = track.boostPads.take(MAX_BOOSTS).joinToString(";") { b ->
+            String.format(Locale.US, "%.1f,%.1f,%.3f,%.1f", b.x, b.y, b.angleRad, b.radius)
+        }
+        val itemsStr = track.itemSpawns.take(MAX_ITEMS).joinToString(";") { item ->
+            String.format(Locale.US, "%d,%.1f,%.1f", item.id, item.x, item.y)
+        }
+        val rampsStr = track.ramps.take(MAX_RAMPS).joinToString(";") { r ->
+            String.format(Locale.US, "%.1f,%.1f,%.3f,%.1f,%.2f", r.x, r.y, r.angleRad, r.radius, r.impulse)
+        }
+        val propsStr = track.props.take(MAX_PROPS).joinToString(";") { pr ->
+            String.format(
+                Locale.US,
+                "%.1f,%.1f,%.1f,%s,%d,%d,%d",
+                pr.x,
+                pr.y,
+                pr.radius,
+                pr.shape.name,
+                pr.colorHex,
+                pr.accentHex,
+                if (pr.isSolidObstacle) 1 else 0
+            )
+        }
+        return "$VERSION_PREFIX|$ptsStr|$boostsStr|$itemsStr|$rampsStr|$propsStr".take(24_500)
+    }
+
+    fun decode(
+        id: String,
+        name: String,
+        themeId: String,
+        roadHalfWidth: Float,
+        creatorUid: String = "",
+        creatorName: String = "",
+        raw: String
+    ): CustomTrackData? {
+        if (id.isBlank() || raw.length < 10) return null
+        val sections = raw.split('|')
+        if (sections.size < 2 || sections[0] != VERSION_PREFIX) return null
+
+        val safeHw = roadHalfWidth.coerceIn(80f, 150f)
+        val safeTheme = TrackId.entries.firstOrNull { it.name == themeId }?.name ?: TrackId.NEON_ROOFTOP.name
+
+        val points = sections.getOrNull(1).orEmpty()
+            .split(';')
+            .filter { it.isNotBlank() }
+            .mapNotNull { token ->
+                val p = token.split(',')
+                if (p.size < 2) return@mapNotNull null
+                val x = p[0].toFloatOrNull()?.coerceIn(80f, 2120f) ?: return@mapNotNull null
+                val y = p[1].toFloatOrNull()?.coerceIn(80f, 1420f) ?: return@mapNotNull null
+                val hw = p.getOrNull(2)?.toFloatOrNull()?.coerceIn(80f, 150f) ?: safeHw
+                TrackPoint(x = x, y = y, halfWidth = hw)
+            }
+        if (points.size < 4) return null
+
+        val boosts = sections.getOrNull(2).orEmpty()
+            .split(';')
+            .filter { it.isNotBlank() }
+            .mapNotNull { token ->
+                val p = token.split(',')
+                if (p.size < 3) return@mapNotNull null
+                val x = p[0].toFloatOrNull() ?: return@mapNotNull null
+                val y = p[1].toFloatOrNull() ?: return@mapNotNull null
+                val ang = p[2].toFloatOrNull() ?: 0f
+                val rad = p.getOrNull(3)?.toFloatOrNull()?.coerceIn(20f, 90f) ?: 44f
+                BoostPad(x = x, y = y, angleRad = ang, radius = rad)
+            }
+
+        val items = sections.getOrNull(3).orEmpty()
+            .split(';')
+            .filter { it.isNotBlank() }
+            .mapIndexedNotNull { idx, token ->
+                val p = token.split(',')
+                if (p.size < 3) return@mapIndexedNotNull null
+                val itemId = p[0].toIntOrNull() ?: idx
+                val x = p[1].toFloatOrNull() ?: return@mapIndexedNotNull null
+                val y = p[2].toFloatOrNull() ?: return@mapIndexedNotNull null
+                ItemBoxSpawn(id = itemId, x = x, y = y)
+            }
+
+        val ramps = sections.getOrNull(4).orEmpty()
+            .split(';')
+            .filter { it.isNotBlank() }
+            .mapNotNull { token ->
+                val p = token.split(',')
+                if (p.size < 3) return@mapNotNull null
+                val x = p[0].toFloatOrNull() ?: return@mapNotNull null
+                val y = p[1].toFloatOrNull() ?: return@mapNotNull null
+                val ang = p[2].toFloatOrNull() ?: 0f
+                val rad = p.getOrNull(3)?.toFloatOrNull()?.coerceIn(24f, 96f) ?: 48f
+                val imp = p.getOrNull(4)?.toFloatOrNull()?.coerceIn(0.5f, 1.8f) ?: 1.0f
+                TrackRamp(x = x, y = y, angleRad = ang, radius = rad, impulse = imp)
+            }
+
+        val props = sections.getOrNull(5).orEmpty()
+            .split(';')
+            .filter { it.isNotBlank() }
+            .mapNotNull { token ->
+                val p = token.split(',')
+                if (p.size < 6) return@mapNotNull null
+                val x = p[0].toFloatOrNull() ?: return@mapNotNull null
+                val y = p[1].toFloatOrNull() ?: return@mapNotNull null
+                val rad = p[2].toFloatOrNull()?.coerceIn(12f, 120f) ?: 42f
+                val shape = PropShape.entries.firstOrNull { it.name == p[3] } ?: PropShape.CIRCLE
+                val col = p[4].toLongOrNull() ?: 0xFFE65100
+                val acc = p[5].toLongOrNull() ?: 0xFFFFFFFF
+                val solid = (p.getOrNull(6)?.toIntOrNull() ?: 0) != 0
+                TrackProp(
+                    x = x,
+                    y = y,
+                    radius = rad,
+                    shape = shape,
+                    colorHex = col,
+                    accentHex = acc,
+                    isSolidObstacle = solid
+                )
+            }
+
+        return CustomTrackData(
+            id = LeaderboardBoardKey.sanitizeKeyToken(id, 36),
+            name = name.trim().take(32).ifEmpty { "Custom Circuit" },
+            themeId = safeTheme,
+            roadHalfWidth = safeHw,
+            controlPoints = points,
+            boostPads = boosts,
+            itemSpawns = items,
+            ramps = ramps,
+            props = props,
+            creatorUid = creatorUid.trim(),
+            creatorName = creatorName.trim().take(24)
+        )
+    }
+
+    fun fromDoc(doc: CustomTrackDoc): CustomTrackData? {
+        val docId = doc.id.takeIf { it.isNotBlank() } ?: return null
+        return decode(
+            id = docId,
+            name = doc.trackName,
+            themeId = doc.themeId,
+            roadHalfWidth = doc.roadHalfWidth.toFloat(),
+            creatorUid = doc.ownerUid,
+            creatorName = doc.ownerName,
+            raw = doc.payloadData
+        )
     }
 }

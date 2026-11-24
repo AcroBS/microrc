@@ -212,6 +212,18 @@ service cloud.firestore {
              isValidTimestampBound(data.updatedAt);
     }
 
+    function isValidCustomTrack(data) {
+      return data.ownerUid is string && data.ownerUid.size() >= 1 && data.ownerUid.size() <= 128 &&
+             data.ownerName is string && data.ownerName.size() >= 1 && data.ownerName.size() <= 24 &&
+             data.trackName is string && data.trackName.size() >= 1 && data.trackName.size() <= 32 &&
+             data.themeId is string && data.themeId in ['LIVING_ROOM_GP', 'BACKYARD_DIRT', 'NEON_ROOFTOP', 'SANDBOX_DUNES', 'WAREHOUSE_DRIFT'] &&
+             isNumberInRange(data.roadHalfWidth, 80.0, 150.0) &&
+             data.payloadData is string && data.payloadData.size() >= 10 && data.payloadData.size() <= 25000 &&
+             data.publicTrack is bool &&
+             isValidTimestampBound(data.createdAt) &&
+             isValidTimestampBound(data.updatedAt);
+    }
+
     // --- 1. Online Multiplayer Rooms (/onlineRooms/{roomId}) ---
     match /onlineRooms/{roomId} {
       allow get: if isSignedIn() && isValidId(roomId);
@@ -702,5 +714,50 @@ service cloud.firestore {
                        isValidId(notificationId) &&
                        (existing().recipientUid == request.auth.uid || existing().senderUid == request.auth.uid);
     }
+
+    // --- 8. Self-Designed Custom Tracks (/customTracks/{trackId}) ---
+    match /customTracks/{trackId} {
+      allow get: if isSignedIn() &&
+                    isValidId(trackId) &&
+                    trackId.size() <= 64 &&
+                    (resource == null || existing().publicTrack == true || existing().ownerUid == request.auth.uid);
+
+      allow list: if isSignedIn() &&
+                     (existing().publicTrack == true || existing().ownerUid == request.auth.uid);
+
+      allow create: if isSignedIn() &&
+                       isValidId(trackId) &&
+                       trackId.size() <= 64 &&
+                       incoming().keys().hasAll([
+                         'ownerUid', 'ownerName', 'trackName', 'themeId',
+                         'roadHalfWidth', 'payloadData', 'publicTrack',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().keys().hasOnly([
+                         'ownerUid', 'ownerName', 'trackName', 'themeId',
+                         'roadHalfWidth', 'payloadData', 'publicTrack',
+                         'createdAt', 'updatedAt'
+                       ]) &&
+                       incoming().ownerUid == request.auth.uid &&
+                       isValidCustomTrack(incoming());
+
+      allow update: if isSignedIn() &&
+                       isValidId(trackId) &&
+                       trackId.size() <= 64 &&
+                       isValidCustomTrack(incoming()) &&
+                       existing().ownerUid == request.auth.uid &&
+                       incoming().ownerUid == existing().ownerUid &&
+                       incoming().createdAt == existing().createdAt &&
+                       incoming().diff(existing()).affectedKeys().hasOnly([
+                         'ownerName', 'trackName', 'themeId', 'roadHalfWidth',
+                         'payloadData', 'publicTrack', 'updatedAt'
+                       ]);
+
+      allow delete: if isSignedIn() &&
+                       isValidId(trackId) &&
+                       trackId.size() <= 64 &&
+                       existing().ownerUid == request.auth.uid;
+    }
   }
 }
+

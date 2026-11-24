@@ -657,3 +657,132 @@ test("LeaderboardNotifications: accepted friends can notify, outsiders blocked, 
     })
   );
 });
+
+test("CustomTracks: creator sync, friend discovery, ghost/leaderboard challenge & cross-user protection", async () => {
+  const hostDb = testEnv.authenticatedContext(HOST_UID).firestore();
+  const bro2Db = testEnv.authenticatedContext(BRO2_UID).firestore();
+  const unauthDb = testEnv.unauthenticatedContext().firestore();
+  const created = new Date(Date.now() - 4000);
+  const updated = new Date(Date.now() - 800);
+  const trackId = "custom_1732450011_a1b2c3";
+  const encodedPayload =
+    "V1|800.0,1150.0,104.0;2400.0,1150.0,104.0;2400.0,2050.0,104.0;800.0,2050.0,104.0;1600.0,1600.0,104.0|0.22|0.55|0.72,1.0,1.0|";
+
+  const customTrackPayload = {
+    ownerUid: HOST_UID,
+    ownerName: "Alex",
+    trackName: "Alex's Hairpin GP",
+    themeId: "NEON_ROOFTOP",
+    roadHalfWidth: 104.0,
+    payloadData: encodedPayload,
+    publicTrack: true,
+    createdAt: created,
+    updatedAt: created,
+  };
+
+  // Unauthenticated reads & writes are denied
+  await assertFails(unauthDb.collection("customTracks").doc(trackId).set(customTrackPayload));
+  await assertFails(unauthDb.collection("customTracks").doc(trackId).get());
+
+  // Cannot spoof another creator's ownerUid or inject shadow fields ("id", "admin")
+  await assertFails(
+    bro2Db.collection("customTracks").doc(trackId).set(customTrackPayload)
+  );
+  await assertFails(
+    hostDb.collection("customTracks").doc(trackId).set({
+      ...customTrackPayload,
+      id: trackId,
+    })
+  );
+  await assertFails(
+    hostDb.collection("customTracks").doc(trackId).set({
+      ...customTrackPayload,
+      createdAt: new Date(Date.now() + 60000),
+    })
+  );
+
+  // Creator saves self-designed track to cloud
+  await assertSucceeds(hostDb.collection("customTracks").doc(trackId).set(customTrackPayload));
+
+  // Friend discovers creator's public custom tracks via scoped query; unfiltered list fails
+  await assertSucceeds(
+    bro2Db
+      .collection("customTracks")
+      .where("publicTrack", "==", true)
+      .where("ownerUid", "==", HOST_UID)
+      .get()
+  );
+  await assertSucceeds(
+    hostDb
+      .collection("customTracks")
+      .where("ownerUid", "==", HOST_UID)
+      .get()
+  );
+  await assertFails(bro2Db.collection("customTracks").get());
+
+  // Friend fetches track directly by ID (e.g. when launching a ghost challenge)
+  await assertSucceeds(bro2Db.collection("customTracks").doc(trackId).get());
+
+  // Friend posts a time-trial leaderboard entry + ghost run on the creator's custom track
+  const boardKey = `RACE_${trackId}_3L`;
+  const friendEntryId = `${BRO2_UID}_${boardKey}`;
+  await assertSucceeds(
+    bro2Db.collection("leaderboardEntries").doc(friendEntryId).set({
+      userId: BRO2_UID,
+      driverName: "Sam",
+      carType: "VOLT_BUGGY",
+      primaryColorArgb: -12000,
+      accentColorArgb: -5000,
+      gameMode: "RACE",
+      trackKey: trackId,
+      boardKey,
+      totalLaps: 3,
+      bestRaceTimeMs: 38420,
+      bestLapTimeMs: 12410,
+      bestScore: 0,
+      hasGhost: true,
+      ghostId: friendEntryId,
+      publicEntry: true,
+      createdAt: updated,
+      updatedAt: updated,
+    })
+  );
+  await assertSucceeds(
+    bro2Db.collection("ghostRuns").doc(friendEntryId).set({
+      userId: BRO2_UID,
+      driverName: "Sam",
+      carType: "VOLT_BUGGY",
+      primaryColorArgb: -12000,
+      accentColorArgb: -5000,
+      boardKey,
+      trackId,
+      totalLaps: 3,
+      finishTimeMs: 38420,
+      bestLapMs: 12410,
+      framesData: "0,800.0,1150.0,0.0,0.0;100,845.0,1152.0,0.04,0.0",
+      publicGhost: true,
+      createdAt: updated,
+      updatedAt: updated,
+    })
+  );
+
+  // Friend cannot overwrite or delete creator's track
+  await assertFails(
+    bro2Db.collection("customTracks").doc(trackId).update({
+      trackName: "Hijacked Track",
+      updatedAt: updated,
+    })
+  );
+  await assertFails(bro2Db.collection("customTracks").doc(trackId).delete());
+
+  // Creator performs valid partial update, then deletes own custom track
+  await assertSucceeds(
+    hostDb.collection("customTracks").doc(trackId).update({
+      trackName: "Alex's Hairpin GP v2",
+      roadHalfWidth: 112.0,
+      updatedAt: updated,
+    })
+  );
+  await assertSucceeds(hostDb.collection("customTracks").doc(trackId).delete());
+});
+
