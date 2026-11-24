@@ -140,6 +140,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _lastRunWasPersonalBest = MutableStateFlow(false)
     val lastRunWasPersonalBest: StateFlow<Boolean> = _lastRunWasPersonalBest.asStateFlow()
 
+    private val _lastRunRecordEvaluated = MutableStateFlow(false)
+    val lastRunRecordEvaluated: StateFlow<Boolean> = _lastRunRecordEvaluated.asStateFlow()
+
     init {
         viewModelScope.launch {
             prefsRepo.ensurePlayerId()
@@ -151,6 +154,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             audioSettings.collect {
                 audioEngine.updateAudioSettings(it)
                 hapticController.enabled = it.hapticsEnabled
+            }
+        }
+        viewModelScope.launch {
+            raceManager.navEvents.collect { event ->
+                if (event is RaceNavEvent.StartRace) {
+                    _lastRunWasPersonalBest.value = false
+                    _lastRunRecordEvaluated.value = false
+                }
             }
         }
         viewModelScope.launch {
@@ -167,6 +178,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     encodedGhostFrames = summary.encodedGhostFrames
                 )
                 _lastRunWasPersonalBest.value = improved
+                _lastRunRecordEvaluated.value = true
                 prefsRepo.recordPlayStreakActivity()
             }
         }
@@ -599,6 +611,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun restartActiveRace() {
         _lastRunWasPersonalBest.value = false
+        _lastRunRecordEvaluated.value = false
+        refreshDefaultLocalGhostIfMatching()
         raceManager.restartRace()
     }
 
@@ -725,11 +739,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun sendChat(text: String) = raceManager.sendChatMessage(profile.value.name, text)
     fun startRace() {
         _lastRunWasPersonalBest.value = false
+        _lastRunRecordEvaluated.value = false
         raceManager.startRace()
     }
     fun voteRematchOption(optionId: String) = raceManager.voteNextRematchTrack(optionId)
     fun launchRematchNow() {
         _lastRunWasPersonalBest.value = false
+        _lastRunRecordEvaluated.value = false
         raceManager.launchRematchNow()
     }
     fun returnToLobby() = raceManager.returnToLobby()

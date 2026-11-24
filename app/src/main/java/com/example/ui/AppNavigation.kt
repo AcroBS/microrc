@@ -182,6 +182,7 @@ fun MicroRCApp(
     val isDailyChallengeSession by viewModel.isDailyChallengeSession.collectAsState()
     val dailyNotificationsEnabled by viewModel.dailyNotificationsEnabled.collectAsState()
     val lastRunWasPersonalBest by viewModel.lastRunWasPersonalBest.collectAsState()
+    val lastRunRecordEvaluated by viewModel.lastRunRecordEvaluated.collectAsState()
     val overviewCamera by viewModel.overviewCamera.collectAsState()
     val appUpdateState by viewModel.appUpdateState.collectAsState()
     val dismissedUpdateTag by viewModel.dismissedUpdateTag.collectAsState()
@@ -1326,8 +1327,14 @@ fun MicroRCApp(
                     lobby = lobbyState,
                     rematchState = rematchState,
                     isNewPersonalBest = !isOnlineSession && lastRunWasPersonalBest,
+                    lastRunRecordEvaluated = !isOnlineSession && lastRunRecordEvaluated,
                     isDailyChallenge = !isOnlineSession && isDailyChallengeSession,
                     challengeGhost = if (!isOnlineSession) activeChallengeGhost else null,
+                    onTryAgainSameTrack = if (!isOnlineSession && sessionRole == SessionRole.Solo) {
+                        { viewModel.restartActiveRace() }
+                    } else {
+                        null
+                    },
                     onRetryDailyChallenge = if (!isOnlineSession && isDailyChallengeSession) {
                         {
                             val isDriftDaily = lastResults?.gameMode == GameMode.DRIFT.name ||

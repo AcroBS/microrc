@@ -82,9 +82,11 @@ fun ResultsScreen(
     lobby: LobbyStatePayload?,
     rematchState: RematchCountdownState? = null,
     isNewPersonalBest: Boolean = false,
+    lastRunRecordEvaluated: Boolean = true,
     isDailyChallenge: Boolean = false,
     challengeGhost: GhostRunPlayback? = null,
     onRetryDailyChallenge: (() -> Unit)? = null,
+    onTryAgainSameTrack: (() -> Unit)? = null,
     onOpenLeaderboards: (() -> Unit)? = null,
     onVoteRematch: (String) -> Unit = {},
     onLaunchRematchNow: () -> Unit = {},
@@ -235,13 +237,22 @@ fun ResultsScreen(
 
                 // Personal Best & Ghost Challenge Summary Banner (Solo Mode)
                 val myRacer = sortedRacers.find { it.playerId == localPlayerId } ?: sortedRacers.firstOrNull()
+                val myFinish = myRacer?.finishTimeMs ?: 0L
+                val ghostDelta = if (challengeGhost != null && myFinish > 0L) {
+                    myFinish - challengeGhost.finishTimeMs
+                } else {
+                    null
+                }
+                val missedChallengeGhost = ghostDelta != null && ghostDelta > 0L
+                val isSoloRecordMode = role == SessionRole.Solo &&
+                    !isHybridTour &&
+                    !isArena &&
+                    (isDrift || isStunts || winCond == WinCondition.FIRST_TO_FINISH)
+                val recordNotBroken = isSoloRecordMode &&
+                    onTryAgainSameTrack != null &&
+                    ((lastRunRecordEvaluated && !isNewPersonalBest) || missedChallengeGhost)
+
                 if (role == SessionRole.Solo && (isNewPersonalBest || challengeGhost != null)) {
-                    val myFinish = myRacer?.finishTimeMs ?: 0L
-                    val ghostDelta = if (challengeGhost != null && myFinish > 0L) {
-                        myFinish - challengeGhost.finishTimeMs
-                    } else {
-                        null
-                    }
                     Surface(
                         color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f),
                         shape = RoundedCornerShape(16.dp),
@@ -381,6 +392,11 @@ fun ResultsScreen(
 
                 // 10-Second Auto-Rematch & Next Track/Arena/Stunt/Hybrid Voting Loop
                 if (rematchState != null) {
+                    val tryAgainHint = if (missedChallengeGhost && challengeGhost != null) {
+                        "Ghost record not beaten — retry $trackName vs ${challengeGhost.driverName}"
+                    } else {
+                        "Record not broken — retry $trackName before advancing"
+                    }
                     RematchCountdownCard(
                         rematchState = rematchState,
                         localPlayerId = localPlayerId,
@@ -390,6 +406,9 @@ fun ResultsScreen(
                         isDrift = isDrift,
                         isHybridTour = isHybridTour,
                         nextHybridModeLabel = nextHybridModeLabel,
+                        showTryAgain = recordNotBroken,
+                        tryAgainHint = tryAgainHint,
+                        onTryAgainSameTrack = onTryAgainSameTrack,
                         onVoteRematch = onVoteRematch,
                         onLaunchRematchNow = onLaunchRematchNow
                     )
@@ -718,6 +737,9 @@ private fun RematchCountdownCard(
     isDrift: Boolean = false,
     isHybridTour: Boolean = false,
     nextHybridModeLabel: String? = null,
+    showTryAgain: Boolean = false,
+    tryAgainHint: String = "",
+    onTryAgainSameTrack: (() -> Unit)? = null,
     onVoteRematch: (String) -> Unit,
     onLaunchRematchNow: () -> Unit
 ) {
@@ -835,6 +857,42 @@ private fun RematchCountdownCard(
                     .height(7.dp)
                     .clip(RoundedCornerShape(50))
             )
+
+            if (isHostOrSolo && showTryAgain && onTryAgainSameTrack != null) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (tryAgainHint.isNotBlank()) {
+                        Text(
+                            text = tryAgainHint,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
+                    Button(
+                        onClick = onTryAgainSameTrack,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.secondary,
+                            contentColor = MaterialTheme.colorScheme.onSecondary
+                        ),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minWidth = 48.dp, minHeight = 48.dp)
+                            .height(50.dp)
+                            .testTag("results_try_again_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Replay,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Try Again",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
+            }
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 rematchState.options.forEach { option ->
