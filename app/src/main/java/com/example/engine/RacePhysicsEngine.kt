@@ -35,6 +35,7 @@ import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.random.Random
 
 class RacePhysicsEngine(
@@ -1643,7 +1644,10 @@ class RacePhysicsEngine(
             racer.vz -= 1.85f * abs(throttle) * dt
         }
 
-        val speedNorm = (abs(forwardVel) / (180f * speedPreset.speedMultiplier)).coerceIn(0.32f, 1.0f)
+        val speedNorm = computeSteeringSpeedFactor(
+            absForwardSpeedPx = abs(forwardVel),
+            speedMultiplier = speedPreset.speedMultiplier
+        )
         val reverseFlip = if (forwardVel < -25f) -1f else 1f
         val gripTurnBoost = if (hasOverdrive) 1.18f else 1.0f
         val airSteerFactor = if (isAirborne) 0.25f else 1.0f
@@ -3248,7 +3252,20 @@ class RacePhysicsEngine(
         )
     }
 
+    enum class SteeringBehaviorMode {
+        /** Original curve: linear speedNorm (0.32..1.0) up to 180 px/s, producing a flat turning radius below 180 px/s. */
+        LEGACY_FLAT_LOW_SPEED,
+        /** Realistic speed-scaled curve: smaller turning radius the slower the car is, with mild high-speed stability. */
+        SPEED_SCALED_RADIUS
+    }
+
     companion object {
+        /**
+         * Global steering model switch (no per-user setting).
+         * Flip to [SteeringBehaviorMode.LEGACY_FLAT_LOW_SPEED] to revert globally to the prior steering curve.
+         */
+        val GLOBAL_STEERING_BEHAVIOR: SteeringBehaviorMode = SteeringBehaviorMode.SPEED_SCALED_RADIUS
+
         const val FINISH_GRACE_MS = 10_000L
         const val STALLED_RIVAL_MIN_GRACE_MS = 2_000L
         const val STALLED_RIVAL_THRESHOLD_MS = 3_500L
@@ -3263,6 +3280,26 @@ class RacePhysicsEngine(
         const val LASER_LENGTH_PX = 340f
         const val ROCKET_DURATION_MS = 6000L
         private const val MAX_FIELD_PICKUPS = 2
+
+        fun computeSteeringSpeedFactor(
+            absForwardSpeedPx: Float,
+            speedMultiplier: Float,
+            mode: SteeringBehaviorMode = GLOBAL_STEERING_BEHAVIOR
+        ): Float {
+            val safeMult = speedMultiplier.coerceAtLeast(0.25f)
+            val refSpeed = 180f * safeMult
+            return when (mode) {
+                SteeringBehaviorMode.LEGACY_FLAT_LOW_SPEED -> {
+                    (absForwardSpeedPx / refSpeed).coerceIn(0.32f, 1.0f)
+                }
+                SteeringBehaviorMode.SPEED_SCALED_RADIUS -> {
+                    val lowSpeedFactor = sqrt((absForwardSpeedPx / refSpeed).coerceIn(0f, 1f))
+                    val highSpeedTaper =
+                        1.0f - 0.10f * ((absForwardSpeedPx - refSpeed) / (380f * safeMult)).coerceIn(0f, 1f)
+                    (lowSpeedFactor * highSpeedTaper).coerceIn(0.24f, 1.0f)
+                }
+            }
+        }
 
         fun normalizeAngle(angle: Float): Float {
             var a = angle

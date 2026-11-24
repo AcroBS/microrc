@@ -2263,6 +2263,99 @@ class RaceEngineUnitTest {
         assertFalse("Sanitized leaderboard docId must never contain slashes or spaces", docId.contains('/') || docId.contains(' '))
         assertTrue(docId.endsWith("RACE_LIVING_ROOM_GP_3L"))
     }
+
+    @Test
+    fun globalSteeringBehavior_turningRadiusIsStrictlySmallerAtLowerSpeeds() {
+        assertEquals(
+            RacePhysicsEngine.SteeringBehaviorMode.SPEED_SCALED_RADIUS,
+            RacePhysicsEngine.GLOBAL_STEERING_BEHAVIOR
+        )
+
+        val turnRate = RcCarType.VOLT_BUGGY.turnRateRad
+        val mult = CarSpeedPreset.FAST.speedMultiplier
+        val speeds = listOf(45f, 70f, 100f, 140f, 180f, 280f, 420f, 560f)
+        val radii = speeds.map { v ->
+            val factor = RacePhysicsEngine.computeSteeringSpeedFactor(v, mult)
+            v / (turnRate * factor)
+        }
+
+        for (i in 0 until radii.lastIndex) {
+            assertTrue(
+                "Expected turning radius at ${speeds[i]} px/s (${radii[i]}) < at ${speeds[i + 1]} px/s (${radii[i + 1]})",
+                radii[i] < radii[i + 1]
+            )
+        }
+
+        // Verify in live physics simulation on an open arena that a slower car carves a smaller turning circle
+        val arena = TrackCatalog.getArenaTrack(ArenaShape.CIRCLE)
+        fun measureTurnCircleDiameter(maintainLowSpeed: Boolean): Float {
+            val engine = RacePhysicsEngine(
+                track = arena,
+                totalLaps = 1,
+                players = listOf(
+                    LobbyPlayer("p1", "Tester", isHost = true, isBot = false, carType = RcCarType.VOLT_BUGGY.name)
+                ),
+                rules = RaceRulesSettings(
+                    gameMode = GameMode.ARENA.name,
+                    carSpeed = CarSpeedPreset.FAST.name,
+                    randomConditionsEnabled = false
+                ),
+                random = Random(99L)
+            )
+            repeat(70) { engine.step(0.05f) } // Pass countdown
+            // Bring car to target speed before entering steady-state circle
+            val warmupTicks = if (maintainLowSpeed) 10 else 65
+            var lastSpeed = 0f
+            repeat(warmupTicks) {
+                engine.submitInput("p1", ControlInput(throttle = 1.0f, steer = 0f))
+                lastSpeed = engine.step(0.02f).racers.first().speed
+            }
+            var minX = Float.MAX_VALUE
+            var maxX = -Float.MAX_VALUE
+            var minY = Float.MAX_VALUE
+            var maxY = -Float.MAX_VALUE
+            repeat(180) {
+                val throttle = if (maintainLowSpeed) {
+                    when {
+                        lastSpeed > 115f -> -0.25f
+                        lastSpeed < 85f -> 0.35f
+                        else -> 0f
+                    }
+                } else {
+                    1.0f
+                }
+                engine.submitInput("p1", ControlInput(throttle = throttle, steer = 1f))
+                val r = engine.step(0.02f).racers.first()
+                lastSpeed = r.speed
+                if (r.x < minX) minX = r.x
+                if (r.x > maxX) maxX = r.x
+                if (r.y < minY) minY = r.y
+                if (r.y > maxY) maxY = r.y
+            }
+            return ((maxX - minX) + (maxY - minY)) * 0.5f
+        }
+
+        val slowDiameter = measureTurnCircleDiameter(maintainLowSpeed = true)
+        val fastDiameter = measureTurnCircleDiameter(maintainLowSpeed = false)
+        assertTrue(
+            "Slow-speed turning diameter ($slowDiameter) should be significantly smaller than full speed ($fastDiameter)",
+            slowDiameter < fastDiameter * 0.45f
+        )
+    }
+
+    @Test
+    fun legacySteeringBehavior_preservesExactOriginalCurveForCleanRevert() {
+        val speeds = listOf(20f, 60f, 120f, 180f, 350f, 560f)
+        for (preset in CarSpeedPreset.entries) {
+            for (v in speeds) {
+                val expected = (v / (180f * preset.speedMultiplier)).coerceIn(0.32f, 1.0f)
+                val actual = RacePhysicsEngine.computeSteeringSpeedFactor(
+                    absForwardSpeedPx = v,
+                    speedMultiplier = preset.speedMultiplier,
+                    mode = RacePhysicsEngine.SteeringBehaviorMode.LEGACY_FLAT_LOW_SPEED
+                )
+                assertEquals(expected, actual, 0.0001f)
+            }
+        }
+    }
 }
-
-
