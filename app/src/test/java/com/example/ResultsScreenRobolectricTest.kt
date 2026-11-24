@@ -224,4 +224,39 @@ class ResultsScreenRobolectricTest {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("results_try_again_button").assertDoesNotExist()
     }
+
+    @Test
+    fun resultsScreen_onlineClientShowsRematchVotingCountdownAndBackToLobby() {
+        var votedOption: String? = null
+        var returnToLobbyClicks = 0
+        composeTestRule.setContent {
+            MicroRCTheme {
+                ResultsScreen(
+                    role = SessionRole.OnlineClient,
+                    localPlayerId = "uid_client",
+                    results = sampleSnapshot(finishTimeMs = 46_200L),
+                    lobby = null,
+                    rematchState = sampleRematchState(),
+                    isNewPersonalBest = false,
+                    lastRunRecordEvaluated = false,
+                    onVoteRematch = { votedOption = it },
+                    onReturnToLobby = { returnToLobbyClicks++ },
+                    onExitHome = {}
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("rematch_countdown_card").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("rematch_countdown_timer").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("rematch_launch_now_button").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("results_try_again_button").assertDoesNotExist()
+
+        composeTestRule.onNodeWithTag("rematch_vote_${TrackId.WAREHOUSE_DRIFT.name}").performScrollTo().performClick()
+        assertEquals(TrackId.WAREHOUSE_DRIFT.name, votedOption)
+
+        composeTestRule.onNodeWithTag("results_rematch_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("results_rematch_button").performClick()
+        assertEquals(1, returnToLobbyClicks)
+    }
 }

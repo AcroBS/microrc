@@ -401,4 +401,16 @@ class OnlineMultiplayerSyncUnitTest {
         )
         assertTrue(voteOptions.any { it.id == decoded.id && !it.isRandom })
     }
+
+    @Test
+    fun onlineSession_returnToLobbyVoteToken_isDistinctPerMatchSeqAndClampedNonNegative() {
+        val t0 = OnlineRaceSessionManager.returnToLobbyVoteToken(-5L)
+        val t1 = OnlineRaceSessionManager.returnToLobbyVoteToken(1L)
+        val t2 = OnlineRaceSessionManager.returnToLobbyVoteToken(2L)
+        assertTrue(t0.startsWith(OnlineRaceSessionManager.RETURN_TO_LOBBY_VOTE_PREFIX))
+        assertEquals("${OnlineRaceSessionManager.RETURN_TO_LOBBY_VOTE_PREFIX}0", t0)
+        assertEquals("${OnlineRaceSessionManager.RETURN_TO_LOBBY_VOTE_PREFIX}1", t1)
+        assertEquals("${OnlineRaceSessionManager.RETURN_TO_LOBBY_VOTE_PREFIX}2", t2)
+        assertTrue(t1 != t2)
+    }
 }

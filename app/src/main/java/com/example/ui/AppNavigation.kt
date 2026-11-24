@@ -197,9 +197,31 @@ fun MicroRCApp(
         }.getOrNull()
     )
 
-    var activeOnlineVm: OnlineViewModel? = null
     var signOutCleanupAction: (suspend () -> Unit)? = null
     var deleteAccountCleanupAction: (suspend () -> Unit)? = null
+    val activeOnlineVm: OnlineViewModel? = if (currentUser != null) {
+        val uid = currentUser!!.uid
+        key(uid) {
+            val onlineVm: OnlineViewModel = viewModel(
+                key = uid,
+                factory = viewModelFactory {
+                    initializer {
+                        OnlineViewModel(
+                            repository = OnlineRaceRepository(appContext),
+                            friendsRepository = FriendsRepository(appContext),
+                            currentUserId = uid,
+                            appContext = appContext
+                        )
+                    }
+                }
+            )
+            signOutCleanupAction = { onlineVm.cleanupBeforeSignOut() }
+            deleteAccountCleanupAction = { onlineVm.deleteAllCloudDataBeforeAccountRemoval() }
+            onlineVm
+        }
+    } else {
+        null
+    }
 
     val cloudCustomTracks = activeOnlineVm?.let { it.cloudCustomTracks.collectAsState().value }.orEmpty()
     val allAccessibleCustomTracks = remember(customTracks, cloudCustomTracks, currentUser?.uid, profile.name) {
@@ -255,83 +277,64 @@ fun MicroRCApp(
         activeOnlineVm?.syncLocalCustomTracksToCloud(profile, customTracks)
     }
 
-    if (currentUser != null) {
-        val uid = currentUser!!.uid
-        key(uid) {
-            val onlineVm: OnlineViewModel = viewModel(
-                key = uid,
-                factory = viewModelFactory {
-                    initializer {
-                        OnlineViewModel(
-                            repository = OnlineRaceRepository(appContext),
-                            friendsRepository = FriendsRepository(appContext),
-                            currentUserId = uid,
-                            appContext = appContext
-                        )
+    if (activeOnlineVm != null) {
+        val onlineVm = activeOnlineVm
+        LaunchedEffect(onlineVm) {
+            DailyChallengeScheduler.scheduleLeaderboardSync(appContext)
+            DailyChallengeScheduler.triggerImmediateBackgroundSync(appContext)
+        }
+
+        LaunchedEffect(onlineVm) {
+            viewModel.latestCompletedSoloRun.collect { summary ->
+                onlineVm.syncSoloRunToCloud(latestProfile, summary, latestCustomTrackNames)
+            }
+        }
+
+        LaunchedEffect(
+            onlineVm,
+            profile.name,
+            profile.carType,
+            profile.primaryColorArgb,
+            profile.accentColorArgb
+        ) {
+            onlineVm.syncProfileToPresence(profile)
+            if (onlineVm.role.value.isOnline) {
+                onlineVm.sessionManager.updateLocalProfile(profile)
+            }
+        }
+
+        LaunchedEffect(onlineVm) {
+            onlineVm.navEvents.collect { event ->
+                when (event) {
+                    is RaceNavEvent.EnterLobby -> {
+                        navController.navigate(Routes.LOBBY) {
+                            popUpTo(Routes.HOME)
+                            launchSingleTop = true
+                        }
                     }
-                }
-            )
-            activeOnlineVm = onlineVm
-            signOutCleanupAction = { onlineVm.cleanupBeforeSignOut() }
-            deleteAccountCleanupAction = { onlineVm.deleteAllCloudDataBeforeAccountRemoval() }
-
-            LaunchedEffect(uid) {
-                DailyChallengeScheduler.scheduleLeaderboardSync(appContext)
-                DailyChallengeScheduler.triggerImmediateBackgroundSync(appContext)
-            }
-
-            LaunchedEffect(onlineVm) {
-                viewModel.latestCompletedSoloRun.collect { summary ->
-                    onlineVm.syncSoloRunToCloud(latestProfile, summary, latestCustomTrackNames)
-                }
-            }
-
-            LaunchedEffect(
-                onlineVm,
-                profile.name,
-                profile.carType,
-                profile.primaryColorArgb,
-                profile.accentColorArgb
-            ) {
-                onlineVm.syncProfileToPresence(profile)
-                if (onlineVm.role.value.isOnline) {
-                    onlineVm.sessionManager.updateLocalProfile(profile)
-                }
-            }
-
-            LaunchedEffect(onlineVm) {
-                onlineVm.navEvents.collect { event ->
-                    when (event) {
-                        is RaceNavEvent.EnterLobby -> {
-                            navController.navigate(Routes.LOBBY) {
-                                popUpTo(Routes.HOME)
-                                launchSingleTop = true
-                            }
+                    is RaceNavEvent.StartRace -> {
+                        navController.navigate(Routes.RACE) {
+                            popUpTo(Routes.LOBBY) { inclusive = false }
+                            launchSingleTop = true
                         }
-                        is RaceNavEvent.StartRace -> {
-                            navController.navigate(Routes.RACE) {
-                                popUpTo(Routes.LOBBY) { inclusive = false }
-                                launchSingleTop = true
-                            }
+                    }
+                    is RaceNavEvent.ShowResults -> {
+                        navController.navigate(Routes.RESULTS) {
+                            popUpTo(Routes.LOBBY)
+                            launchSingleTop = true
                         }
-                        is RaceNavEvent.ShowResults -> {
-                            navController.navigate(Routes.RESULTS) {
-                                popUpTo(Routes.LOBBY)
-                                launchSingleTop = true
-                            }
+                    }
+                    is RaceNavEvent.BackToLobby -> {
+                        navController.navigate(Routes.LOBBY) {
+                            popUpTo(Routes.HOME)
+                            launchSingleTop = true
                         }
-                        is RaceNavEvent.BackToLobby -> {
-                            navController.navigate(Routes.LOBBY) {
-                                popUpTo(Routes.HOME)
-                                launchSingleTop = true
-                            }
-                        }
-                        is RaceNavEvent.Disconnected -> {
-                            onlineVm.leaveRoom()
-                            val poppedToHub = navController.popBackStack(Routes.ONLINE_HUB, inclusive = false)
-                            if (!poppedToHub) {
-                                navController.popBackStack(Routes.HOME, inclusive = false)
-                            }
+                    }
+                    is RaceNavEvent.Disconnected -> {
+                        onlineVm.leaveRoom()
+                        val poppedToHub = navController.popBackStack(Routes.ONLINE_HUB, inclusive = false)
+                        if (!poppedToHub) {
+                            navController.popBackStack(Routes.HOME, inclusive = false)
                         }
                     }
                 }

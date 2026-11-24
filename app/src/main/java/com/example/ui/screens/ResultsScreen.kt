@@ -94,8 +94,9 @@ fun ResultsScreen(
     onExitHome: () -> Unit
 ) {
     val isHostOrSolo = role.isHostLike
+    val canReturnToLobby = isHostOrSolo || role.isOnline
     BackHandler {
-        if (isHostOrSolo) onReturnToLobby() else onExitHome()
+        if (canReturnToLobby) onReturnToLobby() else onExitHome()
     }
 
     val isArena = results?.gameMode == GameMode.ARENA.name
@@ -641,7 +642,7 @@ fun ResultsScreen(
 
                 if (!isHostOrSolo && rematchState == null) {
                     Text(
-                        text = "Stay here to automatically rejoin the paddock when the host starts the next match.",
+                        text = "Syncing next-track vote & countdown, or return everyone to the lobby below.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -686,7 +687,7 @@ fun ResultsScreen(
                                 style = MaterialTheme.typography.labelLarge
                             )
                         }
-                    } else if (isHostOrSolo) {
+                    } else if (canReturnToLobby) {
                         OutlinedButton(
                             onClick = onReturnToLobby,
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary),
@@ -699,7 +700,7 @@ fun ResultsScreen(
                             Icon(Icons.Default.Replay, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "Back to Lobby (Edit Rules)",
+                                text = if (isHostOrSolo) "Back to Lobby (Edit Rules)" else "Back to Lobby",
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.secondary
                             )

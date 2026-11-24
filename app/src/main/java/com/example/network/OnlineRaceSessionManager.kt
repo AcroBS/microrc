@@ -143,6 +143,7 @@ class OnlineRaceSessionManager(
     private val clientAppliedMatchSeq = AtomicLong(0L)
     private val clientAppliedTelemetrySeq = AtomicLong(-1L)
     private val clientFinishEmitted = AtomicBoolean(false)
+    private val clientAwaitingLobbyReturn = AtomicBoolean(false)
     @Volatile private var raceStartedAtNs: Long = 0L
 
     private var localInput = ControlInput()
@@ -161,6 +162,8 @@ class OnlineRaceSessionManager(
     private var rematchOptions: List<RematchVoteOption> = emptyList()
     private val rematchVotes = ConcurrentHashMap<String, String>()
     @Volatile private var rematchSecondsLeft: Int = WifiP2pRaceManager.REMATCH_COUNTDOWN_SECONDS
+    @Volatile private var pendingLocalRematchVote: String? = null
+    @Volatile private var returnToLobbyHandledForMatchSeq: Long = -1L
 
     private val relaySocket = OnlineRelaySocket(
         scope = scope,
@@ -171,6 +174,10 @@ class OnlineRaceSessionManager(
 
     companion object {
         private const val RELAY_FALLBACK_TIMEOUT_NS = 1_500_000_000L
+        internal const val RETURN_TO_LOBBY_VOTE_PREFIX = "__RETURN_TO_LOBBY__:"
+
+        internal fun returnToLobbyVoteToken(matchSeq: Long): String =
+            "$RETURN_TO_LOBBY_VOTE_PREFIX${matchSeq.coerceAtLeast(0L)}"
 
         internal data class HostInputDecision(
             val accepted: Boolean,
@@ -378,6 +385,14 @@ class OnlineRaceSessionManager(
                         ) ?: return
                         applyIncomingClientSnapshot(seq = decoded.seq, snap = decoded.snapshot)
                     }
+                    frame.startsWith("R|") -> {
+                        if (!inRace) {
+                            val parsed = runCatching {
+                                rematchAdapter.fromJson(frame.removePrefix("R|"))
+                            }.getOrNull() ?: return
+                            applyClientRematchState(parsed)
+                        }
+                    }
                     frame.startsWith("P|") -> {
                         val ping = RaceTelemetryCodec.decodeRelayPing(frame) ?: return
                         if (ping.senderId == currentUserId) return
@@ -395,6 +410,28 @@ class OnlineRaceSessionManager(
             }
             SessionRole.None, SessionRole.Host, SessionRole.Client, SessionRole.Solo -> Unit
         }
+    }
+
+    private fun applyClientRematchState(parsed: RematchCountdownState) {
+        val pendingVote = pendingLocalRematchVote
+        val merged = if (pendingVote != null && parsed.options.any { it.id == pendingVote }) {
+            if (parsed.votesByPlayerId[currentUserId] == pendingVote) {
+                pendingLocalRematchVote = null
+                parsed
+            } else {
+                val updatedVotes = parsed.votesByPlayerId + (currentUserId to pendingVote)
+                parsed.copy(
+                    votesByPlayerId = updatedVotes,
+                    leadingOptionId = WifiP2pRaceManager.computeLeadingRematchOption(
+                        parsed.options,
+                        updatedVotes
+                    )
+                )
+            }
+        } else {
+            parsed
+        }
+        _rematchState.value = merged
     }
 
     private fun applyIncomingClientSnapshot(
@@ -418,6 +455,7 @@ class OnlineRaceSessionManager(
         if (snap.phase == RacePhase.FINISHED.name || forceFinishedFromRoomDoc) {
             _lastResults.value = snap
             inRace = false
+            clientAwaitingLobbyReturn.set(true)
             clientInputPushJob?.cancel()
             _usingRelayFallback.value = false
             relaySocket.disconnect("Race finished")
@@ -870,6 +908,8 @@ class OnlineRaceSessionManager(
             clientAppliedMatchSeq.set(0L)
             clientAppliedTelemetrySeq.set(-1L)
             clientFinishEmitted.set(false)
+            clientAwaitingLobbyReturn.set(false)
+            pendingLocalRematchVote = null
 
             if (amHost) {
                 configureInitialMode(currentRules, null)
@@ -917,10 +957,22 @@ class OnlineRaceSessionManager(
         playersObserverJob = scope.launch {
             try {
                 repository.observeRoomPlayers(roomId).collect { playerDocs ->
+                    val currentSeq = hostMatchSeq.get()
+                    val lobbyReturnToken = returnToLobbyVoteToken(currentSeq)
+                    var lobbyRequesterName: String? = null
                     latestHumanPlayers.clear()
                     playerDocs.forEach { p ->
                         latestHumanPlayers[p.userId] = p
-                        if (p.rematchVote.isNotBlank() && _rematchState.value != null) {
+                        if (currentSeq > 0L &&
+                            p.rematchVote == lobbyReturnToken &&
+                            returnToLobbyHandledForMatchSeq != currentSeq &&
+                            _activeRoom.value?.status != "OPEN"
+                        ) {
+                            lobbyRequesterName = p.name
+                        } else if (p.rematchVote.isNotBlank() &&
+                            _rematchState.value != null &&
+                            rematchOptions.any { it.id == p.rematchVote }
+                        ) {
                             rematchVotes[p.userId] = p.rematchVote
                         }
                     }
@@ -928,6 +980,20 @@ class OnlineRaceSessionManager(
                         while (latestHumanPlayers.size + botPlayers.size > maxRoomPlayers && botPlayers.isNotEmpty()) {
                             botPlayers.removeAt(botPlayers.lastIndex)
                         }
+                    }
+                    if (lobbyRequesterName != null && returnToLobbyHandledForMatchSeq != currentSeq) {
+                        returnToLobbyHandledForMatchSeq = currentSeq
+                        val requester = lobbyRequesterName ?: "A player"
+                        returnToLobby()
+                        scope.launch {
+                            repository.sendRoomChat(
+                                roomId = roomId,
+                                senderName = "Race Control",
+                                text = "$requester returned the group to the lobby.",
+                                systemMessage = true
+                            )
+                        }
+                        return@collect
                     }
                     syncHostLobbyToCloud()
                     if (_rematchState.value != null) {
@@ -1047,9 +1113,27 @@ class OnlineRaceSessionManager(
             }
         }
 
-        if (doc.rematchJson.isNotBlank()) {
-            _rematchState.value = runCatching { rematchAdapter.fromJson(doc.rematchJson) }.getOrNull()
-        } else {
+        if (doc.status == "OPEN") {
+            _rematchState.value = null
+            pendingLocalRematchVote = null
+            if (inRace || clientAwaitingLobbyReturn.compareAndSet(true, false)) {
+                inRace = false
+                clientFinishEmitted.set(false)
+                clientInputPushJob?.cancel()
+                _usingRelayFallback.value = false
+                relaySocket.disconnect("Returned to lobby")
+                scope.launch {
+                    repository.updatePlayerFields(doc.id, mapOf("rematchVote" to ""))
+                }
+                _navEvents.tryEmit(RaceNavEvent.BackToLobby)
+                return
+            }
+        } else if (doc.rematchJson.isNotBlank() && (doc.status == "FINISHED" || !inRace)) {
+            val parsedRematch = runCatching { rematchAdapter.fromJson(doc.rematchJson) }.getOrNull()
+            if (parsedRematch != null) {
+                applyClientRematchState(parsedRematch)
+            }
+        } else if (doc.rematchJson.isBlank() && _rematchState.value != null) {
             _rematchState.value = null
         }
 
@@ -1059,8 +1143,13 @@ class OnlineRaceSessionManager(
                 clientAppliedMatchSeq.set(startPayload.matchSeq)
                 clientAppliedTelemetrySeq.set(0L)
                 clientFinishEmitted.set(false)
+                clientAwaitingLobbyReturn.set(true)
+                pendingLocalRematchVote = null
                 _rematchState.value = null
                 currentRules = startPayload.rules
+                scope.launch {
+                    repository.updatePlayerFields(doc.id, mapOf("rematchVote" to ""))
+                }
 
                 val snapMode = startPayload.initialSnapshot?.gameMode ?: startPayload.rules.gameMode
                 val isStunt = snapMode == GameMode.STUNTS.name
@@ -1138,19 +1227,13 @@ class OnlineRaceSessionManager(
                 _lastResults.value = it
             }
             inRace = false
+            clientAwaitingLobbyReturn.set(true)
             clientInputPushJob?.cancel()
             _usingRelayFallback.value = false
             relaySocket.disconnect("Race finished")
             if (clientFinishEmitted.compareAndSet(false, true)) {
                 _navEvents.tryEmit(RaceNavEvent.ShowResults)
             }
-        } else if (doc.status == "OPEN" && inRace) {
-            inRace = false
-            clientInputPushJob?.cancel()
-            _usingRelayFallback.value = false
-            relaySocket.disconnect("Returned to lobby")
-            _rematchState.value = null
-            _navEvents.tryEmit(RaceNavEvent.BackToLobby)
         }
     }
 
@@ -1667,10 +1750,13 @@ class OnlineRaceSessionManager(
                     _lastResults.value = snap
                     inRace = false
                     _usingRelayFallback.value = false
+                    val initialRematch = prepareHostRematchState()
+                    val initialRematchJson = rematchAdapter.toJson(initialRematch).take(7800)
                     val finalSeq = hostTelemetrySeq.incrementAndGet()
                     val fullFinalLine = String(RaceTelemetryCodec.encodeSnapshot(finalSeq, snap), Charsets.UTF_8)
                     if (wsConnected) {
                         relaySocket.sendText(fullFinalLine)
+                        relaySocket.sendText("R|$initialRematchJson")
                     }
                     val finalLineForFirestore = fullFinalLine.take(15_800)
                     val updatedLobbyJson = lobbyAdapter.toJson(buildHostLobbyPayload()).take(29_500)
@@ -1681,7 +1767,8 @@ class OnlineRaceSessionManager(
                                     "status" to "FINISHED",
                                     "lobbyJson" to updatedLobbyJson,
                                     "telemetrySeq" to finalSeq,
-                                    "telemetryLine" to finalLineForFirestore
+                                    "telemetryLine" to finalLineForFirestore,
+                                    "rematchJson" to initialRematchJson
                                 )
                                 var attempt = 0
                                 while (attempt < 3) {
@@ -1692,7 +1779,7 @@ class OnlineRaceSessionManager(
                                 }
                             }
                         } finally {
-                            // Allow final WebSocket frame to flush over TCP before cleanly closing the room socket
+                            // Allow final WebSocket frames to flush over TCP before cleanly closing the room socket
                             delay(250L)
                             if (!inRace) {
                                 relaySocket.disconnect("Race finished")
@@ -1700,7 +1787,7 @@ class OnlineRaceSessionManager(
                         }
                     }
                     _navEvents.tryEmit(RaceNavEvent.ShowResults)
-                    startHostRematchCountdown()
+                    startHostRematchCountdown(alreadyInitialized = true)
                     break
                 }
 
@@ -1837,7 +1924,39 @@ class OnlineRaceSessionManager(
         rematchJob = null
         rematchVotes.clear()
         rematchOptions = emptyList()
+        pendingLocalRematchVote = null
         _rematchState.value = null
+    }
+
+    private fun prepareHostRematchState(): RematchCountdownState {
+        rematchVotes.clear()
+        val voteTargetMode = if (currentRules.gameModeEnum == GameMode.HYBRID) {
+            (nextPlannedHybridMode ?: WifiP2pRaceManager.resolveHybridStageMode(currentRules, hybridStageNumber, activeConcreteMode)).also {
+                nextPlannedHybridMode = it
+            }
+        } else {
+            currentRules.gameModeEnum
+        }
+        val opts = WifiP2pRaceManager.buildRematchVoteOptions(
+            gameMode = voteTargetMode,
+            currentTrackId = currentTrackId,
+            currentArenaShape = currentArenaShape,
+            currentStuntVariant = currentStuntVariant,
+            hasActiveCustomTrack = currentCustomTrack != null,
+            activeCustomTrack = currentCustomTrack
+        )
+        rematchOptions = opts
+        rematchSecondsLeft = WifiP2pRaceManager.REMATCH_COUNTDOWN_SECONDS
+        val votesMap = rematchVotes.toMap()
+        val state = RematchCountdownState(
+            secondsLeft = rematchSecondsLeft,
+            totalSeconds = WifiP2pRaceManager.REMATCH_COUNTDOWN_SECONDS,
+            options = opts,
+            votesByPlayerId = votesMap,
+            leadingOptionId = WifiP2pRaceManager.computeLeadingRematchOption(opts, votesMap)
+        )
+        _rematchState.value = state
+        return state
     }
 
     private fun publishHostRematchState() {
@@ -1861,37 +1980,23 @@ class OnlineRaceSessionManager(
         }
     }
 
-    private fun startHostRematchCountdown() {
+    private fun startHostRematchCountdown(alreadyInitialized: Boolean = false) {
         if (_role.value != SessionRole.OnlineHost) return
         rematchJob?.cancel()
-        rematchVotes.clear()
-        val voteTargetMode = if (currentRules.gameModeEnum == GameMode.HYBRID) {
-            (nextPlannedHybridMode ?: WifiP2pRaceManager.resolveHybridStageMode(currentRules, hybridStageNumber, activeConcreteMode)).also {
-                nextPlannedHybridMode = it
-            }
-        } else {
-            currentRules.gameModeEnum
+        if (!alreadyInitialized) {
+            prepareHostRematchState()
+            publishHostRematchState()
         }
-        rematchOptions = WifiP2pRaceManager.buildRematchVoteOptions(
-            gameMode = voteTargetMode,
-            currentTrackId = currentTrackId,
-            currentArenaShape = currentArenaShape,
-            currentStuntVariant = currentStuntVariant,
-            hasActiveCustomTrack = currentCustomTrack != null,
-            activeCustomTrack = currentCustomTrack
-        )
-        rematchSecondsLeft = WifiP2pRaceManager.REMATCH_COUNTDOWN_SECONDS
-        publishHostRematchState()
 
         rematchJob = scope.launch(Dispatchers.Default) {
             for (sec in (WifiP2pRaceManager.REMATCH_COUNTDOWN_SECONDS - 1) downTo 1) {
                 delay(1000L)
-                if (!isActive || inRace) return@launch
+                if (!isActive || inRace || _role.value != SessionRole.OnlineHost) return@launch
                 rematchSecondsLeft = sec
                 publishHostRematchState()
             }
             delay(1000L)
-            if (!isActive || inRace) return@launch
+            if (!isActive || inRace || _role.value != SessionRole.OnlineHost) return@launch
             launchRematchNow()
         }
     }
@@ -1907,6 +2012,7 @@ class OnlineRaceSessionManager(
             SessionRole.OnlineClient -> {
                 val cur = _rematchState.value ?: return
                 if (cur.options.none { it.id == optionId }) return
+                pendingLocalRematchVote = optionId
                 val updatedVotes = cur.votesByPlayerId + (currentUserId to optionId)
                 _rematchState.value = cur.copy(
                     votesByPlayerId = updatedVotes,
@@ -2015,21 +2121,38 @@ class OnlineRaceSessionManager(
     }
 
     fun returnToLobby() {
-        if (_role.value != SessionRole.OnlineHost) return
-        cancelRematchCountdown()
-        physicsJob?.cancel()
-        physicsJob = null
-        physicsEngine = null
-        inRace = false
-        _usingRelayFallback.value = false
-        relaySocket.disconnect("Returned to lobby")
-        syncHostLobbyToCloud(
-            extraFields = mapOf(
-                "status" to "OPEN",
-                "rematchJson" to ""
-            )
-        )
-        _navEvents.tryEmit(RaceNavEvent.BackToLobby)
+        val rid = activeRoomId ?: return
+        when (_role.value) {
+            SessionRole.OnlineHost -> {
+                returnToLobbyHandledForMatchSeq = hostMatchSeq.get()
+                cancelRematchCountdown()
+                physicsJob?.cancel()
+                physicsJob = null
+                physicsEngine = null
+                inRace = false
+                _usingRelayFallback.value = false
+                relaySocket.disconnect("Returned to lobby")
+                syncHostLobbyToCloud(
+                    extraFields = mapOf(
+                        "status" to "OPEN",
+                        "rematchJson" to ""
+                    )
+                )
+                _navEvents.tryEmit(RaceNavEvent.BackToLobby)
+            }
+            SessionRole.OnlineClient -> {
+                val seq = clientAppliedMatchSeq.get()
+                pendingLocalRematchVote = null
+                _rematchState.value = null
+                scope.launch {
+                    repository.updatePlayerFields(
+                        roomId = rid,
+                        fields = mapOf("rematchVote" to returnToLobbyVoteToken(seq).take(64))
+                    )
+                }
+            }
+            else -> Unit
+        }
     }
 
     suspend fun leaveCurrentRoomInternal() {
@@ -2050,6 +2173,9 @@ class OnlineRaceSessionManager(
         clientInputPushJob?.cancel()
         clientInputPushJob = null
         inRace = false
+        clientAwaitingLobbyReturn.set(false)
+        pendingLocalRematchVote = null
+        returnToLobbyHandledForMatchSeq = -1L
         _usingRelayFallback.value = false
         relaySocket.disconnect("Left room")
         lastClientRelayRxNsByUser.clear()
