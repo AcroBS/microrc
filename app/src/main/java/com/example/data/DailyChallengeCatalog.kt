@@ -42,6 +42,10 @@ object DailyChallengeCatalog {
             DATE_KEY_REGEX.matches(trackKey.removePrefix(DAILY_TRACK_PREFIX))
     }
 
+    fun isAnyDailyTrackId(trackKey: String?): Boolean {
+        return isDailyTrackId(trackKey) || com.example.drift.DriftDailyChallenge.isDailyDriftTrackId(trackKey)
+    }
+
     fun extractDateKey(trackKey: String?): String? {
         if (!isDailyTrackId(trackKey)) return null
         return trackKey!!.removePrefix(DAILY_TRACK_PREFIX)
@@ -111,6 +115,7 @@ object DailyChallengeCatalog {
     }
 
     fun resolveTrackDisplayName(trackKey: String): String {
+        com.example.drift.DriftTrackCatalog.resolveTrackDisplayName(trackKey)?.let { return it }
         val dateKey = extractDateKey(trackKey)
         if (dateKey != null) {
             return "Daily GP (${displayDateLabel(dateKey)})"

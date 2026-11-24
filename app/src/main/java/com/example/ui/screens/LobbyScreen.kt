@@ -166,6 +166,7 @@ fun LobbyScreen(
     val isArenaMode = selectedMode == GameMode.ARENA
     val isStuntsMode = selectedMode == GameMode.STUNTS
     val isHybridMode = selectedMode == GameMode.HYBRID
+    val isDriftMode = selectedMode == GameMode.DRIFT
 
     Surface(
         color = MaterialTheme.colorScheme.background,
@@ -242,6 +243,7 @@ fun LobbyScreen(
                                 isHybridMode -> "Offline Hybrid Tour vs AI"
                                 isStuntsMode -> "Offline Stunt Gauntlet vs AI"
                                 isArenaMode -> "Offline Arena vs AI"
+                                isDriftMode -> "Offline Drifting vs AI • 1 Nitro/Lap"
                                 else -> "Offline Practice vs AI"
                             },
                             style = MaterialTheme.typography.labelSmall,
@@ -402,6 +404,7 @@ fun LobbyScreen(
                                 }
                                 isStuntsMode -> "STUNTS • 4 RANDOM CHALLENGES • 1x NITRO"
                                 isArenaMode -> "ARENA • ${activeRules.arenaTargetMinutes}M FLAG"
+                                isDriftMode -> "${lobby?.totalLaps ?: activeRules.totalLaps} LAPS • DRIFT • 1x NITRO/LAP"
                                 activeRules.winConditionEnum == WinCondition.TIME_TRIAL_DISTANCE ->
                                     "MAX TIME • ${activeRules.timeLimitSec}s"
                                 else -> "${lobby?.totalLaps ?: activeRules.totalLaps} LAPS • ${activeRules.winConditionEnum.displayName.uppercase()}"
@@ -415,7 +418,7 @@ fun LobbyScreen(
                                 onOpenSettings
                             )
                         }
-                        if (activeRules.randomJumpsEnabled && !isStuntsMode) {
+                        if (activeRules.randomJumpsEnabled && !isStuntsMode && !isDriftMode) {
                             item { LobbyRuleBadge("JUMPS", MaterialTheme.colorScheme.secondary, onOpenSettings) }
                         }
                         if (activeRules.randomConditionsEnabled && !isStuntsMode) {
@@ -534,7 +537,7 @@ fun LobbyScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            items(GameMode.entries) { mode ->
+                            items(com.example.drift.DriftFeature.selectableGameModes()) { mode ->
                                 FilterChip(
                                     selected = activeRules.gameModeEnum == mode,
                                     onClick = { onUpdateRules(activeRules.copy(gameMode = mode.name)) },
@@ -821,6 +824,135 @@ fun LobbyScreen(
                                 Icon(Icons.Default.SportsScore, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("Circuit Mode", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+                } else if (isDriftMode) {
+                    val activeCustom = lobby?.activeCustomTrack
+                    val defaultDriftTracks = remember { com.example.drift.DriftTrackCatalog.defaultDriftCustomTracks() }
+                    val driftTracksList = remember(activeCustom, defaultDriftTracks) {
+                        if (activeCustom != null && defaultDriftTracks.none { it.id == activeCustom.id }) {
+                            listOf(activeCustom) + defaultDriftTracks
+                        } else {
+                            defaultDriftTracks
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (isHostOrSolo) "SELECT DRIFT COURSE" else "DRIFT COURSE",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "TIME-BASED • 0 POWERUPS • 1x NITRO/LAP",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
+
+                    if (isHostOrSolo) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            listOf(1, 2, 3, 5, 7).forEach { laps ->
+                                FilterChip(
+                                    selected = (lobby?.totalLaps ?: activeRules?.totalLaps ?: 3) == laps,
+                                    onClick = { onSelectLaps(laps) },
+                                    label = { Text("${laps}L", style = MaterialTheme.typography.labelSmall) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = onGenerateRandomTrack,
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("lobby_random_drift_track_button")
+                            ) {
+                                Icon(Icons.Default.Casino, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Random Drift", style = MaterialTheme.typography.labelMedium)
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    val base = activeRules ?: RaceRulesSettings()
+                                    onUpdateRules(base.copy(gameMode = GameMode.RACE.name))
+                                },
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .testTag("lobby_switch_mode_button")
+                            ) {
+                                Icon(Icons.Default.SportsScore, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Circuit Mode", style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(driftTracksList, key = { "drift_${it.id}" }) { dTrack ->
+                            val previewDef = remember(dTrack) { TrackCatalog.buildCustomTrack(dTrack) }
+                            val active = activeCustom?.id == dTrack.id
+                            val obstacleCount = dTrack.props.count { it.isSolidObstacle }
+                            Surface(
+                                color = if (active) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainer
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                border = BorderStroke(
+                                    width = if (active) 2.dp else 1.dp,
+                                    color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                                ),
+                                modifier = Modifier
+                                    .width(172.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .clickable(enabled = isHostOrSolo) { onSelectCustomTrack(dTrack) }
+                                    .testTag("drift_track_card_${dTrack.id}")
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(66.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(Color(previewDef.id.baseBgColorHex).copy(alpha = 0.85f))
+                                    ) {
+                                        Canvas(modifier = Modifier.fillMaxSize()) {
+                                            drawTrackMiniMap(previewDef)
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = dTrack.name,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "Drift • $obstacleCount Obstacles • 1x Nitro",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
+                                    )
+                                }
                             }
                         }
                     }
@@ -1376,6 +1508,8 @@ fun LobbyScreen(
                                     isStuntsMode -> "START STUNTS ($playerCount RACERS)"
                                     isArenaMode && playerCount < 2 -> "START SOLO ARENA (OR ADD BOT)"
                                     isArenaMode -> "START ARENA ($playerCount RACERS)"
+                                    isDriftMode && playerCount < 2 -> "START SOLO DRIFT (OR ADD BOT)"
+                                    isDriftMode -> "START DRIFT ($playerCount RACERS)"
                                     playerCount < 2 -> "START SOLO RACE (OR ADD BOT)"
                                     else -> "START RACE ($playerCount RACERS)"
                                 },

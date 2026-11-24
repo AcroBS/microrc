@@ -180,7 +180,7 @@ private data class NormalizedStandingEntry(
 
 object FriendStandingsCalculator {
 
-    private val DAILY_BOARD_DATE_REGEX = Regex("""^RACE_daily_(\d{8})(?:_|$)""")
+    private val DAILY_BOARD_DATE_REGEX = Regex("""^(?:RACE_daily|DRIFT_daily_drift)_(\d{8})(?:_|$)""")
 
     internal fun isExpiredDailyBoard(
         trackKey: String,
@@ -188,6 +188,7 @@ object FriendStandingsCalculator {
         todayDateKey: String
     ): Boolean {
         val dateFromTrack = DailyChallengeCatalog.extractDateKey(trackKey)
+            ?: com.example.drift.DriftDailyChallenge.extractDateKey(trackKey)
         if (dateFromTrack != null) {
             return dateFromTrack != todayDateKey
         }
@@ -217,7 +218,8 @@ object FriendStandingsCalculator {
             if (doc.userId.isBlank() || doc.boardKey.isBlank()) continue
             if (doc.userId != cleanMyUid && doc.userId !in friendMap) continue
             if (isExpiredDailyBoard(doc.trackKey, doc.boardKey, todayDateKey)) continue
-            val mode = runCatching { GameMode.valueOf(doc.gameMode) }.getOrDefault(GameMode.RACE)
+            val rawMode = runCatching { GameMode.valueOf(doc.gameMode) }.getOrDefault(GameMode.RACE)
+            val mode = if (com.example.drift.DriftFeature.isDriftBoardKey(doc.boardKey)) GameMode.DRIFT else rawMode
             val isStunts = mode == GameMode.STUNTS || doc.boardKey.startsWith("STUNTS_")
             val valid = if (isStunts) doc.bestScore > 0L else doc.bestRaceTimeMs > 0L
             if (!valid) continue
@@ -245,7 +247,8 @@ object FriendStandingsCalculator {
         for (rec in localRecords) {
             if (rec.boardKey.isBlank()) continue
             if (isExpiredDailyBoard(rec.trackKey, rec.boardKey, todayDateKey)) continue
-            val mode = runCatching { GameMode.valueOf(rec.gameMode) }.getOrDefault(GameMode.RACE)
+            val rawMode = runCatching { GameMode.valueOf(rec.gameMode) }.getOrDefault(GameMode.RACE)
+            val mode = if (com.example.drift.DriftFeature.isDriftBoardKey(rec.boardKey)) GameMode.DRIFT else rawMode
             val isStunts = mode == GameMode.STUNTS || rec.boardKey.startsWith("STUNTS_")
             val valid = if (isStunts) rec.bestScore > 0 else rec.bestRaceTimeMs > 0L
             if (!valid) continue
@@ -281,6 +284,11 @@ object FriendStandingsCalculator {
         var unchallengedFriendBoardsCount = 0
         val boardItems = ArrayList<FriendBoardStandingItem>(byBoard.size)
         val todayDailyBoardKey = DailyChallengeCatalog.boardKeyForDate(todayDateKey)
+        val todayDailyDriftBoardKey = if (com.example.drift.DriftFeature.ENABLED) {
+            com.example.drift.DriftDailyChallenge.boardKeyForDate(todayDateKey)
+        } else {
+            ""
+        }
 
         for ((boardKey, rawEntries) in byBoard) {
             val sample = rawEntries.first()
@@ -340,7 +348,7 @@ object FriendStandingsCalculator {
                 null
             }
 
-            val isDaily = DailyChallengeCatalog.isDailyTrackId(sample.trackKey)
+            val isDaily = DailyChallengeCatalog.isAnyDailyTrackId(sample.trackKey)
             boardItems.add(
                 FriendBoardStandingItem(
                     boardKey = boardKey,
@@ -401,7 +409,9 @@ object FriendStandingsCalculator {
         // 5. Prioritize highlights for HomeScreen:
         //    Today's Daily GP > Shared tracks with friends > Unchallenged friend records > Personal PBs
         val highlighted = boardItems.sortedWith(
-            compareByDescending<FriendBoardStandingItem> { it.boardKey == todayDailyBoardKey }
+            compareByDescending<FriendBoardStandingItem> {
+                it.boardKey == todayDailyBoardKey || (todayDailyDriftBoardKey.isNotEmpty() && it.boardKey == todayDailyDriftBoardKey)
+            }
                 .thenByDescending { it.myRank != null && it.topFriendName != null }
                 .thenByDescending { it.myRank == null && it.topFriendName != null }
                 .thenByDescending { it.totalDriversOnBoard }

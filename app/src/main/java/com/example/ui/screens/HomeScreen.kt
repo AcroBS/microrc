@@ -145,6 +145,9 @@ fun HomeScreen(
     dailyChallengeSubtitle: String = "Fixed Portals • 1 Nitro/Lap • No Mines",
     dailyChallengeResetLabel: String = "",
     dailyBestTimeMs: Long? = null,
+    onOpenDailyDriftChallenge: () -> Unit = {},
+    dailyDriftTitle: String = "Daily Drift",
+    dailyDriftBestTimeMs: Long? = null,
     onOpenOnlinePlay: () -> Unit = {},
     onOpenFriends: () -> Unit = {},
     onlineFriendsCount: Int = 0,
@@ -491,7 +494,10 @@ fun HomeScreen(
                                     dailyChallengeTitle = dailyChallengeTitle,
                                     dailyChallengeSubtitle = dailyChallengeSubtitle,
                                     dailyChallengeResetLabel = dailyChallengeResetLabel,
-                                    dailyBestTimeMs = dailyBestTimeMs
+                                    dailyBestTimeMs = dailyBestTimeMs,
+                                    onOpenDailyDriftChallenge = onOpenDailyDriftChallenge,
+                                    dailyDriftTitle = dailyDriftTitle,
+                                    dailyDriftBestTimeMs = dailyDriftBestTimeMs
                                 )
                                 LiveOnlineGameplaySection(
                                     modifier = Modifier.weight(0.9f),
@@ -511,7 +517,10 @@ fun HomeScreen(
                                 dailyChallengeTitle = dailyChallengeTitle,
                                 dailyChallengeSubtitle = dailyChallengeSubtitle,
                                 dailyChallengeResetLabel = dailyChallengeResetLabel,
-                                dailyBestTimeMs = dailyBestTimeMs
+                                dailyBestTimeMs = dailyBestTimeMs,
+                                onOpenDailyDriftChallenge = onOpenDailyDriftChallenge,
+                                dailyDriftTitle = dailyDriftTitle,
+                                dailyDriftBestTimeMs = dailyDriftBestTimeMs
                             )
                             LiveOnlineGameplaySection(
                                 modifier = Modifier.fillMaxWidth(),
@@ -582,7 +591,10 @@ private fun ChallengesAndRankingsSection(
     dailyChallengeTitle: String,
     dailyChallengeSubtitle: String,
     dailyChallengeResetLabel: String,
-    dailyBestTimeMs: Long?
+    dailyBestTimeMs: Long?,
+    onOpenDailyDriftChallenge: () -> Unit = {},
+    dailyDriftTitle: String = "Daily Drift",
+    dailyDriftBestTimeMs: Long? = null
 ) {
     ElevatedCard(
         colors = CardDefaults.elevatedCardColors(
@@ -621,7 +633,7 @@ private fun ChallengesAndRankingsSection(
                 )
             }
 
-            // 1. Daily Challenge Card
+            // 1. Daily Race Challenge Card
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.tertiaryContainer
@@ -650,7 +662,7 @@ private fun ChallengesAndRankingsSection(
                     ) {
                         Icon(
                             Icons.Default.Today,
-                            contentDescription = "Daily Challenge",
+                            contentDescription = "Daily Race Challenge",
                             tint = MaterialTheme.colorScheme.onTertiaryContainer,
                             modifier = Modifier.size(20.dp)
                         )
@@ -703,6 +715,76 @@ private fun ChallengesAndRankingsSection(
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onTertiaryContainer
                         )
+                    }
+                }
+            }
+
+            // 1b. Daily Drift Challenge Card (modular / gated via DriftFeature.ENABLED)
+            if (com.example.drift.DriftFeature.ENABLED) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.6f)),
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(MaterialTheme.shapes.medium)
+                        .clickable(onClick = onOpenDailyDriftChallenge)
+                        .testTag("daily_drift_challenge_button")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(MaterialTheme.shapes.small)
+                                .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.18f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Speed,
+                                contentDescription = "Daily Drift Challenge",
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "DAILY DRIFT",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                            Text(
+                                text = "$dailyDriftTitle • Obstacles • 1 Nitro/Lap",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Icon(
+                                Icons.Default.Bolt,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Text(
+                                text = if (dailyDriftBestTimeMs != null && dailyDriftBestTimeMs > 0L) {
+                                    String.format(Locale.US, "%.2fs", dailyDriftBestTimeMs / 1000f)
+                                } else {
+                                    "DRIFT"
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
                     }
                 }
             }

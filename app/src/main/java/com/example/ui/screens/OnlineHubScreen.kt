@@ -475,7 +475,7 @@ fun OnlineHubScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                GameMode.entries.forEach { mode ->
+                                com.example.drift.DriftFeature.selectableGameModes().forEach { mode ->
                                     FilterChip(
                                         selected = selectedMode == mode,
                                         onClick = { selectedMode = mode },
@@ -681,8 +681,14 @@ fun OnlineHubScreen(
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         openRooms.forEachIndexed { idx, room ->
                             val isFull = room.playerCount >= room.maxPlayers
-                            val modeLabel = runCatching { GameMode.valueOf(room.gameMode).displayName }
-                                .getOrDefault(room.gameMode)
+                            val isDriftRoom = com.example.drift.DriftFeature.isDriftTrackKey(room.trackId) ||
+                                room.lobbyJson.contains("\"gameMode\":\"DRIFT\"")
+                            val modeLabel = if (isDriftRoom) {
+                                GameMode.DRIFT.displayName
+                            } else {
+                                runCatching { GameMode.valueOf(room.gameMode).displayName }
+                                    .getOrDefault(room.gameMode)
+                            }
                             val lockGold = adaptiveGoldColor()
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceContainer,

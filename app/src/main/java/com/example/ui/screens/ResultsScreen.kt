@@ -98,6 +98,12 @@ fun ResultsScreen(
 
     val isArena = results?.gameMode == GameMode.ARENA.name
     val isStunts = results?.gameMode == GameMode.STUNTS.name
+    val isDrift = results?.gameMode == GameMode.DRIFT.name
+    val isDailyDrift = isDailyChallenge && (
+        isDrift || com.example.drift.DriftDailyChallenge.isDailyDriftTrackId(
+            results?.trackId ?: lobby?.activeCustomTrack?.id
+        )
+    )
     val isHybridTour = results?.isHybridTour == true
     val nextHybridModeLabel = results?.nextHybridMode?.let {
         runCatching { GameMode.valueOf(it).displayName }.getOrNull()
@@ -175,7 +181,11 @@ fun ResultsScreen(
                     Column {
                         if (isDailyChallenge) {
                             Text(
-                                text = "DAILY CHALLENGE • FIXED FAIR CIRCUIT",
+                                text = if (isDailyDrift) {
+                                    "DAILY DRIFT • FIXED OBSTACLE COURSE"
+                                } else {
+                                    "DAILY CHALLENGE • FIXED FAIR CIRCUIT"
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = goldColor
                             )
@@ -191,6 +201,7 @@ fun ResultsScreen(
                             text = when {
                                 isStunts -> "STUNT CHAMPION"
                                 isArena -> "ARENA CHAMPION"
+                                isDrift -> "DRIFT CHECKERED FLAG"
                                 else -> "CHECKERED FLAG"
                             },
                             style = MaterialTheme.typography.headlineLarge,
@@ -376,6 +387,7 @@ fun ResultsScreen(
                         isHostOrSolo = isHostOrSolo,
                         isArena = isArena,
                         isStunts = isStunts,
+                        isDrift = isDrift,
                         isHybridTour = isHybridTour,
                         nextHybridModeLabel = nextHybridModeLabel,
                         onVoteRematch = onVoteRematch,
@@ -703,6 +715,7 @@ private fun RematchCountdownCard(
     isHostOrSolo: Boolean,
     isArena: Boolean,
     isStunts: Boolean = false,
+    isDrift: Boolean = false,
     isHybridTour: Boolean = false,
     nextHybridModeLabel: String? = null,
     onVoteRematch: (String) -> Unit,
@@ -770,6 +783,7 @@ private fun RematchCountdownCard(
                                 isHybridTour -> "NEXT HYBRID STAGE IN ${secLeft}S"
                                 isStunts -> "NEXT STUNT GAUNTLET IN ${secLeft}S"
                                 isArena -> "NEXT BATTLE IN ${secLeft}S"
+                                isDrift -> "NEXT DRIFT RACE IN ${secLeft}S"
                                 else -> "NEXT RACE IN ${secLeft}S"
                             },
                             style = MaterialTheme.typography.titleMedium,

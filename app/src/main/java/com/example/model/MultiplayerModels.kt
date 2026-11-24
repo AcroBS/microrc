@@ -27,6 +27,10 @@ enum class GameMode(
     HYBRID(
         displayName = "Hybrid Tour",
         description = "Multi-mode party tour cycling through Circuit, Arena & Stunts events"
+    ),
+    DRIFT(
+        displayName = "Drifting",
+        description = "Rear-loose corner drifting around obstacles — time-based with 1 Nitro per lap"
     )
 }
 

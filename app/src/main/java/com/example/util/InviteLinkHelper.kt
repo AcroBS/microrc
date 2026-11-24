@@ -435,7 +435,7 @@ object SessionNotificationHelper {
             formatNotifTimeMs(notif.bestRaceTimeMs)
         }
         val title = if (notif.dailyChallenge) {
-            "${notif.senderName} set a Daily Challenge time!"
+            "${notif.senderName} set a new Daily Challenge record!"
         } else {
             "${notif.senderName} posted a new track record!"
         }

@@ -68,7 +68,8 @@ fun DrawScope.drawTrackWorld(
     arenaSuddenDeathStage: Int = 0,
     stuntState: StuntStateSnapshot? = null,
     rockets: List<ActiveRocketState> = emptyList(),
-    ghostCar: ActiveGhostCarState? = null
+    ghostCar: ActiveGhostCarState? = null,
+    isDriftMode: Boolean = false
 ) {
     // 1. Background floor
     drawRect(
@@ -800,6 +801,40 @@ fun DrawScope.drawTrackWorld(
     // 9. Draw all RC cars (grounded first, airborne cars rendered on top)
     val orderedRacers = racers.sortedBy { it.jumpZ }
     for (r in orderedRacers) {
+        if (isDriftMode && com.example.drift.DriftPhysics.isDrifting(r.angleRad, r.vx, r.vy, r.jumpZ)) {
+            val deg = r.angleRad * 180f / PI.toFloat()
+            withTransform({
+                translate(r.x, r.y)
+                rotate(deg, Offset.Zero)
+            }) {
+                // Dark rubber skid streaks & light tire smoke behind the rear wheels
+                drawLine(
+                    color = Color(0xFF0A0C10).copy(alpha = 0.58f),
+                    start = Offset(-15f, -11f),
+                    end = Offset(-42f, -13f),
+                    strokeWidth = 5f,
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    color = Color(0xFF0A0C10).copy(alpha = 0.58f),
+                    start = Offset(-15f, 11f),
+                    end = Offset(-42f, 13f),
+                    strokeWidth = 5f,
+                    cap = StrokeCap.Round
+                )
+                val puff = 6f + 3f * sin(animTimeSec * 24f + r.x * 0.05f)
+                drawCircle(
+                    color = Color(0xFFCFD8DC).copy(alpha = 0.34f),
+                    radius = puff,
+                    center = Offset(-28f, -11f)
+                )
+                drawCircle(
+                    color = Color(0xFFCFD8DC).copy(alpha = 0.34f),
+                    radius = puff,
+                    center = Offset(-28f, 11f)
+                )
+            }
+        }
         val carType = runCatching { RcCarType.valueOf(r.carType) }.getOrDefault(RcCarType.VOLT_BUGGY)
         drawRcCar(
             x = r.x,

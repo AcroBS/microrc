@@ -297,10 +297,14 @@ class OnlineViewModel(
         leaderboardNotifsJob = viewModelScope.launch {
             try {
                 friendsRepository.observeIncomingLeaderboardNotifications(currentUserId).collect { list ->
-                    _incomingLeaderboardNotifications.value = list
+                    val boardEntries = _friendCircleEntries.value
+                    val recordOnlyList = list.filter { notif ->
+                        OnlineRaceRepository.isNotificationStillBoardRecord(notif, boardEntries)
+                    }
+                    _incomingLeaderboardNotifications.value = recordOnlyList
                     val ctx = appContext?.applicationContext
                     if (ctx != null) {
-                        list.forEach { notif ->
+                        recordOnlyList.forEach { notif ->
                             SessionNotificationHelper.showFriendLeaderboardRecordNotification(ctx, notif)
                         }
                     }
@@ -903,10 +907,10 @@ class OnlineViewModel(
                 bestScore = summary.bestScore,
                 encodedGhostFrames = summary.encodedGhostFrames
             )
-            res.onSuccess { improved ->
-                if (improved) {
+            res.onSuccess { submission ->
+                if (submission.isNewBoardRecord) {
                     val trackName = DailyChallengeCatalog.resolveTrackDisplayName(summary.trackKey)
-                    val isDaily = DailyChallengeCatalog.isDailyTrackId(summary.trackKey)
+                    val isDaily = DailyChallengeCatalog.isAnyDailyTrackId(summary.trackKey)
                     val notifiedCount = friendsRepository.sendLeaderboardNotificationsToAllFriends(
                         senderProfile = profile,
                         gameMode = summary.gameMode,
@@ -919,10 +923,12 @@ class OnlineViewModel(
                         dailyChallenge = isDaily
                     ).getOrDefault(0)
                     _cloudStatusMessage.value = if (notifiedCount > 0) {
-                        "New Cloud Record & Ghost uploaded — $notifiedCount friend${if (notifiedCount == 1) "" else "s"} notified!"
+                        "New #1 Record & Ghost uploaded — $notifiedCount friend${if (notifiedCount == 1) "" else "s"} notified!"
                     } else {
-                        "New Cloud Leaderboard Record & Ghost uploaded!"
+                        "New #1 Leaderboard Record & Ghost uploaded!"
                     }
+                } else if (submission.improvedPersonalBest) {
+                    _cloudStatusMessage.value = "Personal Best & Ghost uploaded!"
                 }
             }
         }

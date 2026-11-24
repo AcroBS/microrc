@@ -510,7 +510,7 @@ fun SettingsScreen(
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            GameMode.entries.chunked(2).forEach { rowModes ->
+                            com.example.drift.DriftFeature.selectableGameModes().chunked(2).forEach { rowModes ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -519,12 +519,26 @@ fun SettingsScreen(
                                         FilterChip(
                                             selected = rules.gameModeEnum == mode,
                                             enabled = canEditRules,
-                                            onClick = { onUpdateRules(rules.copy(gameMode = mode.name)) },
+                                            onClick = {
+                                                val updated = if (mode == GameMode.DRIFT) {
+                                                    rules.copy(
+                                                        gameMode = mode.name,
+                                                        winCondition = WinCondition.FIRST_TO_FINISH.name,
+                                                        randomJumpsEnabled = false
+                                                    )
+                                                } else {
+                                                    rules.copy(gameMode = mode.name)
+                                                }
+                                                onUpdateRules(updated)
+                                            },
                                             label = { Text(mode.displayName, style = MaterialTheme.typography.labelMedium) },
                                             modifier = Modifier
                                                 .weight(1f)
                                                 .testTag("settings_mode_${mode.name}")
                                         )
+                                    }
+                                    if (rowModes.size == 1) {
+                                        Spacer(modifier = Modifier.weight(1f))
                                     }
                                 }
                             }
@@ -608,6 +622,32 @@ fun SettingsScreen(
                                             label = { Text("Stunts", style = MaterialTheme.typography.labelSmall) },
                                             modifier = Modifier.weight(1f)
                                         )
+                                    }
+                                }
+                                GameMode.DRIFT -> {
+                                    Text(
+                                        text = "Rear-loose drifting with corner obstacles. Time-based, 0 powerups, 1x Nitro per lap.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = "Number of Laps: ${rules.totalLaps}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        listOf(1, 2, 3, 5, 7).forEach { laps ->
+                                            FilterChip(
+                                                selected = rules.totalLaps == laps,
+                                                enabled = canEditRules,
+                                                onClick = { onUpdateRules(rules.copy(totalLaps = laps)) },
+                                                label = { Text("${laps}L", style = MaterialTheme.typography.labelSmall) },
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
                                     }
                                 }
                                 GameMode.RACE -> {

@@ -631,6 +631,12 @@ fun MicroRCApp(
                 val todayPbTime = remember(localLeaderboard, todayBoardKey) {
                     localLeaderboard.find { it.boardKey == todayBoardKey }?.bestRaceTimeMs
                 }
+                val todayDriftBoardKey = remember(todayKey) {
+                    com.example.drift.DriftDailyChallenge.boardKeyForDate(todayKey)
+                }
+                val todayDriftPbTime = remember(localLeaderboard, todayDriftBoardKey) {
+                    localLeaderboard.find { it.boardKey == todayDriftBoardKey }?.bestRaceTimeMs
+                }
                 HomeScreen(
                     profile = profile,
                     onHostRace = { navController.navigate(Routes.HOST_SETUP) },
@@ -648,6 +654,16 @@ fun MicroRCApp(
                     ),
                     dailyChallengeResetLabel = "Resets in ${DailyChallengeCatalog.formatCountdownUntilReset()}",
                     dailyBestTimeMs = todayPbTime,
+                    onOpenDailyDriftChallenge = {
+                        leaderboardInitialDaily = true
+                        leaderboardInitialMode = GameMode.DRIFT
+                        leaderboardInitialTrackKey = null
+                        navController.navigate(Routes.LEADERBOARD)
+                    },
+                    dailyDriftTitle = com.example.drift.DriftTrackCatalog.resolveTrackDisplayName(
+                        com.example.drift.DriftDailyChallenge.trackIdForDate(todayKey)
+                    ) ?: "Daily Drift (${com.example.drift.DriftDailyChallenge.displayDateLabel(todayKey)})",
+                    dailyDriftBestTimeMs = todayDriftPbTime,
                     onOpenOnlinePlay = { navController.navigate(Routes.ONLINE_HUB) },
                     onOpenFriends = { navController.navigate(Routes.FRIENDS) },
                     onlineFriendsCount = onlineFriendsCount,
@@ -860,9 +876,17 @@ fun MicroRCApp(
                         onlineVm?.leaveRoom()
                         viewModel.startPureSoloForTrack(mode, trackId, laps, ghost)
                     },
+                    onStartPureSoloForDriftTrack = { driftTrack, laps, ghost ->
+                        onlineVm?.leaveRoom()
+                        viewModel.startPureSoloForDriftTrack(driftTrack, laps, ghost)
+                    },
                     onStartDailyChallenge = { dateKey, ghost ->
                         onlineVm?.leaveRoom()
                         viewModel.startDailyChallenge(dateKey = dateKey, customGhost = ghost)
+                    },
+                    onStartDailyDriftChallenge = { dateKey, ghost ->
+                        onlineVm?.leaveRoom()
+                        viewModel.startDailyDriftChallenge(dateKey = dateKey, customGhost = ghost)
                     },
                     onChallengeCloudGhost = { entry ->
                         onlineVm?.loadGhostRunForChallenge(entry.ghostId) { playback ->
@@ -1197,19 +1221,35 @@ fun MicroRCApp(
                     challengeGhost = if (!isOnlineSession) activeChallengeGhost else null,
                     onRetryDailyChallenge = if (!isOnlineSession && isDailyChallengeSession) {
                         {
-                            val dateKey = DailyChallengeCatalog.extractDateKey(lastResults?.trackId)
-                                ?: DailyChallengeCatalog.todayDateKey()
+                            val isDriftDaily = lastResults?.gameMode == GameMode.DRIFT.name ||
+                                com.example.drift.DriftDailyChallenge.isDailyDriftTrackId(
+                                    lastResults?.trackId ?: lobbyState?.activeCustomTrack?.id
+                                )
                             val ghostToKeep = activeChallengeGhost
-                            viewModel.startDailyChallenge(dateKey = dateKey, customGhost = ghostToKeep)
+                            if (isDriftDaily) {
+                                val dateKey = com.example.drift.DriftDailyChallenge.extractDateKey(
+                                    lastResults?.trackId ?: lobbyState?.activeCustomTrack?.id
+                                ) ?: DailyChallengeCatalog.todayDateKey()
+                                viewModel.startDailyDriftChallenge(dateKey = dateKey, customGhost = ghostToKeep)
+                            } else {
+                                val dateKey = DailyChallengeCatalog.extractDateKey(lastResults?.trackId)
+                                    ?: DailyChallengeCatalog.todayDateKey()
+                                viewModel.startDailyChallenge(dateKey = dateKey, customGhost = ghostToKeep)
+                            }
                         }
                     } else {
                         null
                     },
                     onOpenLeaderboards = if (!isOnlineSession) {
                         {
+                            val isDriftRun = lastResults?.gameMode == GameMode.DRIFT.name ||
+                                com.example.drift.DriftDailyChallenge.isDailyDriftTrackId(
+                                    lastResults?.trackId ?: lobbyState?.activeCustomTrack?.id
+                                )
                             leaderboardInitialDaily = isDailyChallengeSession
-                            leaderboardInitialMode = GameMode.RACE
-                            leaderboardInitialTrackKey = null
+                            leaderboardInitialMode = if (isDriftRun) GameMode.DRIFT else GameMode.RACE
+                            leaderboardInitialTrackKey = lobbyState?.activeCustomTrack?.id
+                                ?: lastResults?.trackId
                             viewModel.leaveSession()
                             navController.navigate(Routes.LEADERBOARD) {
                                 popUpTo(Routes.HOME)

@@ -72,6 +72,7 @@ import androidx.compose.ui.unit.dp
 import com.example.util.SessionNotificationHelper
 import com.example.data.DailyChallengeCatalog
 import com.example.data.TrackCatalog
+import com.example.model.CustomTrackData
 import com.example.model.GameMode
 import com.example.model.GhostCodec
 import com.example.model.GhostRunPlayback
@@ -87,8 +88,10 @@ import com.example.ui.theme.adaptiveGoldColor
 
 enum class LeaderboardFilterTab {
     RACE,
+    DRIFT,
     STUNTS,
-    DAILY
+    DAILY,
+    DAILY_DRIFT
 }
 
 @Composable
@@ -105,23 +108,31 @@ fun LeaderboardScreen(
     initialTrackKey: String? = null,
     onSelectBoardKey: (String) -> Unit,
     onStartPureSoloForTrack: (GameMode, TrackId, Int, GhostRunPlayback?) -> Unit,
+    onStartPureSoloForDriftTrack: (CustomTrackData, Int, GhostRunPlayback?) -> Unit = { _, _, _ -> },
     onStartDailyChallenge: (dateKey: String, ghost: GhostRunPlayback?) -> Unit = { _, _ -> },
+    onStartDailyDriftChallenge: (dateKey: String, ghost: GhostRunPlayback?) -> Unit = { _, _ -> },
     onChallengeCloudGhost: (LeaderboardEntryDoc) -> Unit,
     onRequestSignIn: () -> Unit,
     onBack: () -> Unit
 ) {
     BackHandler { onBack() }
 
+    val driftTracks = remember { com.example.drift.DriftTrackCatalog.defaultDriftCustomTracks() }
     var selectedTab by remember {
         mutableStateOf(
             when {
+                initialTabDaily && initialMode == GameMode.DRIFT && com.example.drift.DriftFeature.ENABLED ->
+                    LeaderboardFilterTab.DAILY_DRIFT
                 initialTabDaily -> LeaderboardFilterTab.DAILY
+                initialMode == GameMode.DRIFT && com.example.drift.DriftFeature.ENABLED ->
+                    LeaderboardFilterTab.DRIFT
                 initialMode == GameMode.STUNTS -> LeaderboardFilterTab.STUNTS
                 else -> LeaderboardFilterTab.RACE
             }
         )
     }
     var selectedTrack by remember { mutableStateOf(TrackId.LIVING_ROOM_GP) }
+    var selectedDriftTrack by remember(driftTracks) { mutableStateOf(driftTracks.first()) }
     var selectedLaps by remember { mutableIntStateOf(3) }
     var dailyGhostEnabled by remember { mutableStateOf(true) }
     val context = LocalContext.current
@@ -134,7 +145,17 @@ fun LeaderboardScreen(
 
     LaunchedEffect(initialTabDaily, initialMode, initialTrackKey) {
         when {
+            initialTabDaily && initialMode == GameMode.DRIFT && com.example.drift.DriftFeature.ENABLED ->
+                selectedTab = LeaderboardFilterTab.DAILY_DRIFT
             initialTabDaily -> selectedTab = LeaderboardFilterTab.DAILY
+            initialMode == GameMode.DRIFT && com.example.drift.DriftFeature.ENABLED -> {
+                selectedTab = LeaderboardFilterTab.DRIFT
+                if (!initialTrackKey.isNullOrBlank()) {
+                    driftTracks.find { it.id == initialTrackKey }?.let {
+                        selectedDriftTrack = it
+                    }
+                }
+            }
             initialMode == GameMode.STUNTS -> selectedTab = LeaderboardFilterTab.STUNTS
             initialMode == GameMode.RACE -> {
                 selectedTab = LeaderboardFilterTab.RACE
@@ -151,13 +172,26 @@ fun LeaderboardScreen(
     val dailyCustomTrack = remember(todayKey) { DailyChallengeCatalog.dailyCustomTrack(todayKey) }
     val dailyTrackDef = remember(dailyCustomTrack) { TrackCatalog.buildCustomTrack(dailyCustomTrack) }
     val dailyBoardKey = remember(todayKey) { DailyChallengeCatalog.boardKeyForDate(todayKey) }
+    val dailyDriftCustomTrack = remember(todayKey) { com.example.drift.DriftDailyChallenge.dailyDriftCustomTrack(todayKey) }
+    val dailyDriftTrackDef = remember(dailyDriftCustomTrack) { TrackCatalog.buildCustomTrack(dailyDriftCustomTrack) }
+    val dailyDriftBoardKey = remember(todayKey) { com.example.drift.DriftDailyChallenge.boardKeyForDate(todayKey) }
     val dailyResetLabel = remember(todayKey) { DailyChallengeCatalog.formatCountdownUntilReset() }
 
-    val selectedMode = if (selectedTab == LeaderboardFilterTab.STUNTS) GameMode.STUNTS else GameMode.RACE
+    val selectedMode = when (selectedTab) {
+        LeaderboardFilterTab.STUNTS -> GameMode.STUNTS
+        LeaderboardFilterTab.DRIFT, LeaderboardFilterTab.DAILY_DRIFT -> GameMode.DRIFT
+        else -> GameMode.RACE
+    }
 
-    val boardKey = remember(selectedTab, selectedTrack, selectedLaps, dailyBoardKey) {
+    val boardKey = remember(selectedTab, selectedTrack, selectedDriftTrack, selectedLaps, dailyBoardKey, dailyDriftBoardKey) {
         when (selectedTab) {
             LeaderboardFilterTab.DAILY -> dailyBoardKey
+            LeaderboardFilterTab.DAILY_DRIFT -> dailyDriftBoardKey
+            LeaderboardFilterTab.DRIFT -> LeaderboardBoardKey.build(
+                gameMode = GameMode.DRIFT,
+                trackKey = selectedDriftTrack.id,
+                totalLaps = selectedLaps
+            )
             LeaderboardFilterTab.STUNTS -> LeaderboardBoardKey.build(
                 gameMode = GameMode.STUNTS,
                 trackKey = selectedTrack.name,
@@ -207,7 +241,7 @@ fun LeaderboardScreen(
     }
 
     val topCloudDailyGhostEntry = remember(cloudEntries, selectedTab, currentUserId) {
-        if (selectedTab != LeaderboardFilterTab.DAILY) {
+        if (selectedTab != LeaderboardFilterTab.DAILY && selectedTab != LeaderboardFilterTab.DAILY_DRIFT) {
             null
         } else {
             cloudEntries.firstOrNull { it.hasGhost && it.ghostId.isNotBlank() && it.userId != currentUserId }
@@ -251,19 +285,22 @@ fun LeaderboardScreen(
                     }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = if (selectedTab == LeaderboardFilterTab.DAILY) {
-                                "DAILY CHALLENGE"
-                            } else {
-                                "LEADERBOARDS & GHOSTS"
+                            text = when (selectedTab) {
+                                LeaderboardFilterTab.DAILY -> "DAILY CHALLENGE"
+                                LeaderboardFilterTab.DAILY_DRIFT -> "DAILY DRIFT"
+                                else -> "LEADERBOARDS & GHOSTS"
                             },
                             style = MaterialTheme.typography.titleLarge,
                             color = MaterialTheme.colorScheme.onBackground
                         )
                         Text(
-                            text = if (selectedTab == LeaderboardFilterTab.DAILY) {
-                                "1 fixed random track per UTC day • 0 bots • fair for every run"
-                            } else {
-                                "Pure Solo high scores & virtual Ghost Car challenges"
+                            text = when (selectedTab) {
+                                LeaderboardFilterTab.DAILY ->
+                                    "1 fixed random track per UTC day • 0 bots • fair for every run"
+                                LeaderboardFilterTab.DAILY_DRIFT ->
+                                    "1 fixed drift obstacle course per UTC day • 1x Nitro/Lap • 0 powerups"
+                                else ->
+                                    "Pure Solo high scores & virtual Ghost Car challenges"
                             },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.secondary
@@ -286,7 +323,7 @@ fun LeaderboardScreen(
                     }
                 }
 
-                // Mode Filter (Circuit Time Trial / Stunt Gauntlet / Daily Challenge)
+                // Mode Filter (Daily GP / Daily Drift / Drifting / Circuit Time Trial / Stunt Gauntlet)
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     item {
                         FilterChip(
@@ -298,6 +335,30 @@ fun LeaderboardScreen(
                             label = { Text("Daily Challenge") },
                             modifier = Modifier.testTag("leaderboard_mode_DAILY")
                         )
+                    }
+                    if (com.example.drift.DriftFeature.ENABLED) {
+                        item {
+                            FilterChip(
+                                selected = selectedTab == LeaderboardFilterTab.DAILY_DRIFT,
+                                onClick = { selectedTab = LeaderboardFilterTab.DAILY_DRIFT },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Today, contentDescription = null, modifier = Modifier.size(16.dp))
+                                },
+                                label = { Text("Daily Drift") },
+                                modifier = Modifier.testTag("leaderboard_mode_DAILY_DRIFT")
+                            )
+                        }
+                        item {
+                            FilterChip(
+                                selected = selectedTab == LeaderboardFilterTab.DRIFT,
+                                onClick = { selectedTab = LeaderboardFilterTab.DRIFT },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(16.dp))
+                                },
+                                label = { Text("Drifting") },
+                                modifier = Modifier.testTag("leaderboard_mode_DRIFT")
+                            )
+                        }
                     }
                     item {
                         FilterChip(
@@ -359,16 +420,22 @@ fun LeaderboardScreen(
                     }
                 }
 
-                if (selectedTab == LeaderboardFilterTab.DAILY) {
+                if (selectedTab == LeaderboardFilterTab.DAILY || selectedTab == LeaderboardFilterTab.DAILY_DRIFT) {
+                    val isDailyDriftTab = selectedTab == LeaderboardFilterTab.DAILY_DRIFT
+                    val activeDailyTrack = if (isDailyDriftTab) dailyDriftCustomTrack else dailyCustomTrack
+                    val activeDailyTrackDef = if (isDailyDriftTab) dailyDriftTrackDef else dailyTrackDef
                     // Daily Challenge Card with Deterministic Mini-Map & Optional Ghost Car
                     val anyDailyGhostAvailable = topCloudDailyGhostEntry != null || localGhostPlayback != null
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                        border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.tertiary),
+                        border = BorderStroke(
+                            1.5.dp,
+                            if (isDailyDriftTab) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.tertiary
+                        ),
                         shape = RoundedCornerShape(22.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .testTag("daily_challenge_card")
+                            .testTag(if (isDailyDriftTab) "daily_drift_challenge_card" else "daily_challenge_card")
                     ) {
                         Column(
                             modifier = Modifier.padding(16.dp),
@@ -381,7 +448,7 @@ fun LeaderboardScreen(
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = dailyCustomTrack.name.uppercase(),
+                                        text = activeDailyTrack.name.uppercase(),
                                         style = MaterialTheme.typography.titleMedium,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
@@ -392,11 +459,15 @@ fun LeaderboardScreen(
                                         Icon(
                                             Icons.Default.Verified,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.tertiary,
+                                            tint = if (isDailyDriftTab) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.tertiary,
                                             modifier = Modifier.size(14.dp)
                                         )
                                         Text(
-                                            text = "Fixed Boosts, Ramps & Portals • 1 Nitro/Lap • No Mines",
+                                            text = if (isDailyDriftTab) {
+                                                "Fixed Drift Course • Obstacles • 1 Nitro/Lap • 0 Powerups"
+                                            } else {
+                                                "Fixed Boosts, Ramps & Portals • 1 Nitro/Lap • No Mines"
+                                            },
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -435,7 +506,7 @@ fun LeaderboardScreen(
                                     .background(Color(0xFF0B0E14))
                             ) {
                                 Canvas(modifier = Modifier.fillMaxSize()) {
-                                    drawTrackMiniMap(track = dailyTrackDef)
+                                    drawTrackMiniMap(track = activeDailyTrackDef)
                                 }
                             }
 
@@ -504,12 +575,16 @@ fun LeaderboardScreen(
 
                             Button(
                                 onClick = {
+                                    val ghostToUse = when {
+                                        dailyGhostEnabled && localGhostPlayback != null -> localGhostPlayback
+                                        else -> null
+                                    }
                                     if (dailyGhostEnabled && topCloudDailyGhostEntry != null) {
                                         onChallengeCloudGhost(topCloudDailyGhostEntry)
-                                    } else if (dailyGhostEnabled && localGhostPlayback != null) {
-                                        onStartDailyChallenge(todayKey, localGhostPlayback)
+                                    } else if (isDailyDriftTab) {
+                                        onStartDailyDriftChallenge(todayKey, ghostToUse)
                                     } else {
-                                        onStartDailyChallenge(todayKey, null)
+                                        onStartDailyChallenge(todayKey, ghostToUse)
                                     }
                                 },
                                 enabled = ghostLoadingId == null,
@@ -521,7 +596,7 @@ fun LeaderboardScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(54.dp)
-                                    .testTag("daily_start_button")
+                                    .testTag(if (isDailyDriftTab) "daily_drift_start_button" else "daily_start_button")
                             ) {
                                 if (ghostLoadingId != null) {
                                     CircularProgressIndicator(
@@ -534,9 +609,11 @@ fun LeaderboardScreen(
                                 }
                                 Spacer(modifier = Modifier.width(8.dp))
                                 val ctaLabel = if (dailyGhostEnabled && topCloudDailyGhostEntry != null) {
-                                    "START DAILY RUN (VS ${topCloudDailyGhostEntry.driverName.uppercase()})"
+                                    "START DAILY ${if (isDailyDriftTab) "DRIFT" else "RUN"} (VS ${topCloudDailyGhostEntry.driverName.uppercase()})"
                                 } else if (dailyGhostEnabled && localGhostPlayback != null) {
-                                    "START DAILY RUN (VS PB GHOST)"
+                                    "START DAILY ${if (isDailyDriftTab) "DRIFT" else "RUN"} (VS PB GHOST)"
+                                } else if (isDailyDriftTab) {
+                                    "START DAILY DRIFT (PURE SOLO)"
                                 } else {
                                     "START DAILY CHALLENGE (PURE SOLO)"
                                 }
@@ -550,8 +627,41 @@ fun LeaderboardScreen(
                         }
                     }
                 } else {
-                    // Track & Laps Selector for Circuit Mode
-                    if (selectedTab == LeaderboardFilterTab.RACE) {
+                    // Track & Laps Selector for Circuit or Drift Mode
+                    if (selectedTab == LeaderboardFilterTab.DRIFT) {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(driftTracks, key = { it.id }) { dTrack ->
+                                FilterChip(
+                                    selected = selectedDriftTrack.id == dTrack.id,
+                                    onClick = { selectedDriftTrack = dTrack },
+                                    label = { Text(dTrack.name, style = MaterialTheme.typography.labelSmall) },
+                                    modifier = Modifier.testTag("leaderboard_drift_track_${dTrack.id}")
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "DRIFT DISTANCE",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf(1, 3, 5).forEach { laps ->
+                                    FilterChip(
+                                        selected = selectedLaps == laps,
+                                        onClick = { selectedLaps = laps },
+                                        label = { Text("$laps ${if (laps == 1) "Lap" else "Laps"}", style = MaterialTheme.typography.labelSmall) },
+                                        modifier = Modifier.testTag("leaderboard_drift_laps_$laps")
+                                    )
+                                }
+                            }
+                        }
+                    } else if (selectedTab == LeaderboardFilterTab.RACE) {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             items(TrackId.entries) { track ->
                                 FilterChip(
@@ -589,7 +699,11 @@ fun LeaderboardScreen(
                     // Quick Launch Pure Solo (0 Bots) Button
                     Button(
                         onClick = {
-                            onStartPureSoloForTrack(selectedMode, selectedTrack, selectedLaps, localGhostPlayback)
+                            if (selectedTab == LeaderboardFilterTab.DRIFT) {
+                                onStartPureSoloForDriftTrack(selectedDriftTrack, selectedLaps, localGhostPlayback)
+                            } else {
+                                onStartPureSoloForTrack(selectedMode, selectedTrack, selectedLaps, localGhostPlayback)
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary,
@@ -604,12 +718,17 @@ fun LeaderboardScreen(
                         Icon(Icons.Default.PlayArrow, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (selectedMode == GameMode.STUNTS) {
-                                "START SOLO STUNT GAUNTLET (0 BOTS)"
-                            } else if (localGhostPlayback != null) {
-                                "DRIVE ${selectedTrack.displayName.uppercase()} (${selectedLaps}L VS PB GHOST)"
-                            } else {
-                                "DRIVE ${selectedTrack.displayName.uppercase()} (${selectedLaps}L PURE SOLO)"
+                            text = when {
+                                selectedMode == GameMode.STUNTS ->
+                                    "START SOLO STUNT GAUNTLET (0 BOTS)"
+                                selectedTab == LeaderboardFilterTab.DRIFT && localGhostPlayback != null ->
+                                    "DRIFT ${selectedDriftTrack.name.uppercase()} (${selectedLaps}L VS PB GHOST)"
+                                selectedTab == LeaderboardFilterTab.DRIFT ->
+                                    "DRIFT ${selectedDriftTrack.name.uppercase()} (${selectedLaps}L PURE SOLO)"
+                                localGhostPlayback != null ->
+                                    "DRIVE ${selectedTrack.displayName.uppercase()} (${selectedLaps}L VS PB GHOST)"
+                                else ->
+                                    "DRIVE ${selectedTrack.displayName.uppercase()} (${selectedLaps}L PURE SOLO)"
                             },
                             style = MaterialTheme.typography.labelLarge,
                             maxLines = 1,
@@ -651,6 +770,10 @@ fun LeaderboardScreen(
                                 text = when (selectedTab) {
                                     LeaderboardFilterTab.DAILY ->
                                         "No Daily Challenge time recorded today yet. Finish a 3-lap run on today's track to set your benchmark!"
+                                    LeaderboardFilterTab.DAILY_DRIFT ->
+                                        "No Daily Drift time recorded today yet. Finish a 3-lap drift run on today's obstacle course!"
+                                    LeaderboardFilterTab.DRIFT ->
+                                        "No time recorded on ${selectedDriftTrack.name} (${selectedLaps}L) yet. Complete a Drift run to save your Ghost car!"
                                     LeaderboardFilterTab.STUNTS ->
                                         "No Solo Stunt Gauntlet score recorded yet. Finish a 4-round solo run to post a high score!"
                                     LeaderboardFilterTab.RACE ->
@@ -695,15 +818,24 @@ fun LeaderboardScreen(
                             if (localGhostPlayback != null) {
                                 FilledTonalButton(
                                     onClick = {
-                                        if (selectedTab == LeaderboardFilterTab.DAILY) {
-                                            onStartDailyChallenge(todayKey, localGhostPlayback)
-                                        } else {
-                                            onStartPureSoloForTrack(
-                                                GameMode.RACE,
-                                                selectedTrack,
-                                                selectedLaps,
-                                                localGhostPlayback
-                                            )
+                                        when (selectedTab) {
+                                            LeaderboardFilterTab.DAILY ->
+                                                onStartDailyChallenge(todayKey, localGhostPlayback)
+                                            LeaderboardFilterTab.DAILY_DRIFT ->
+                                                onStartDailyDriftChallenge(todayKey, localGhostPlayback)
+                                            LeaderboardFilterTab.DRIFT ->
+                                                onStartPureSoloForDriftTrack(
+                                                    selectedDriftTrack,
+                                                    selectedLaps,
+                                                    localGhostPlayback
+                                                )
+                                            else ->
+                                                onStartPureSoloForTrack(
+                                                    GameMode.RACE,
+                                                    selectedTrack,
+                                                    selectedLaps,
+                                                    localGhostPlayback
+                                                )
                                         }
                                     },
                                     shape = RoundedCornerShape(12.dp),
@@ -728,7 +860,7 @@ fun LeaderboardScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (selectedTab == LeaderboardFilterTab.DAILY) {
+                        text = if (selectedTab == LeaderboardFilterTab.DAILY || selectedTab == LeaderboardFilterTab.DAILY_DRIFT) {
                             "TODAY'S ONLINE LEADERBOARD & GHOSTS"
                         } else {
                             "ONLINE LEADERBOARD & RIVAL GHOSTS"

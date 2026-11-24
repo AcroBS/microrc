@@ -195,6 +195,8 @@ fun RaceScreen(
 
     val isStuntsMode = snapshot?.gameMode == GameMode.STUNTS.name ||
         (snapshot == null && rules.gameModeEnum == GameMode.STUNTS)
+    val isDriftMode = snapshot?.gameMode == GameMode.DRIFT.name ||
+        (snapshot == null && rules.gameModeEnum == GameMode.DRIFT)
     val stuntState = snapshot?.stuntState
     val isLocalActiveStuntDriver = !isStuntsMode ||
         stuntState == null ||
@@ -436,7 +438,8 @@ fun RaceScreen(
                         arenaSuddenDeathStage = snapshot?.arenaSuddenDeathStage ?: 0,
                         stuntState = stuntState,
                         rockets = snapshot?.rockets.orEmpty(),
-                        ghostCar = ghostCar
+                        ghostCar = ghostCar,
+                        isDriftMode = isDriftMode
                     )
                 }
             } else {
@@ -464,7 +467,8 @@ fun RaceScreen(
                         arenaSuddenDeathStage = snapshot?.arenaSuddenDeathStage ?: 0,
                         stuntState = stuntState,
                         rockets = snapshot?.rockets.orEmpty(),
-                        ghostCar = ghostCar
+                        ghostCar = ghostCar,
+                        isDriftMode = isDriftMode
                     )
                 }
             }
@@ -639,6 +643,23 @@ fun RaceScreen(
                                 }
                             }
                         }
+                    }
+                }
+
+                // Drift Mode Pill
+                if (isDriftMode) {
+                    Surface(
+                        color = hudSurface,
+                        shape = RoundedCornerShape(50),
+                        border = BorderStroke(1.dp, secondaryAccent.copy(alpha = 0.8f)),
+                        modifier = Modifier.testTag("drift_mode_badge")
+                    ) {
+                        Text(
+                            text = if (isDailyChallenge) "DAILY DRIFT • 1x NITRO/LAP" else "DRIFT • 1x NITRO/LAP",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = secondaryAccent,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
                     }
                 }
 
@@ -1227,7 +1248,7 @@ fun RaceScreen(
                         horizontalArrangement = Arrangement.spacedBy(actionRowSpacing),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (!isArenaMode && !isStuntsMode && !isDailyChallenge) {
+                        if (!isArenaMode && !isStuntsMode && !isDailyChallenge && !isDriftMode) {
                             val currentLap = localRacer?.lap ?: 1
                             val mineFlash = 0.5f + 0.5f * sin(animTimeSec * 14f)
                             val mineActiveBg = if (mineFlash > 0.45f) {
@@ -1331,7 +1352,7 @@ fun RaceScreen(
                                     text = when {
                                         stuntControlsLocked -> "LOCKED"
                                         heldPowerUp != null -> heldPowerUp.shortName
-                                        isDailyChallenge -> "1/LAP USED"
+                                        isDailyChallenge || isDriftMode -> "1/LAP USED"
                                         else -> "EMPTY"
                                     },
                                     style = MaterialTheme.typography.labelLarge,

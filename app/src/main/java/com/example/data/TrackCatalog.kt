@@ -311,9 +311,16 @@ object TrackCatalog {
                 boostAt(spline, (spline.size * 0.64).toInt())
             )
         }
-        val items = data.itemSpawns.ifEmpty {
-            listOf(0.22f, 0.44f, 0.68f, 0.86f).mapIndexed { idx, frac ->
-                itemAt(spline, (spline.size * frac).toInt(), idx)
+        val noTrackItems = data.id.startsWith("drift_") ||
+            data.id.startsWith("daily_drift_") ||
+            data.id.startsWith("daily_")
+        val items = if (noTrackItems) {
+            data.itemSpawns
+        } else {
+            data.itemSpawns.ifEmpty {
+                listOf(0.22f, 0.44f, 0.68f, 0.86f).mapIndexed { idx, frac ->
+                    itemAt(spline, (spline.size * frac).toInt(), idx)
+                }
             }
         }
         val ramps = data.ramps

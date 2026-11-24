@@ -475,8 +475,9 @@ class FriendsRepository(
             }
             val cleanSender = senderProfile.name.trim().take(24).ifEmpty { "Driver" }
             val cleanRecipient = recipientName.trim().take(24).ifEmpty { "Friend" }
-            val validMode = runCatching { GameMode.valueOf(room.gameMode).name }
-                .getOrDefault(GameMode.RACE.name)
+            val validMode = com.example.drift.DriftFeature.toFirestoreWireGameMode(
+                runCatching { GameMode.valueOf(room.gameMode) }.getOrDefault(GameMode.RACE)
+            )
             val token = if (room.passwordProtected) room.passwordHash.take(64) else ""
 
             withFirestoreTimeout(8_000L, "session invite server") {

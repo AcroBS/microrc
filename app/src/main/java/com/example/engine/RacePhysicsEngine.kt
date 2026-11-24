@@ -120,7 +120,8 @@ class RacePhysicsEngine(
 
     private val isStuntMode: Boolean = track.isStunt || rules.gameModeEnum == GameMode.STUNTS
     private val isArenaMode: Boolean = !isStuntMode && (track.isArena || rules.gameModeEnum == GameMode.ARENA)
-    private val winCondition: WinCondition = rules.winConditionEnum
+    private val isDriftMode: Boolean = !isStuntMode && !isArenaMode && com.example.drift.DriftFeature.isDriftMode(rules.gameModeEnum)
+    private val winCondition: WinCondition = if (isDriftMode) WinCondition.FIRST_TO_FINISH else rules.winConditionEnum
     private val speedPreset: CarSpeedPreset = rules.carSpeedEnum
     private val effectiveLaps: Int = totalLaps.coerceIn(1, 9)
     private val timeLimitMs: Long = rules.timeLimitSec.coerceIn(30, 600) * 1000L
@@ -242,7 +243,7 @@ class RacePhysicsEngine(
                 flagX = fx
                 flagY = fy
             }
-            if (isDailyChallenge) {
+            if (isDailyChallenge || isDriftMode) {
                 itemBoxes.clear()
                 fieldPickups.clear()
                 nextFieldPickupSpawnMs = Long.MAX_VALUE
@@ -252,7 +253,9 @@ class RacePhysicsEngine(
                     r.minesAvailable = 0
                     r.lastMineGrantedLap = Int.MAX_VALUE
                 }
-                setupFixedDailyPortals()
+                if (isDailyChallenge && !isDriftMode) {
+                    setupFixedDailyPortals()
+                }
             } else {
                 randomizeAllItemBoxes()
             }
@@ -471,7 +474,7 @@ class RacePhysicsEngine(
     }
 
     fun grantMineForTest(playerId: String, count: Int = 1) {
-        if (isDailyChallenge || isArenaMode || isStuntMode) return
+        if (isDailyChallenge || isDriftMode || isArenaMode || isStuntMode) return
         val racer = racers.find { it.playerId == playerId } ?: return
         racer.minesAvailable = count.coerceIn(0, 1)
     }
@@ -725,7 +728,7 @@ class RacePhysicsEngine(
     }
 
     private fun updateFieldPickups(dtMs: Long) {
-        if (isDailyChallenge || phase != RacePhase.RACING) return
+        if (isDailyChallenge || isDriftMode || phase != RacePhase.RACING) return
 
         val it = fieldPickups.iterator()
         while (it.hasNext()) {
@@ -766,7 +769,7 @@ class RacePhysicsEngine(
     }
 
     private fun updatePortals(dtMs: Long) {
-        if (isDailyChallenge || phase != RacePhase.RACING) return
+        if (isDailyChallenge || isDriftMode || phase != RacePhase.RACING) return
 
         val current = portalPair
         if (current != null) {
@@ -1629,11 +1632,8 @@ class RacePhysicsEngine(
         val reverseFlip = if (forwardVel < -25f) -1f else 1f
         val gripTurnBoost = if (hasOverdrive) 1.18f else 1.0f
         val airSteerFactor = if (isAirborne) 0.25f else 1.0f
-        racer.angleRad = normalizeAngle(
-            racer.angleRad + steer * racer.carType.turnRateRad * gripTurnBoost * airSteerFactor * speedNorm * reverseFlip * dt
-        )
 
-        if (!isAirborne) {
+        if (isDriftMode && !isAirborne) {
             val weatherGripMult = when {
                 inRainPuddle && !hasOverdrive -> 0.45f
                 activeEvent == ExternalEventType.SNOW -> 0.40f
@@ -1641,21 +1641,55 @@ class RacePhysicsEngine(
                 activeEvent == ExternalEventType.EARTHQUAKE -> 0.80f
                 else -> 1.0f
             }
-            val grip = racer.carType.lateralGrip *
-                track.id.surfaceGripMultiplier *
-                weatherGripMult *
-                (if (hasOverdrive) 1.55f else 1.0f) *
-                (if (isOffRoad) 0.85f else 1.0f)
-            lateralVel *= max(0f, 1f - grip * dt)
+            val driftStep = com.example.drift.DriftPhysics.integrateDriftTurn(
+                currentAngleRad = racer.angleRad,
+                forwardVel = forwardVel,
+                lateralVel = lateralVel,
+                steer = steer,
+                throttle = throttle,
+                turnRateRad = racer.carType.turnRateRad,
+                carLateralGrip = racer.carType.lateralGrip,
+                surfaceGripMultiplier = track.id.surfaceGripMultiplier,
+                speedNorm = speedNorm,
+                reverseFlip = reverseFlip,
+                hasOverdrive = hasOverdrive,
+                hasBoost = hasBoost,
+                isOffRoad = isOffRoad,
+                weatherGripMult = weatherGripMult,
+                dt = dt
+            )
+            racer.angleRad = driftStep.newAngleRad
+            racer.vx = driftStep.vx
+            racer.vy = driftStep.vy
+        } else {
+            racer.angleRad = normalizeAngle(
+                racer.angleRad + steer * racer.carType.turnRateRad * gripTurnBoost * airSteerFactor * speedNorm * reverseFlip * dt
+            )
+
+            if (!isAirborne) {
+                val weatherGripMult = when {
+                    inRainPuddle && !hasOverdrive -> 0.45f
+                    activeEvent == ExternalEventType.SNOW -> 0.40f
+                    activeEvent == ExternalEventType.RAIN -> 0.72f
+                    activeEvent == ExternalEventType.EARTHQUAKE -> 0.80f
+                    else -> 1.0f
+                }
+                val grip = racer.carType.lateralGrip *
+                    track.id.surfaceGripMultiplier *
+                    weatherGripMult *
+                    (if (hasOverdrive) 1.55f else 1.0f) *
+                    (if (isOffRoad) 0.85f else 1.0f)
+                lateralVel *= max(0f, 1f - grip * dt)
+            }
+
+            val nCos = cos(racer.angleRad)
+            val nSin = sin(racer.angleRad)
+            val nRightX = -nSin
+            val nRightY = nCos
+
+            racer.vx = nCos * forwardVel + nRightX * lateralVel
+            racer.vy = nSin * forwardVel + nRightY * lateralVel
         }
-
-        val nCos = cos(racer.angleRad)
-        val nSin = sin(racer.angleRad)
-        val nRightX = -nSin
-        val nRightY = nCos
-
-        racer.vx = nCos * forwardVel + nRightX * lateralVel
-        racer.vy = nSin * forwardVel + nRightY * lateralVel
 
         racer.x += racer.vx * dt
         racer.y += racer.vy * dt
@@ -1886,7 +1920,7 @@ class RacePhysicsEngine(
     }
 
     private fun handleItemPickups(racer: MutableRacer) {
-        if (isDailyChallenge || racer.heldPowerUp != null) return
+        if (isDailyChallenge || isDriftMode || racer.heldPowerUp != null) return
         for (i in itemBoxes.indices) {
             val box = itemBoxes[i]
             if (box.available && TrackCatalog.distance(racer.x, racer.y, box.x, box.y) <= 44f) {
@@ -1923,7 +1957,7 @@ class RacePhysicsEngine(
     }
 
     private fun grantLapMineIfEligible(racer: MutableRacer): Boolean {
-        if (isDailyChallenge || isArenaMode || racer.finished) return false
+        if (isDailyChallenge || isDriftMode || isArenaMode || racer.finished) return false
         if (racer.lap >= 2 && racer.lap > racer.lastMineGrantedLap) {
             racer.lastMineGrantedLap = racer.lap
             racer.minesAvailable = 1
@@ -1936,7 +1970,7 @@ class RacePhysicsEngine(
     }
 
     private fun grantDailyNitroIfEligible(racer: MutableRacer): Boolean {
-        if (!isDailyChallenge || racer.finished) return false
+        if ((!isDailyChallenge && !isDriftMode) || racer.finished) return false
         if (racer.lap > racer.lastNitroGrantedLap) {
             racer.lastNitroGrantedLap = racer.lap
             racer.heldPowerUp = PowerUpType.TURBO_NITRO
@@ -1946,7 +1980,7 @@ class RacePhysicsEngine(
     }
 
     private fun dropMine(racer: MutableRacer) {
-        if (isDailyChallenge || isArenaMode || racer.minesAvailable <= 0) return
+        if (isDailyChallenge || isDriftMode || isArenaMode || racer.minesAvailable <= 0) return
         racer.minesAvailable = 0
         val dropX = racer.x - cos(racer.angleRad) * 54f
         val dropY = racer.y - sin(racer.angleRad) * 54f
@@ -1965,7 +1999,7 @@ class RacePhysicsEngine(
     }
 
     private fun handleFieldPickups(racer: MutableRacer) {
-        if (isDailyChallenge || racer.jumpZ > 0.30f || fieldPickups.isEmpty()) return
+        if (isDailyChallenge || isDriftMode || racer.jumpZ > 0.30f || fieldPickups.isEmpty()) return
         val hitRadius = 40f + racer.carType.radiusPx * 0.45f
         val it = fieldPickups.iterator()
         while (it.hasNext()) {
@@ -2951,8 +2985,20 @@ class RacePhysicsEngine(
         val np = pts[nextIdx]
 
         val segAngle = atan2(np.y - tp.y, np.x - tp.x)
-        val targetX = tp.x + (-sin(segAngle)) * racer.botLaneOffset
-        val targetY = tp.y + cos(segAngle) * racer.botLaneOffset
+        var targetX = tp.x + (-sin(segAngle)) * racer.botLaneOffset
+        var targetY = tp.y + cos(segAngle) * racer.botLaneOffset
+        if (isDriftMode) {
+            val adjusted = com.example.drift.DriftPhysics.avoidSolidObstacles(
+                track = track,
+                racerX = racer.x,
+                racerY = racer.y,
+                racerAngleRad = racer.angleRad,
+                targetX = targetX,
+                targetY = targetY
+            )
+            targetX = adjusted.first
+            targetY = adjusted.second
+        }
 
         val desiredAngle = atan2(targetY - racer.y, targetX - racer.x)
         val angleDiff = normalizeAngle(desiredAngle - racer.angleRad)
@@ -3130,6 +3176,7 @@ class RacePhysicsEngine(
             gameMode = when {
                 isStuntMode -> GameMode.STUNTS.name
                 isArenaMode -> GameMode.ARENA.name
+                isDriftMode -> GameMode.DRIFT.name
                 else -> GameMode.RACE.name
             },
             arenaShape = track.arenaShape?.name,

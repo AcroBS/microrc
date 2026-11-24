@@ -177,6 +177,26 @@ class WifiP2pRaceManager(
                         isRandom = true
                     )
                 }
+                GameMode.DRIFT -> {
+                    val driftTracks = com.example.drift.DriftTrackCatalog.defaultDriftCustomTracks()
+                    val candidates = driftTracks
+                        .shuffled(random)
+                        .take(2)
+                        .map { dt ->
+                            RematchVoteOption(
+                                id = dt.id,
+                                displayName = dt.name,
+                                subtitle = "Drift • Time Trial (1 Nitro/Lap)",
+                                isRandom = false
+                            )
+                        }
+                    candidates + RematchVoteOption(
+                        id = REMATCH_OPTION_RANDOM,
+                        displayName = "Random Drift Track",
+                        subtitle = "Procedural obstacle drift circuit",
+                        isRandom = true
+                    )
+                }
                 else -> {
                     val pool = if (hasActiveCustomTrack) {
                         TrackId.entries.toList()
@@ -415,6 +435,25 @@ class WifiP2pRaceManager(
                 currentTrackId = currentArenaShape.themeTrackId
                 _activeTrack.value = TrackCatalog.getArenaTrack(currentArenaShape)
             }
+            GameMode.DRIFT -> {
+                activeConcreteMode = GameMode.DRIFT
+                nextPlannedHybridMode = null
+                currentRules = rules.copy(
+                    gameMode = GameMode.DRIFT.name,
+                    winCondition = WinCondition.FIRST_TO_FINISH.name,
+                    randomJumpsEnabled = false
+                )
+                val driftTrack = initialCustomTrack?.takeIf { com.example.drift.DriftFeature.isDriftTrackKey(it.id) }
+                    ?: com.example.drift.DriftTrackCatalog.defaultDriftCustomTracks().firstOrNull()
+                if (driftTrack != null) {
+                    currentCustomTrack = driftTrack
+                    currentTrackId = runCatching { TrackId.valueOf(driftTrack.themeId) }
+                        .getOrDefault(TrackId.WAREHOUSE_DRIFT)
+                    _activeTrack.value = TrackCatalog.buildCustomTrack(driftTrack)
+                } else {
+                    _activeTrack.value = TrackCatalog.getTrack(currentTrackId)
+                }
+            }
             GameMode.RACE -> {
                 activeConcreteMode = GameMode.RACE
                 nextPlannedHybridMode = null
@@ -538,6 +577,34 @@ class WifiP2pRaceManager(
         val ghostMsg = challengeGhost?.let {
             "Daily GP ($dateKey) vs ${it.driverName} (${String.format("%.2fs", it.finishTimeMs / 1000f)})!"
         } ?: "Daily GP ($dateKey) • Fair Fixed Track Layout (0 AI Bots)!"
+        addSystemChat(ghostMsg)
+        publishLocalLobbyState()
+        startRace()
+    }
+
+    fun startDailyDriftChallengeSession(
+        profile: PlayerProfile,
+        baseRules: RaceRulesSettings = RaceRulesSettings(),
+        customTrack: CustomTrackData,
+        dateKey: String,
+        challengeGhost: GhostRunPlayback? = null
+    ) {
+        leaveSession()
+        localPlayerId = profile.playerId
+        val dailyRules = com.example.drift.DriftDailyChallenge.lockedDailyDriftRules(baseRules)
+        _isDailyChallenge.value = true
+        dailySeedForSession = com.example.drift.DriftDailyChallenge.seedForDate(dateKey)
+        configureInitialSessionMode(dailyRules, customTrack)
+        _role.value = SessionRole.Solo
+        _activeChallengeGhost.value = challengeGhost
+        _activeGhostCar.value = null
+        inRace = false
+        chatLog.clear()
+        playersList.clear()
+        playersList.add(profile.toLobbyPlayer(isHost = true, isReady = true))
+        val ghostMsg = challengeGhost?.let {
+            "Daily Drift ($dateKey) vs ${it.driverName} (${String.format("%.2fs", it.finishTimeMs / 1000f)})!"
+        } ?: "Daily Drift ($dateKey) • Obstacle Drift Layout (0 Powerups, 1 Nitro/Lap)!"
         addSystemChat(ghostMsg)
         publishLocalLobbyState()
         startRace()
@@ -1278,7 +1345,12 @@ class WifiP2pRaceManager(
 
     fun updateRules(rules: RaceRulesSettings) {
         if (_role.value != SessionRole.Host && _role.value != SessionRole.Solo) return
-        configureInitialSessionMode(rules, if (rules.gameModeEnum == GameMode.RACE) currentCustomTrack else null)
+        val keepCustom = if (rules.gameModeEnum == GameMode.RACE || rules.gameModeEnum == GameMode.DRIFT) {
+            currentCustomTrack
+        } else {
+            null
+        }
+        configureInitialSessionMode(rules, keepCustom)
         val summary = buildList {
             when (rules.gameModeEnum) {
                 GameMode.ARENA -> add("Arena (${rules.arenaTargetMinutes} min flag)")
@@ -1287,6 +1359,7 @@ class WifiP2pRaceManager(
                     val enabledNames = rules.enabledHybridModes().joinToString("+") { it.displayName }
                     add("Hybrid Tour ($enabledNames)")
                 }
+                GameMode.DRIFT -> add("Drifting (${rules.totalLaps} Laps • Time-Based • 1 Nitro/Lap)")
                 GameMode.RACE -> {
                     if (rules.winConditionEnum == com.example.model.WinCondition.TIME_TRIAL_DISTANCE) {
                         add("Max Time: ${rules.timeLimitSec}s")
@@ -1296,7 +1369,7 @@ class WifiP2pRaceManager(
                 }
             }
             add("Speed: ${rules.carSpeedEnum.displayName}")
-            if (rules.randomJumpsEnabled && rules.gameModeEnum != GameMode.STUNTS) add("Jumps")
+            if (rules.randomJumpsEnabled && rules.gameModeEnum != GameMode.STUNTS && rules.gameModeEnum != GameMode.DRIFT) add("Jumps")
             if (rules.randomConditionsEnabled && rules.gameModeEnum != GameMode.STUNTS) add("Random Weather")
             if (rules.showPlayerNames) add("Name Tags")
         }.joinToString(" • ").ifEmpty { "Standard Rules" }
@@ -1407,6 +1480,7 @@ class WifiP2pRaceManager(
         }
         val isStuntMode = concreteMode == GameMode.STUNTS
         val isArenaMode = concreteMode == GameMode.ARENA
+        val isDriftMode = concreteMode == GameMode.DRIFT
         val customData = if (isArenaMode || isStuntMode) null else currentCustomTrack
         val stuntSequence: List<StuntVariant>? = if (isStuntMode) {
             if (isHybrid) {
@@ -1431,7 +1505,7 @@ class WifiP2pRaceManager(
         }
         val dailyChallengeRun = _isDailyChallenge.value
         val track = when {
-            isStuntMode -> baseTrack
+            isStuntMode || isDriftMode -> baseTrack
             dailyChallengeRun -> baseTrack
             customData == null -> TrackCatalog.withRandomJumps(baseTrack, enabled = currentRules.randomJumpsEnabled)
             !currentRules.randomJumpsEnabled -> baseTrack.copy(ramps = emptyList())
@@ -1442,7 +1516,10 @@ class WifiP2pRaceManager(
 
         val effectiveStageRules = currentRules.copy(gameMode = concreteMode.name)
         val engineRng = if (dailyChallengeRun) {
-            Random(dailySeedForSession ?: DailyChallengeCatalog.seedForDate())
+            Random(
+                dailySeedForSession
+                    ?: if (isDriftMode) com.example.drift.DriftDailyChallenge.seedForDate() else DailyChallengeCatalog.seedForDate()
+            )
         } else {
             Random.Default
         }
@@ -1486,7 +1563,8 @@ class WifiP2pRaceManager(
 
         val isSoloSession = _role.value == SessionRole.Solo
         val pureSoloNoBots = isSoloSession && snapshotPlayers.none { it.isBot }
-        val activeGhostForRun = if (isSoloSession && concreteMode == GameMode.RACE && !isHybrid) {
+        val isGhostTimeMode = concreteMode == GameMode.RACE || concreteMode == GameMode.DRIFT
+        val activeGhostForRun = if (isSoloSession && isGhostTimeMode && !isHybrid) {
             _activeChallengeGhost.value?.takeIf { ghost ->
                 ghost.trackId == (customData?.id ?: currentTrackId.name)
             }
@@ -1494,7 +1572,7 @@ class WifiP2pRaceManager(
             null
         }
         val recordedGhostFrames = mutableListOf<GhostFrame>()
-        if (isSoloSession && concreteMode == GameMode.RACE && !isHybrid) {
+        if (isSoloSession && isGhostTimeMode && !isHybrid) {
             initialSnap.racers.find { it.playerId == localPlayerId }?.let { me ->
                 recordedGhostFrames.add(
                     GhostFrame(
@@ -1562,7 +1640,7 @@ class WifiP2pRaceManager(
                 _raceSnapshot.value = snap
 
                 // Ghost recording & live Ghost Challenge interpolation in Solo mode
-                if (isSoloSession && concreteMode == GameMode.RACE && !isHybrid) {
+                if (isSoloSession && isGhostTimeMode && !isHybrid) {
                     val me = snap.racers.find { it.playerId == localPlayerId }
                     if (me != null && snap.phase == RacePhase.RACING.name && (snap.raceTimeMs - lastGhostRecordMs) >= 95L) {
                         lastGhostRecordMs = snap.raceTimeMs
@@ -1621,8 +1699,8 @@ class WifiP2pRaceManager(
                         val me = snap.racers.find { it.playerId == localPlayerId }
                         if (me != null) {
                             val finishMs = me.finishTimeMs ?: snap.raceTimeMs
-                            if (concreteMode == GameMode.RACE &&
-                                currentRules.winConditionEnum == WinCondition.FIRST_TO_FINISH &&
+                            if (isGhostTimeMode &&
+                                (isDriftMode || currentRules.winConditionEnum == WinCondition.FIRST_TO_FINISH) &&
                                 finishMs > 0L
                             ) {
                                 recordedGhostFrames.add(
@@ -1637,14 +1715,14 @@ class WifiP2pRaceManager(
                                 )
                                 val trackKey = customData?.id ?: currentTrackId.name
                                 val bKey = LeaderboardBoardKey.build(
-                                    gameMode = GameMode.RACE,
+                                    gameMode = concreteMode,
                                     trackKey = trackKey,
                                     totalLaps = currentTotalLaps
                                 )
                                 _completedSoloRuns.tryEmit(
                                     CompletedSoloRunSummary(
                                         boardKey = bKey,
-                                        gameMode = GameMode.RACE,
+                                        gameMode = concreteMode,
                                         trackKey = trackKey,
                                         totalLaps = currentTotalLaps,
                                         finishTimeMs = finishMs,
@@ -1947,6 +2025,24 @@ class WifiP2pRaceManager(
                 currentCustomTrack = null
                 _activeTrack.value = TrackCatalog.getStuntTrack(nextStunt)
                 addSystemChat("Next stunt event: ${nextStunt.displayName}!")
+            }
+            GameMode.DRIFT -> {
+                val chosenDrift = if (winnerId == REMATCH_OPTION_RANDOM) {
+                    if (Random.nextFloat() < 0.5f) {
+                        com.example.drift.DriftTrackCatalog.generateRandomDriftTrack(seed = System.currentTimeMillis())
+                    } else {
+                        val defaults = com.example.drift.DriftTrackCatalog.defaultDriftCustomTracks()
+                        defaults.filter { it.id != currentCustomTrack?.id }.randomOrNull() ?: defaults.first()
+                    }
+                } else {
+                    com.example.drift.DriftTrackCatalog.resolveCustomTrackByKey(winnerId)
+                        ?: com.example.drift.DriftTrackCatalog.defaultDriftCustomTracks().first()
+                }
+                currentCustomTrack = chosenDrift
+                currentTrackId = runCatching { TrackId.valueOf(chosenDrift.themeId) }
+                    .getOrDefault(TrackId.WAREHOUSE_DRIFT)
+                _activeTrack.value = TrackCatalog.buildCustomTrack(chosenDrift)
+                addSystemChat("Next Drift track: ${chosenDrift.name}!")
             }
             else -> {
                 if (winnerId == REMATCH_OPTION_RANDOM) {

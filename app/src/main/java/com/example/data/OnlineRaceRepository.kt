@@ -172,7 +172,7 @@ open class OnlineRaceRepository(
                     "passwordSalt" to salt,
                     "passwordHash" to hash,
                     "status" to "OPEN",
-                    "gameMode" to gameMode.name,
+                    "gameMode" to com.example.drift.DriftFeature.toFirestoreWireGameMode(gameMode),
                     "trackId" to safeTrackId,
                     "playerCount" to 1L,
                     "maxPlayers" to clampedMax,
@@ -236,7 +236,7 @@ open class OnlineRaceRepository(
                 passwordSalt = salt,
                 passwordHash = hash,
                 status = "OPEN",
-                gameMode = gameMode.name,
+                gameMode = com.example.drift.DriftFeature.toFirestoreWireGameMode(gameMode),
                 trackId = safeTrackId,
                 playerCount = 1L,
                 maxPlayers = clampedMax,
@@ -692,6 +692,57 @@ open class OnlineRaceRepository(
         }
     }
 
+    data class LeaderboardSubmissionResult(
+        val improvedPersonalBest: Boolean,
+        val isNewBoardRecord: Boolean
+    )
+
+    companion object {
+        internal fun isNewOverallBoardRecord(
+            existingBoardEntries: List<LeaderboardEntryDoc>,
+            submitterUid: String,
+            gameMode: GameMode,
+            finishTimeMs: Long,
+            bestScore: Int
+        ): Boolean {
+            val isStunts = gameMode == GameMode.STUNTS
+            val others = existingBoardEntries.filter { entry ->
+                entry.publicEntry && entry.userId.isNotBlank() && entry.userId != submitterUid
+            }
+            if (isStunts) {
+                if (bestScore <= 0) return false
+                val topOtherScore = others.maxOfOrNull { it.bestScore } ?: 0L
+                return bestScore.toLong() > topOtherScore
+            } else {
+                if (finishTimeMs <= 0L) return false
+                val fastestOtherTime = others
+                    .filter { it.bestRaceTimeMs > 0L }
+                    .minOfOrNull { it.bestRaceTimeMs }
+                return fastestOtherTime == null || finishTimeMs < fastestOtherTime
+            }
+        }
+
+        internal fun isNotificationStillBoardRecord(
+            notif: com.example.model.LeaderboardNotificationDoc,
+            boardEntries: List<LeaderboardEntryDoc>
+        ): Boolean {
+            if (boardEntries.isEmpty()) return true
+            val isStunts = notif.gameMode == GameMode.STUNTS.name || notif.boardKey.startsWith("STUNTS_")
+            val others = boardEntries.filter {
+                it.publicEntry && it.boardKey == notif.boardKey && it.userId != notif.senderUid
+            }
+            return if (isStunts) {
+                if (notif.bestScore <= 0L) return false
+                val topOther = others.maxOfOrNull { it.bestScore } ?: 0L
+                notif.bestScore >= topOther
+            } else {
+                if (notif.bestRaceTimeMs <= 0L) return false
+                val fastestOther = others.filter { it.bestRaceTimeMs > 0L }.minOfOrNull { it.bestRaceTimeMs }
+                fastestOther == null || notif.bestRaceTimeMs <= fastestOther
+            }
+        }
+    }
+
     suspend fun submitPersonalBestAndGhost(
         profile: PlayerProfile,
         gameMode: GameMode,
@@ -702,7 +753,7 @@ open class OnlineRaceRepository(
         bestLapMs: Long,
         bestScore: Int,
         encodedGhostFrames: String
-    ): Result<Boolean> {
+    ): Result<LeaderboardSubmissionResult> {
         var currentPath = "leaderboardEntries"
         return try {
             val uid = requireUserId()
@@ -734,7 +785,12 @@ open class OnlineRaceRepository(
                 (existing.bestLapTimeMs <= 0L || safeLapMs < existing.bestLapTimeMs)
 
             if (!improvedPrimary && !improvedLap) {
-                return Result.success(false)
+                return Result.success(
+                    LeaderboardSubmissionResult(
+                        improvedPersonalBest = false,
+                        isNewBoardRecord = false
+                    )
+                )
             }
 
             val canWriteGhost = improvedPrimary &&
@@ -821,11 +877,7 @@ open class OnlineRaceRepository(
                     )
                 ).await()
             } else {
-                val ruleMode = when (gameMode) {
-                    GameMode.STUNTS -> GameMode.STUNTS.name
-                    GameMode.ARENA -> GameMode.ARENA.name
-                    else -> GameMode.RACE.name
-                }
+                val ruleMode = com.example.drift.DriftFeature.toFirestoreWireGameMode(gameMode)
                 entryRef.set(
                     mapOf(
                         "userId" to uid,
@@ -848,7 +900,44 @@ open class OnlineRaceRepository(
                     )
                 ).await()
             }
-            Result.success(improvedPrimary)
+
+            val isNewBoardRecord = if (improvedPrimary) {
+                val boardDocs = runCatching {
+                    withTimeoutOrNull(6_000L) {
+                        db.collection("leaderboardEntries")
+                            .whereEqualTo("publicEntry", true)
+                            .whereEqualTo("boardKey", boardKey)
+                            .get(Source.SERVER)
+                            .await()
+                    } ?: db.collection("leaderboardEntries")
+                        .whereEqualTo("publicEntry", true)
+                        .whereEqualTo("boardKey", boardKey)
+                        .get()
+                        .await()
+                }.getOrNull()
+                val existingBoardEntries = boardDocs?.documents?.mapNotNull { doc ->
+                    doc.toObject(
+                        LeaderboardEntryDoc::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    )
+                }.orEmpty()
+                isNewOverallBoardRecord(
+                    existingBoardEntries = existingBoardEntries,
+                    submitterUid = uid,
+                    gameMode = gameMode,
+                    finishTimeMs = safeRaceMs,
+                    bestScore = safeScore.toInt()
+                )
+            } else {
+                false
+            }
+
+            Result.success(
+                LeaderboardSubmissionResult(
+                    improvedPersonalBest = improvedPrimary,
+                    isNewBoardRecord = isNewBoardRecord
+                )
+            )
         } catch (e: Exception) {
             rethrowIfRealCancellation(e)
             handleFirestoreError(e, OperationType.WRITE, currentPath)

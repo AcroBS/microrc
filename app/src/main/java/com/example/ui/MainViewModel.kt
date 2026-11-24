@@ -358,7 +358,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             profile = profile.value,
             initialRules = setupRules,
             includeBots = false,
-            challengeGhost = if (mode == GameMode.RACE) ghost else null
+            challengeGhost = if (mode == GameMode.RACE || mode == GameMode.DRIFT) ghost else null
         )
         if (mode == GameMode.RACE) {
             raceManager.selectTrack(trackId)
@@ -367,11 +367,74 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         raceManager.startRace()
     }
 
+    fun startPureSoloForDriftTrack(
+        driftTrack: CustomTrackData,
+        laps: Int = 3,
+        ghost: GhostRunPlayback? = null
+    ) {
+        _lastRunWasPersonalBest.value = false
+        val cleanLaps = laps.coerceIn(1, 9)
+        val setupRules = rules.value.copy(
+            gameMode = GameMode.DRIFT.name,
+            winCondition = WinCondition.FIRST_TO_FINISH.name,
+            totalLaps = cleanLaps,
+            randomJumpsEnabled = false
+        )
+        val boardKey = LeaderboardBoardKey.build(GameMode.DRIFT, driftTrack.id, cleanLaps)
+        val ghostToUse = ghost ?: localLeaderboard.value.find { it.boardKey == boardKey }
+            ?.takeIf { it.ghostFramesData.isNotBlank() }
+            ?.let { rec ->
+                val frames = GhostCodec.decodeFrames(rec.ghostFramesData)
+                if (frames.size >= 2) {
+                    GhostRunPlayback(
+                        ghostId = "local_${rec.boardKey}",
+                        driverName = "${rec.driverName} (PB)",
+                        carType = rec.carType,
+                        primaryColorArgb = rec.primaryColorArgb,
+                        accentColorArgb = rec.accentColorArgb,
+                        boardKey = rec.boardKey,
+                        trackId = rec.trackKey,
+                        totalLaps = rec.totalLaps,
+                        finishTimeMs = rec.bestRaceTimeMs,
+                        bestLapMs = rec.bestLapTimeMs,
+                        frames = frames
+                    )
+                } else {
+                    null
+                }
+            }
+        raceManager.startSoloSession(
+            profile = profile.value,
+            initialRules = setupRules,
+            initialCustomTrack = driftTrack,
+            includeBots = false,
+            challengeGhost = ghostToUse
+        )
+        raceManager.setTotalLaps(cleanLaps)
+        raceManager.startRace()
+    }
+
     fun startGhostChallenge(playback: GhostRunPlayback) {
+        val dailyDriftDate = com.example.drift.DriftDailyChallenge.extractDateKey(playback.trackId)
+        if (dailyDriftDate != null) {
+            startDailyDriftChallenge(dateKey = dailyDriftDate, customGhost = playback)
+            return
+        }
         val dailyDateKey = DailyChallengeCatalog.extractDateKey(playback.trackId)
         if (dailyDateKey != null) {
             startDailyChallenge(dateKey = dailyDateKey, customGhost = playback)
             return
+        }
+        val driftCustom = com.example.drift.DriftTrackCatalog.resolveCustomTrackByKey(playback.trackId)
+        if (driftCustom != null || com.example.drift.DriftFeature.isDriftBoardKey(playback.boardKey)) {
+            if (driftCustom != null) {
+                startPureSoloForDriftTrack(
+                    driftTrack = driftCustom,
+                    laps = playback.totalLaps,
+                    ghost = playback
+                )
+                return
+            }
         }
         val targetTrack = runCatching { TrackId.valueOf(playback.trackId) }
             .getOrDefault(TrackId.LIVING_ROOM_GP)
@@ -414,6 +477,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         raceManager.startDailyChallengeSession(
+            profile = profile.value,
+            baseRules = rules.value,
+            customTrack = dailyTrack,
+            dateKey = normalizedDate,
+            challengeGhost = ghostToUse
+        )
+    }
+
+    fun startDailyDriftChallenge(
+        dateKey: String = DailyChallengeCatalog.todayDateKey(),
+        customGhost: GhostRunPlayback? = null
+    ) {
+        if (!com.example.drift.DriftFeature.ENABLED) return
+        _lastRunWasPersonalBest.value = false
+        val normalizedDate = DailyChallengeCatalog.normalizeDateKey(dateKey)
+        val dailyTrack = com.example.drift.DriftDailyChallenge.dailyDriftCustomTrack(normalizedDate)
+        val boardKey = com.example.drift.DriftDailyChallenge.boardKeyForDate(normalizedDate)
+        val ghostToUse = customGhost ?: localLeaderboard.value.find { it.boardKey == boardKey }
+            ?.takeIf { it.ghostFramesData.isNotBlank() }
+            ?.let { rec ->
+                val frames = GhostCodec.decodeFrames(rec.ghostFramesData)
+                if (frames.size >= 2) {
+                    GhostRunPlayback(
+                        ghostId = "local_${rec.boardKey}",
+                        driverName = "${rec.driverName} (PB)",
+                        carType = rec.carType,
+                        primaryColorArgb = rec.primaryColorArgb,
+                        accentColorArgb = rec.accentColorArgb,
+                        boardKey = rec.boardKey,
+                        trackId = rec.trackKey,
+                        totalLaps = rec.totalLaps,
+                        finishTimeMs = rec.bestRaceTimeMs,
+                        bestLapMs = rec.bestLapTimeMs,
+                        frames = frames
+                    )
+                } else {
+                    null
+                }
+            }
+        raceManager.startDailyDriftChallengeSession(
             profile = profile.value,
             baseRules = rules.value,
             customTrack = dailyTrack,
@@ -476,7 +579,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
     fun generateRandomTrackForLobby() {
         raceManager.setChallengeGhost(null)
-        val randomTrack = TrackCatalog.generateRandomTrack(seed = System.currentTimeMillis())
+        val isDrift = lobbyState.value?.rules?.gameModeEnum == GameMode.DRIFT
+        val randomTrack = if (isDrift && com.example.drift.DriftFeature.ENABLED) {
+            com.example.drift.DriftTrackCatalog.generateRandomDriftTrack(seed = System.currentTimeMillis())
+        } else {
+            TrackCatalog.generateRandomTrack(seed = System.currentTimeMillis())
+        }
         raceManager.selectCustomTrack(randomTrack)
     }
     fun selectRandomArenaForLobby() {
@@ -504,10 +612,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun refreshDefaultLocalGhostIfMatching() {
         if (sessionRole.value != SessionRole.Solo) return
         val lobby = lobbyState.value ?: return
-        if (lobby.activeCustomTrack != null || lobby.players.any { it.isBot }) return
+        if (lobby.players.any { it.isBot }) return
+        val lobbyMode = lobby.rules.gameModeEnum
+        val customId = lobby.activeCustomTrack?.id
+        if (lobbyMode != GameMode.DRIFT && customId != null) return
         val currentGhost = activeChallengeGhost.value
         if (currentGhost != null && !currentGhost.ghostId.startsWith("local_")) return
-        val boardKey = LeaderboardBoardKey.build(GameMode.RACE, lobby.trackId, lobby.totalLaps)
+        val targetTrackKey = customId ?: lobby.trackId
+        val boardKey = LeaderboardBoardKey.build(lobbyMode, targetTrackKey, lobby.totalLaps)
         val rec = localLeaderboard.value.find { it.boardKey == boardKey }
         val pbGhost = rec?.takeIf { it.ghostFramesData.isNotBlank() }?.let { r ->
             val frames = GhostCodec.decodeFrames(r.ghostFramesData)

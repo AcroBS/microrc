@@ -146,6 +146,7 @@ fun HostSetupScreen(
                                     GameMode.ARENA -> Icons.Default.Flag
                                     GameMode.STUNTS -> Icons.Default.FlightTakeoff
                                     GameMode.HYBRID -> Icons.Default.Shuffle
+                                    GameMode.DRIFT -> Icons.Default.Speed
                                     GameMode.RACE -> Icons.Default.SportsScore
                                 },
                                 contentDescription = null,
@@ -158,7 +159,7 @@ fun HostSetupScreen(
                             )
                         }
 
-                        GameMode.entries.chunked(2).forEach { modePair ->
+                        com.example.drift.DriftFeature.selectableGameModes().chunked(2).forEach { modePair ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -169,6 +170,7 @@ fun HostSetupScreen(
                                         GameMode.ARENA -> Icons.Default.Flag
                                         GameMode.STUNTS -> Icons.Default.FlightTakeoff
                                         GameMode.HYBRID -> Icons.Default.Shuffle
+                                        GameMode.DRIFT -> Icons.Default.Speed
                                         GameMode.RACE -> Icons.Default.SportsScore
                                     }
                                     Surface(
@@ -187,7 +189,15 @@ fun HostSetupScreen(
                                             .weight(1f)
                                             .clip(RoundedCornerShape(16.dp))
                                             .clickable {
-                                                draft = draft.copy(gameMode = mode.name)
+                                                draft = if (mode == GameMode.DRIFT) {
+                                                    draft.copy(
+                                                        gameMode = mode.name,
+                                                        winCondition = WinCondition.FIRST_TO_FINISH.name,
+                                                        randomJumpsEnabled = false
+                                                    )
+                                                } else {
+                                                    draft.copy(gameMode = mode.name)
+                                                }
                                             }
                                             .testTag("mode_option_${mode.name}")
                                     ) {
@@ -407,6 +417,57 @@ fun HostSetupScreen(
                                         modifier = Modifier
                                             .weight(1f)
                                             .testTag("arena_minutes_$mins")
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    }
+                    GameMode.DRIFT -> {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer
+                        ),
+                        shape = RoundedCornerShape(22.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Speed,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = "Time-Based Drift Race",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Text(
+                                text = "Rear-end oversteer lets you kick the tail out into turns and drift cleanly around solid corner obstacles. No powerups — 1x Turbo Nitro per lap!",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                listOf(1, 2, 3, 5, 7).forEach { laps ->
+                                    val active = draft.totalLaps == laps
+                                    FilterChip(
+                                        selected = active,
+                                        onClick = { draft = draft.copy(totalLaps = laps) },
+                                        label = { Text("${laps}L") },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag("setup_drift_laps_${laps}")
                                     )
                                 }
                             }
@@ -658,14 +719,16 @@ fun HostSetupScreen(
                     onCheckedChange = { draft = draft.copy(randomConditionsEnabled = it) }
                 )
 
-                SetupSwitchCard(
-                    icon = Icons.Default.FlightTakeoff,
-                    title = "Random Jumps",
-                    description = "Spawn launch ramps on the circuit or arena floor for mid-air action.",
-                    checked = draft.randomJumpsEnabled,
-                    testTag = "setup_random_jumps_switch",
-                    onCheckedChange = { draft = draft.copy(randomJumpsEnabled = it) }
-                )
+                if (selectedMode != GameMode.DRIFT && selectedMode != GameMode.STUNTS) {
+                    SetupSwitchCard(
+                        icon = Icons.Default.FlightTakeoff,
+                        title = "Random Jumps",
+                        description = "Spawn launch ramps on the circuit or arena floor for mid-air action.",
+                        checked = draft.randomJumpsEnabled,
+                        testTag = "setup_random_jumps_switch",
+                        onCheckedChange = { draft = draft.copy(randomJumpsEnabled = it) }
+                    )
+                }
 
                 SetupSwitchCard(
                     icon = Icons.Default.Badge,
@@ -690,7 +753,17 @@ fun HostSetupScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Button(
-                        onClick = { onCreateLobby(draft) },
+                        onClick = {
+                            val finalRules = if (selectedMode == GameMode.DRIFT) {
+                                draft.copy(
+                                    winCondition = WinCondition.FIRST_TO_FINISH.name,
+                                    randomJumpsEnabled = false
+                                )
+                            } else {
+                                draft
+                            }
+                            onCreateLobby(finalRules)
+                        },
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
                             .widthIn(max = 640.dp)
@@ -705,6 +778,7 @@ fun HostSetupScreen(
                                 GameMode.ARENA -> "Open Arena Wi-Fi Lobby"
                                 GameMode.STUNTS -> "Open Stunts Wi-Fi Lobby"
                                 GameMode.HYBRID -> "Open Hybrid Tour Lobby"
+                                GameMode.DRIFT -> "Open Drift Wi-Fi Lobby"
                                 GameMode.RACE -> "Open Wi-Fi Lobby"
                             },
                             style = MaterialTheme.typography.labelLarge

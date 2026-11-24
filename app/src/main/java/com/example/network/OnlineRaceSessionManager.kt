@@ -28,6 +28,7 @@ import com.example.model.RematchVoteOption
 import com.example.model.StuntVariant
 import com.example.model.TrackDefinition
 import com.example.model.TrackId
+import com.example.model.WinCondition
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.CoroutineScope
@@ -191,6 +192,25 @@ class OnlineRaceSessionManager(
                 currentTrackId = currentArenaShape.themeTrackId
                 _activeTrack.value = TrackCatalog.getArenaTrack(currentArenaShape)
             }
+            GameMode.DRIFT -> {
+                activeConcreteMode = GameMode.DRIFT
+                nextPlannedHybridMode = null
+                currentRules = rules.copy(
+                    gameMode = GameMode.DRIFT.name,
+                    winCondition = WinCondition.FIRST_TO_FINISH.name,
+                    randomJumpsEnabled = false
+                )
+                val driftTrack = initialCustomTrack?.takeIf { com.example.drift.DriftFeature.isDriftTrackKey(it.id) }
+                    ?: com.example.drift.DriftTrackCatalog.defaultDriftCustomTracks().firstOrNull()
+                if (driftTrack != null) {
+                    currentCustomTrack = driftTrack
+                    currentTrackId = runCatching { TrackId.valueOf(driftTrack.themeId) }
+                        .getOrDefault(TrackId.WAREHOUSE_DRIFT)
+                    _activeTrack.value = TrackCatalog.buildCustomTrack(driftTrack)
+                } else {
+                    _activeTrack.value = TrackCatalog.getTrack(currentTrackId)
+                }
+            }
             GameMode.RACE -> {
                 activeConcreteMode = GameMode.RACE
                 nextPlannedHybridMode = null
@@ -330,9 +350,23 @@ class OnlineRaceSessionManager(
             GameMode.HYBRID -> WifiP2pRaceManager.resolveHybridStageMode(initialRules, 0, null)
             else -> initialRules.gameModeEnum
         }
-        val seedTrackId = when (concreteMode) {
-            GameMode.ARENA -> ArenaShape.SQUARE.themeTrackId.name
-            GameMode.STUNTS -> StuntVariant.LONG_JUMP.themeTrackId.name
+        val seedDriftCustom = if (concreteMode == GameMode.DRIFT) {
+            com.example.drift.DriftTrackCatalog.defaultDriftCustomTracks().first()
+        } else {
+            null
+        }
+        val normalizedRules = if (concreteMode == GameMode.DRIFT) {
+            initialRules.copy(
+                winCondition = WinCondition.FIRST_TO_FINISH.name,
+                randomJumpsEnabled = false
+            )
+        } else {
+            initialRules
+        }
+        val seedTrackId = when {
+            seedDriftCustom != null -> seedDriftCustom.themeId
+            concreteMode == GameMode.ARENA -> ArenaShape.SQUARE.themeTrackId.name
+            concreteMode == GameMode.STUNTS -> StuntVariant.LONG_JUMP.themeTrackId.name
             else -> TrackId.LIVING_ROOM_GP.name
         }
         val initialHostPlayer = LobbyPlayer(
@@ -354,12 +388,12 @@ class OnlineRaceSessionManager(
             trackId = seedTrackId,
             arenaShape = ArenaShape.SQUARE.name,
             stuntVariant = StuntVariant.LONG_JUMP.name,
-            totalLaps = initialRules.totalLaps.coerceIn(1, 9),
+            totalLaps = normalizedRules.totalLaps.coerceIn(1, 9),
             players = listOf(initialHostPlayer),
             chatHistory = emptyList(),
             inRace = false,
-            rules = initialRules,
-            activeCustomTrack = null
+            rules = normalizedRules,
+            activeCustomTrack = seedDriftCustom
         )
         val lobbyJson = lobbyAdapter.toJson(seedPayload)
         return repository.createOnlineRoom(
@@ -705,6 +739,9 @@ class OnlineRaceSessionManager(
                 _activeTrack.value = when (parsedLobby.rules.gameModeEnum) {
                     GameMode.ARENA -> TrackCatalog.getArenaTrack(parsedLobby.arenaShape)
                     GameMode.STUNTS -> TrackCatalog.getStuntTrack(parsedLobby.stuntVariant)
+                    GameMode.DRIFT -> (parsedLobby.activeCustomTrack
+                        ?: com.example.drift.DriftTrackCatalog.defaultDriftCustomTracks().first()
+                    ).let { TrackCatalog.buildCustomTrack(it) }
                     else -> parsedLobby.activeCustomTrack?.let {
                         TrackCatalog.buildCustomTrack(it)
                     } ?: TrackCatalog.getTrack(parsedLobby.trackId)
@@ -730,6 +767,7 @@ class OnlineRaceSessionManager(
                 val snapMode = startPayload.initialSnapshot?.gameMode ?: startPayload.rules.gameMode
                 val isStunt = snapMode == GameMode.STUNTS.name
                 val isArena = !isStunt && snapMode == GameMode.ARENA.name
+                val isDrift = !isStunt && !isArena && snapMode == GameMode.DRIFT.name
                 val baseTrack = when {
                     isStunt -> TrackCatalog.getStuntTrack(
                         startPayload.stuntVariant ?: startPayload.initialSnapshot?.stuntState?.variant
@@ -737,10 +775,13 @@ class OnlineRaceSessionManager(
                     isArena -> TrackCatalog.getArenaTrack(
                         startPayload.arenaShape ?: startPayload.initialSnapshot?.arenaShape
                     )
+                    isDrift -> (startPayload.customTrack
+                        ?: com.example.drift.DriftTrackCatalog.defaultDriftCustomTracks().first()
+                    ).let { TrackCatalog.buildCustomTrack(it) }
                     else -> startPayload.customTrack?.let { TrackCatalog.buildCustomTrack(it) }
                         ?: TrackCatalog.getTrack(startPayload.trackId)
                 }
-                _activeTrack.value = if (!isStunt && startPayload.ramps.isNotEmpty()) {
+                _activeTrack.value = if (!isStunt && !isDrift && startPayload.ramps.isNotEmpty()) {
                     baseTrack.copy(ramps = startPayload.ramps)
                 } else {
                     baseTrack
@@ -909,7 +950,7 @@ class OnlineRaceSessionManager(
         val lobbyJson = lobbyAdapter.toJson(payload).take(29_500)
         val fields = mutableMapOf<String, Any>(
             "roomName" to roomDisplayName,
-            "gameMode" to currentRules.gameModeEnum.name,
+            "gameMode" to com.example.drift.DriftFeature.toFirestoreWireGameMode(currentRules.gameModeEnum),
             "trackId" to payload.trackId,
             "playerCount" to totalCount,
             "maxPlayers" to maxRoomPlayers.toLong(),
@@ -988,7 +1029,12 @@ class OnlineRaceSessionManager(
 
     fun updateRules(rules: RaceRulesSettings) {
         if (_role.value != SessionRole.OnlineHost) return
-        configureInitialMode(rules, if (rules.gameModeEnum == GameMode.RACE) currentCustomTrack else null)
+        val keepCustom = if (rules.gameModeEnum == GameMode.RACE || rules.gameModeEnum == GameMode.DRIFT) {
+            currentCustomTrack
+        } else {
+            null
+        }
+        configureInitialMode(rules, keepCustom)
         syncHostLobbyToCloud()
     }
 
@@ -1065,6 +1111,7 @@ class OnlineRaceSessionManager(
         }
         val isStuntMode = concreteMode == GameMode.STUNTS
         val isArenaMode = concreteMode == GameMode.ARENA
+        val isDriftMode = concreteMode == GameMode.DRIFT
         val customData = if (isArenaMode || isStuntMode) null else currentCustomTrack
         val stuntSequence: List<StuntVariant>? = if (isStuntMode) {
             if (isHybrid) {
@@ -1087,7 +1134,7 @@ class OnlineRaceSessionManager(
             else -> TrackCatalog.getTrack(currentTrackId)
         }
         val track = when {
-            isStuntMode -> baseTrack
+            isStuntMode || isDriftMode -> baseTrack
             customData == null -> TrackCatalog.withRandomJumps(baseTrack, enabled = currentRules.randomJumpsEnabled)
             !currentRules.randomJumpsEnabled -> baseTrack.copy(ramps = emptyList())
             baseTrack.ramps.isEmpty() -> TrackCatalog.withRandomJumps(baseTrack, enabled = true)
@@ -1423,6 +1470,23 @@ class OnlineRaceSessionManager(
                 currentTrackId = nextStunt.themeTrackId
                 currentCustomTrack = null
                 _activeTrack.value = TrackCatalog.getStuntTrack(nextStunt)
+            }
+            GameMode.DRIFT -> {
+                val chosenDrift = if (winnerId == WifiP2pRaceManager.REMATCH_OPTION_RANDOM) {
+                    if (Random.nextFloat() < 0.5f) {
+                        com.example.drift.DriftTrackCatalog.generateRandomDriftTrack(seed = System.currentTimeMillis())
+                    } else {
+                        val defaults = com.example.drift.DriftTrackCatalog.defaultDriftCustomTracks()
+                        defaults.filter { it.id != currentCustomTrack?.id }.randomOrNull() ?: defaults.first()
+                    }
+                } else {
+                    com.example.drift.DriftTrackCatalog.resolveCustomTrackByKey(winnerId)
+                        ?: com.example.drift.DriftTrackCatalog.defaultDriftCustomTracks().first()
+                }
+                currentCustomTrack = chosenDrift
+                currentTrackId = runCatching { TrackId.valueOf(chosenDrift.themeId) }
+                    .getOrDefault(TrackId.WAREHOUSE_DRIFT)
+                _activeTrack.value = TrackCatalog.buildCustomTrack(chosenDrift)
             }
             else -> {
                 if (winnerId == WifiP2pRaceManager.REMATCH_OPTION_RANDOM) {

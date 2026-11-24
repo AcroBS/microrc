@@ -255,6 +255,7 @@ object LeaderboardBoardKey {
         return when (gameMode) {
             GameMode.STUNTS -> "STUNTS_GAUNTLET_4R"
             GameMode.ARENA -> "ARENA_${safeTrack}_${arenaMinutes.coerceIn(1, 10)}M"
+            GameMode.DRIFT -> "DRIFT_${safeTrack}_${totalLaps.coerceIn(1, 9)}L"
             else -> "RACE_${safeTrack}_${totalLaps.coerceIn(1, 9)}L"
         }
     }

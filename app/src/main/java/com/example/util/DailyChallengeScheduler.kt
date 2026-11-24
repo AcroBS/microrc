@@ -232,7 +232,7 @@ object DailyChallengeScheduler {
 
         var lbPosted = 0
         if (lbSnap != null) {
-            lbSnap.documents.mapNotNull { doc ->
+            val unreadNotifs = lbSnap.documents.mapNotNull { doc ->
                 doc.toObject(
                     LeaderboardNotificationDoc::class.java,
                     DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
@@ -240,9 +240,31 @@ object DailyChallengeScheduler {
             }.filter { notif ->
                 val createdSec = notif.createdAt?.seconds ?: nowSec
                 notif.status == "UNREAD" && (nowSec - createdSec) <= 172_800L
-            }.forEach { notif ->
-                if (SessionNotificationHelper.showFriendLeaderboardRecordNotification(appCtx, notif)) {
-                    lbPosted++
+            }
+            val boardEntriesCache = mutableMapOf<String, List<com.example.model.LeaderboardEntryDoc>>()
+            for (notif in unreadNotifs) {
+                val boardEntries = boardEntriesCache.getOrPut(notif.boardKey) {
+                    withTimeoutOrNull(5_000L) {
+                        runCatching {
+                            db.collection("leaderboardEntries")
+                                .whereEqualTo("publicEntry", true)
+                                .whereEqualTo("boardKey", notif.boardKey)
+                                .get(Source.SERVER)
+                                .await()
+                                .documents
+                                .mapNotNull { d ->
+                                    d.toObject(
+                                        com.example.model.LeaderboardEntryDoc::class.java,
+                                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                                    )
+                                }
+                        }.getOrNull()
+                    }.orEmpty()
+                }
+                if (com.example.data.OnlineRaceRepository.isNotificationStillBoardRecord(notif, boardEntries)) {
+                    if (SessionNotificationHelper.showFriendLeaderboardRecordNotification(appCtx, notif)) {
+                        lbPosted++
+                    }
                 }
             }
         }
