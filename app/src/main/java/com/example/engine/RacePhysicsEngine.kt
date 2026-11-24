@@ -102,7 +102,8 @@ class RacePhysicsEngine(
         var electroShockAuraMs: Long = 0L,
         var electroParalyzedMs: Long = 0L,
         var electroImmunityMs: Long = 0L,
-        var laserBeamMs: Long = 0L
+        var laserBeamMs: Long = 0L,
+        var stalledMs: Long = 0L
     )
 
     private data class MutableRocket(
@@ -1054,8 +1055,16 @@ class RacePhysicsEngine(
             }
 
             integrateCarPhysics(racer, input, dt)
-            handleWorldAndPropCollisions(racer)
+            handleWorldAndPropCollisions(racer, input.throttle)
             if (phase == RacePhase.RACING && !racer.finished) {
+                if (!racer.isBot) {
+                    val curSpeed = hypot(racer.vx, racer.vy)
+                    if (curSpeed < 60f && racer.electroParalyzedMs == 0L && racer.stunnedMs == 0L) {
+                        racer.stalledMs += dtMs
+                    } else {
+                        racer.stalledMs = (racer.stalledMs - dtMs * 2L).coerceAtLeast(0L)
+                    }
+                }
                 handleBoostPads(racer)
                 handleRamps(racer)
                 handleItemPickups(racer)
@@ -1112,7 +1121,13 @@ class RacePhysicsEngine(
             } else {
                 val humanRacers = racers.filter { !it.isBot }
                 val firstHumanDoneMs = firstHumanFinishTimeMs
-                val graceExpired = firstHumanDoneMs != null && (raceTimeMs - firstHumanDoneMs) >= FINISH_GRACE_MS
+                val graceElapsedMs = if (firstHumanDoneMs != null) raceTimeMs - firstHumanDoneMs else 0L
+                val graceExpired = firstHumanDoneMs != null && graceElapsedMs >= FINISH_GRACE_MS
+                val unfinishedHumans = humanRacers.filter { !it.finished }
+                val allRemainingHumansStalled = firstHumanDoneMs != null &&
+                    unfinishedHumans.isNotEmpty() &&
+                    graceElapsedMs >= STALLED_RIVAL_MIN_GRACE_MS &&
+                    unfinishedHumans.all { it.stalledMs >= STALLED_RIVAL_THRESHOLD_MS }
 
                 val timeLimitReached = winCondition == WinCondition.TIME_TRIAL_DISTANCE &&
                     raceTimeMs >= timeLimitMs
@@ -1124,7 +1139,7 @@ class RacePhysicsEngine(
                 val shouldEndRace = when (winCondition) {
                     WinCondition.TIME_TRIAL_DISTANCE -> timeLimitReached || allRacersDone
                     WinCondition.FIRST_TO_FINISH, WinCondition.CHAMPIONSHIP_POINTS ->
-                        allRacersDone || allHumansDone || safetyPointsTimeout || graceExpired
+                        allRacersDone || allHumansDone || safetyPointsTimeout || graceExpired || allRemainingHumansStalled
                 }
 
                 if (shouldEndRace) {
@@ -1735,14 +1750,16 @@ class RacePhysicsEngine(
                         racer.vy = (racer.vy - restitution * vnOut * outNy) * retention
                     }
 
-                    // Gently guide glancing auto-gas cars along the arena wall so they never pin nose-first
-                    if (throttle > 0.1f && abs(vnOut) < 45f) {
+                    // Gently guide auto-gas cars along the arena wall so they never pin nose-first
+                    val noseOutDot = cos(racer.angleRad) * outNx + sin(racer.angleRad) * outNy
+                    if (throttle > 0.1f && (abs(vnOut) < 45f || noseOutDot > 0.12f)) {
                         val tang1X = -inNy
                         val tang1Y = inNx
                         val dot1 = cos(racer.angleRad) * tang1X + sin(racer.angleRad) * tang1Y
                         val tangAng = if (dot1 >= 0f) atan2(tang1Y, tang1X) else atan2(-tang1Y, -tang1X)
                         val diff = normalizeAngle(tangAng - racer.angleRad)
-                        racer.angleRad = normalizeAngle(racer.angleRad + diff * (2.6f * dt).coerceAtMost(0.35f))
+                        val alignRate = if (noseOutDot > 0.35f) 3.6f else 2.6f
+                        racer.angleRad = normalizeAngle(racer.angleRad + diff * (alignRate * dt).coerceAtMost(0.42f))
                     }
                 }
             }
@@ -1820,22 +1837,30 @@ class RacePhysicsEngine(
                     racer.wallBumpCooldownMs = 260L
                     racer.collisionSeq += 1
                 }
-                val restitution = if (rules.hardTrackBoundary) 1.55f else 1.3f
-                val retention = if (rules.hardTrackBoundary) 0.80f else 0.84f
+                val restitution = if (rules.hardTrackBoundary) 1.48f else 1.3f
+                val retention = if (rules.hardTrackBoundary) 0.85f else 0.84f
                 racer.vx = (racer.vx - restitution * vn * nx) * retention
                 racer.vy = (racer.vy - restitution * vn * ny) * retention
             }
-            if (throttle > 0.1f && abs(vn) < 40f && rules.hardTrackBoundary) {
+            val noseOutDot = cos(racer.angleRad) * nx + sin(racer.angleRad) * ny
+            if (throttle > 0.1f && rules.hardTrackBoundary && (abs(vn) < 40f || noseOutDot > 0.10f)) {
                 val segA = track.centerline[proj.index]
                 val segB = track.centerline[(proj.index + 1) % track.centerline.size]
                 val tangAng = atan2(segB.y - segA.y, segB.x - segA.x)
                 val diff = normalizeAngle(tangAng - racer.angleRad)
-                racer.angleRad = normalizeAngle(racer.angleRad + diff * (2.6f * dt).coerceAtMost(0.35f))
+                val alignRate = if (noseOutDot > 0.35f) 3.8f else 2.6f
+                racer.angleRad = normalizeAngle(racer.angleRad + diff * (alignRate * dt).coerceAtMost(0.45f))
+                if (noseOutDot > 0.35f && hypot(racer.vx, racer.vy) < 95f) {
+                    val tx = cos(tangAng)
+                    val ty = sin(tangAng)
+                    racer.vx += tx * 35f
+                    racer.vy += ty * 35f
+                }
             }
         }
     }
 
-    private fun handleWorldAndPropCollisions(racer: MutableRacer) {
+    private fun handleWorldAndPropCollisions(racer: MutableRacer, throttle: Float = 0f) {
         val margin = racer.carType.radiusPx + 12f
         if (racer.x < margin) {
             racer.x = margin; racer.vx = abs(racer.vx) * 0.55f
@@ -1865,8 +1890,18 @@ class RacePhysicsEngine(
                             racer.wallBumpCooldownMs = 240L
                             racer.collisionSeq += 1
                         }
-                        racer.vx = (racer.vx - 1.45f * vn * nx) * 0.82f
-                        racer.vy = (racer.vy - 1.45f * vn * ny) * 0.82f
+                        racer.vx = (racer.vx - 1.45f * vn * nx) * 0.84f
+                        racer.vy = (racer.vy - 1.45f * vn * ny) * 0.84f
+                    }
+                    // Slide auto-accelerating cars around solid obstacles instead of pinning nose-first
+                    val noseIntoProp = -(cos(racer.angleRad) * nx + sin(racer.angleRad) * ny)
+                    if (throttle > 0.1f && noseIntoProp > 0.25f) {
+                        val t1x = -ny
+                        val t1y = nx
+                        val chooseSign = if (cos(racer.angleRad) * t1x + sin(racer.angleRad) * t1y >= 0f) 1f else -1f
+                        val slideAng = atan2(t1y * chooseSign, t1x * chooseSign)
+                        val diff = normalizeAngle(slideAng - racer.angleRad)
+                        racer.angleRad = normalizeAngle(racer.angleRad + diff * 0.16f)
                     }
                 }
             } else if (prop.shape == PropShape.MUD_POOL && dist < prop.radius && racer.jumpZ <= 0.05f) {
@@ -3214,7 +3249,9 @@ class RacePhysicsEngine(
     }
 
     companion object {
-        const val FINISH_GRACE_MS = 20_000L
+        const val FINISH_GRACE_MS = 10_000L
+        const val STALLED_RIVAL_MIN_GRACE_MS = 2_000L
+        const val STALLED_RIVAL_THRESHOLD_MS = 3_500L
         const val ARENA_SUDDEN_DEATH_START_MS = 120_000L
         const val ARENA_SUDDEN_DEATH_WAVE_MS = 10_000L
         const val ARENA_SUDDEN_DEATH_DURATION_MS = 30_000L

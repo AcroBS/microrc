@@ -34,6 +34,7 @@ import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,11 +44,15 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlin.random.Random
 
 class OnlineRaceSessionManager(
@@ -87,6 +92,12 @@ class OnlineRaceSessionManager(
     private val _isBusy = MutableStateFlow(false)
     val isBusy: StateFlow<Boolean> = _isBusy.asStateFlow()
 
+    private val _syncPingMs = MutableStateFlow<Int?>(null)
+    val syncPingMs: StateFlow<Int?> = _syncPingMs.asStateFlow()
+
+    private val _usingRelayFallback = MutableStateFlow(false)
+    val usingRelayFallback: StateFlow<Boolean> = _usingRelayFallback.asStateFlow()
+
     private val _navEvents = MutableSharedFlow<RaceNavEvent>(extraBufferCapacity = 8)
     val navEvents: SharedFlow<RaceNavEvent> = _navEvents.asSharedFlow()
 
@@ -112,22 +123,27 @@ class OnlineRaceSessionManager(
     private var hybridStageNumber: Int = 1
     private var activeConcreteMode: GameMode = GameMode.RACE
     private var nextPlannedHybridMode: GameMode? = null
-    private var inRace: Boolean = false
+    @Volatile private var inRace: Boolean = false
     private var physicsEngine: RacePhysicsEngine? = null
 
     private val botPlayers = mutableListOf<LobbyPlayer>()
     private val latestHumanPlayers = ConcurrentHashMap<String, OnlineRoomPlayerDoc>()
+    private val lastClientRelayRxNsByUser = ConcurrentHashMap<String, Long>()
     private val sessionPointsByPlayer = ConcurrentHashMap<String, Int>()
     private val winsByPlayer = ConcurrentHashMap<String, Int>()
     private val latestChatHistory = mutableListOf<ChatMessage>()
+    private val appliedInputSeqByUser = ConcurrentHashMap<String, Long>()
     private val appliedPowerSeqByUser = ConcurrentHashMap<String, Long>()
     private val appliedMineSeqByUser = ConcurrentHashMap<String, Long>()
 
+    private val hostRoomWriteMutex = Mutex()
+    private val clientSnapshotLock = Any()
     private val hostMatchSeq = AtomicLong(0L)
     private val hostTelemetrySeq = AtomicLong(0L)
     private val clientAppliedMatchSeq = AtomicLong(0L)
     private val clientAppliedTelemetrySeq = AtomicLong(-1L)
     private val clientFinishEmitted = AtomicBoolean(false)
+    @Volatile private var raceStartedAtNs: Long = 0L
 
     private var localInput = ControlInput()
     private var pendingLocalPowerUp = false
@@ -135,13 +151,282 @@ class OnlineRaceSessionManager(
     private val localInputSeq = AtomicLong(0L)
     private val localPowerUpSeq = AtomicLong(0L)
     private val localMineDropSeq = AtomicLong(0L)
-    private var lastPushedThrottle = 0f
-    private var lastPushedSteer = 0f
+    private val inputWakeSignal = Channel<Unit>(Channel.CONFLATED)
+    @Volatile private var inputDirty = false
+    @Volatile private var urgentInputPending = false
+    private var lastPushedThrottle = Float.NaN
+    private var lastPushedSteer = Float.NaN
     private var lastInputPushMs = 0L
 
     private var rematchOptions: List<RematchVoteOption> = emptyList()
     private val rematchVotes = ConcurrentHashMap<String, String>()
     @Volatile private var rematchSecondsLeft: Int = WifiP2pRaceManager.REMATCH_COUNTDOWN_SECONDS
+
+    private val relaySocket = OnlineRelaySocket(
+        scope = scope,
+        onConnected = { handleRelayConnected() },
+        onDisconnected = { handleRelayDisconnected() },
+        onFrameReceived = { frame -> handleRelayFrame(frame) }
+    )
+
+    companion object {
+        private const val RELAY_FALLBACK_TIMEOUT_NS = 1_500_000_000L
+
+        internal data class HostInputDecision(
+            val accepted: Boolean,
+            val controlInput: ControlInput? = null
+        )
+
+        internal fun evaluateIncomingHostInput(
+            doc: OnlineRoomInputDoc,
+            appliedInputSeqByUser: MutableMap<String, Long>,
+            appliedPowerSeqByUser: MutableMap<String, Long>,
+            appliedMineSeqByUser: MutableMap<String, Long>
+        ): HostInputDecision {
+            val prevSeq = appliedInputSeqByUser[doc.userId] ?: -1L
+            val prevPower = appliedPowerSeqByUser[doc.userId] ?: doc.powerUpSeq
+            val prevMine = appliedMineSeqByUser[doc.userId] ?: doc.mineDropSeq
+            val triggerPower = doc.powerUpSeq > prevPower
+            val triggerMine = doc.mineDropSeq > prevMine
+            if (doc.seq < prevSeq && !triggerPower && !triggerMine) {
+                return HostInputDecision(accepted = false)
+            }
+            if (doc.seq == prevSeq && !triggerPower && !triggerMine) {
+                return HostInputDecision(accepted = false)
+            }
+            if (doc.seq > prevSeq) {
+                appliedInputSeqByUser[doc.userId] = doc.seq
+            }
+            if (doc.powerUpSeq > prevPower || doc.userId !in appliedPowerSeqByUser) {
+                appliedPowerSeqByUser[doc.userId] = doc.powerUpSeq
+            }
+            if (doc.mineDropSeq > prevMine || doc.userId !in appliedMineSeqByUser) {
+                appliedMineSeqByUser[doc.userId] = doc.mineDropSeq
+            }
+            return HostInputDecision(
+                accepted = true,
+                controlInput = ControlInput(
+                    throttle = doc.throttle.toFloat(),
+                    steer = doc.steer.toFloat(),
+                    usePowerUp = triggerPower,
+                    dropMine = triggerMine
+                )
+            )
+        }
+
+        internal fun evaluateIncomingHostRelayInput(
+            decoded: RaceTelemetryCodec.DecodedInput,
+            appliedInputSeqByUser: MutableMap<String, Long>,
+            appliedPowerSeqByUser: MutableMap<String, Long>,
+            appliedMineSeqByUser: MutableMap<String, Long>
+        ): HostInputDecision {
+            val pSeq = decoded.powerUpSeq
+            val mSeq = decoded.mineDropSeq
+            if (pSeq != null && mSeq != null) {
+                return evaluateIncomingHostInput(
+                    doc = OnlineRoomInputDoc(
+                        userId = decoded.playerId,
+                        seq = decoded.seq,
+                        throttle = decoded.input.throttle.toDouble(),
+                        steer = decoded.input.steer.toDouble(),
+                        powerUpSeq = pSeq,
+                        mineDropSeq = mSeq
+                    ),
+                    appliedInputSeqByUser = appliedInputSeqByUser,
+                    appliedPowerSeqByUser = appliedPowerSeqByUser,
+                    appliedMineSeqByUser = appliedMineSeqByUser
+                )
+            }
+            val prevSeq = appliedInputSeqByUser[decoded.playerId] ?: -1L
+            val hasAction = decoded.input.usePowerUp || decoded.input.dropMine
+            if (decoded.seq <= prevSeq && !hasAction) {
+                return HostInputDecision(accepted = false)
+            }
+            if (decoded.seq > prevSeq) {
+                appliedInputSeqByUser[decoded.playerId] = decoded.seq
+            }
+            return HostInputDecision(accepted = true, controlInput = decoded.input)
+        }
+
+        internal fun shouldHostMirrorToFirestore(
+            hostRelayConnected: Boolean,
+            remoteHumanIds: Set<String>,
+            lastClientRelayRxNsByUser: Map<String, Long>,
+            nowNs: Long,
+            raceStartedAtNs: Long
+        ): Boolean {
+            if (remoteHumanIds.isEmpty()) return false
+            if (!hostRelayConnected) return true
+            if (raceStartedAtNs > 0L && (nowNs - raceStartedAtNs) < RELAY_FALLBACK_TIMEOUT_NS) {
+                return false
+            }
+            return remoteHumanIds.any { uid ->
+                val lastRx = lastClientRelayRxNsByUser[uid] ?: 0L
+                lastRx <= 0L || (nowNs - lastRx) > RELAY_FALLBACK_TIMEOUT_NS
+            }
+        }
+    }
+
+    private fun recordWriteLatencySample(rttMs: Long) {
+        val clamped = rttMs.coerceIn(1L, 5_000L).toFloat()
+        val prev = _syncPingMs.value?.toFloat()
+        val smoothed = if (prev == null) clamped else (prev * 0.65f + clamped * 0.35f)
+        _syncPingMs.value = smoothed.roundToInt()
+    }
+
+    private fun handleRelayConnected() {
+        when (_role.value) {
+            SessionRole.OnlineHost -> {
+                _usingRelayFallback.value = false
+                if (inRace) {
+                    val hasRemoteHumans = latestHumanPlayers.keys.any { it != currentUserId }
+                    if (hasRemoteHumans) {
+                        relaySocket.sendText(RaceTelemetryCodec.encodeRelayPing(currentUserId, System.nanoTime()))
+                    }
+                    _raceSnapshot.value?.let { snap ->
+                        val seq = hostTelemetrySeq.incrementAndGet()
+                        val line = String(RaceTelemetryCodec.encodeSnapshot(seq, snap), Charsets.UTF_8)
+                        relaySocket.sendText(line)
+                    }
+                }
+            }
+            SessionRole.OnlineClient -> {
+                _usingRelayFallback.value = false
+                if (inRace) {
+                    val ackSeq = clientAppliedTelemetrySeq.get()
+                    relaySocket.sendText(String(RaceTelemetryCodec.encodeHello(currentUserId, ackSeq), Charsets.UTF_8))
+                    relaySocket.sendText(RaceTelemetryCodec.encodeRelayPing(currentUserId, System.nanoTime()))
+                    inputWakeSignal.trySend(Unit)
+                }
+            }
+            SessionRole.None, SessionRole.Host, SessionRole.Client, SessionRole.Solo -> Unit
+        }
+    }
+
+    private fun handleRelayDisconnected() {
+        if (inRace && _role.value.isOnline) {
+            _usingRelayFallback.value = true
+            if (_role.value == SessionRole.OnlineClient) {
+                inputWakeSignal.trySend(Unit)
+            }
+        }
+    }
+
+    private fun handleRelayFrame(frame: String) {
+        if (frame.length < 2) return
+        when (_role.value) {
+            SessionRole.OnlineHost -> {
+                when {
+                    frame.startsWith("I|") -> {
+                        val decoded = RaceTelemetryCodec.decodeInput(frame) ?: return
+                        if (decoded.playerId == currentUserId) return
+                        if (!latestHumanPlayers.containsKey(decoded.playerId)) return
+                        lastClientRelayRxNsByUser[decoded.playerId] = System.nanoTime()
+                        val engine = physicsEngine ?: return
+                        if (!inRace) return
+                        val decision = evaluateIncomingHostRelayInput(
+                            decoded = decoded,
+                            appliedInputSeqByUser = appliedInputSeqByUser,
+                            appliedPowerSeqByUser = appliedPowerSeqByUser,
+                            appliedMineSeqByUser = appliedMineSeqByUser
+                        )
+                        val ctrl = decision.controlInput
+                        if (decision.accepted && ctrl != null) {
+                            engine.submitInput(decoded.playerId, ctrl)
+                        }
+                    }
+                    frame.startsWith("H|") -> {
+                        val hello = RaceTelemetryCodec.decodeHelloPacket(frame) ?: return
+                        if (hello.playerId == currentUserId) return
+                        if (!latestHumanPlayers.containsKey(hello.playerId)) return
+                        lastClientRelayRxNsByUser[hello.playerId] = System.nanoTime()
+                        if (inRace) {
+                            _raceSnapshot.value?.let { snap ->
+                                val seq = hostTelemetrySeq.incrementAndGet()
+                                val line = String(RaceTelemetryCodec.encodeSnapshot(seq, snap), Charsets.UTF_8)
+                                relaySocket.sendText(line)
+                            }
+                            relaySocket.sendText(RaceTelemetryCodec.encodeRelayPing(currentUserId, System.nanoTime()))
+                        }
+                    }
+                    frame.startsWith("P|") -> {
+                        val ping = RaceTelemetryCodec.decodeRelayPing(frame) ?: return
+                        if (ping.senderId == currentUserId) return
+                        lastClientRelayRxNsByUser[ping.senderId] = System.nanoTime()
+                        relaySocket.sendText(RaceTelemetryCodec.encodeRelayPong(ping.senderId, ping.timestampNs))
+                    }
+                    frame.startsWith("Q|") -> {
+                        val pong = RaceTelemetryCodec.decodeRelayPong(frame) ?: return
+                        if (pong.targetSenderId != currentUserId) return
+                        val rttMs = ((System.nanoTime() - pong.timestampNs) / 1_000_000L)
+                        if (rttMs in 0L..10_000L) {
+                            recordWriteLatencySample(rttMs.coerceAtLeast(1L))
+                        }
+                    }
+                }
+            }
+            SessionRole.OnlineClient -> {
+                when {
+                    frame.startsWith("S|") -> {
+                        if (!inRace) return
+                        val roster = _lobbyState.value?.players.orEmpty()
+                        val decoded = RaceTelemetryCodec.decodeSnapshot(
+                            text = frame,
+                            roster = roster,
+                            previousSnapshot = _raceSnapshot.value,
+                            activeTrack = _activeTrack.value
+                        ) ?: return
+                        applyIncomingClientSnapshot(seq = decoded.seq, snap = decoded.snapshot)
+                    }
+                    frame.startsWith("P|") -> {
+                        val ping = RaceTelemetryCodec.decodeRelayPing(frame) ?: return
+                        if (ping.senderId == currentUserId) return
+                        relaySocket.sendText(RaceTelemetryCodec.encodeRelayPong(ping.senderId, ping.timestampNs))
+                    }
+                    frame.startsWith("Q|") -> {
+                        val pong = RaceTelemetryCodec.decodeRelayPong(frame) ?: return
+                        if (pong.targetSenderId != currentUserId) return
+                        val rttMs = ((System.nanoTime() - pong.timestampNs) / 1_000_000L)
+                        if (rttMs in 0L..10_000L) {
+                            recordWriteLatencySample(rttMs.coerceAtLeast(1L))
+                        }
+                    }
+                }
+            }
+            SessionRole.None, SessionRole.Host, SessionRole.Client, SessionRole.Solo -> Unit
+        }
+    }
+
+    private fun applyIncomingClientSnapshot(
+        seq: Long,
+        snap: RaceSnapshot,
+        forceFinishedFromRoomDoc: Boolean = false
+    ): Boolean {
+        synchronized(clientSnapshotLock) {
+            if (seq <= clientAppliedTelemetrySeq.get()) {
+                return false
+            }
+            clientAppliedTelemetrySeq.set(seq)
+        }
+        if (snap.gameMode == GameMode.STUNTS.name) {
+            val vName = snap.stuntState?.variant
+            if (vName != null && _activeTrack.value?.stuntVariant?.name != vName) {
+                _activeTrack.value = TrackCatalog.getStuntTrack(vName)
+            }
+        }
+        _raceSnapshot.value = snap
+        if (snap.phase == RacePhase.FINISHED.name || forceFinishedFromRoomDoc) {
+            _lastResults.value = snap
+            inRace = false
+            clientInputPushJob?.cancel()
+            _usingRelayFallback.value = false
+            relaySocket.disconnect("Race finished")
+            if (clientFinishEmitted.compareAndSet(false, true)) {
+                _navEvents.tryEmit(RaceNavEvent.ShowResults)
+            }
+        }
+        return true
+    }
 
     fun clearError() {
         _errorBanner.value = null
@@ -620,7 +905,11 @@ class OnlineRaceSessionManager(
                         _activeRoom.value = doc
                     }
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                rethrowIfScopeCancellation(e)
+                com.example.data.formatUserFacingOnlineErrorOrNull(e, "Room sync interrupted.")?.let {
+                    _errorBanner.value = it
+                }
             }
         }
 
@@ -645,7 +934,11 @@ class OnlineRaceSessionManager(
                         publishHostRematchState()
                     }
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                rethrowIfScopeCancellation(e)
+                com.example.data.formatUserFacingOnlineErrorOrNull(e, "Player list sync interrupted.")?.let {
+                    _errorBanner.value = it
+                }
             }
         }
 
@@ -656,24 +949,23 @@ class OnlineRaceSessionManager(
                     val engine = physicsEngine ?: return@collect
                     for (doc in inputDocs) {
                         if (doc.userId == currentUserId) continue
-                        val prevPower = appliedPowerSeqByUser[doc.userId] ?: doc.powerUpSeq
-                        val prevMine = appliedMineSeqByUser[doc.userId] ?: doc.mineDropSeq
-                        val triggerPower = doc.powerUpSeq > prevPower
-                        val triggerMine = doc.mineDropSeq > prevMine
-                        appliedPowerSeqByUser[doc.userId] = doc.powerUpSeq
-                        appliedMineSeqByUser[doc.userId] = doc.mineDropSeq
-                        engine.submitInput(
-                            doc.userId,
-                            ControlInput(
-                                throttle = doc.throttle.toFloat(),
-                                steer = doc.steer.toFloat(),
-                                usePowerUp = triggerPower,
-                                dropMine = triggerMine
-                            )
+                        val decision = evaluateIncomingHostInput(
+                            doc = doc,
+                            appliedInputSeqByUser = appliedInputSeqByUser,
+                            appliedPowerSeqByUser = appliedPowerSeqByUser,
+                            appliedMineSeqByUser = appliedMineSeqByUser
                         )
+                        val ctrl = decision.controlInput
+                        if (decision.accepted && ctrl != null) {
+                            engine.submitInput(doc.userId, ctrl)
+                        }
                     }
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                rethrowIfScopeCancellation(e)
+                com.example.data.formatUserFacingOnlineErrorOrNull(e, "Remote player input sync lost.")?.let {
+                    _errorBanner.value = it
+                }
             }
         }
 
@@ -689,7 +981,8 @@ class OnlineRaceSessionManager(
                         )
                     }
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                rethrowIfScopeCancellation(e)
             }
         }
     }
@@ -707,7 +1000,8 @@ class OnlineRaceSessionManager(
                         )
                     }
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                rethrowIfScopeCancellation(e)
             }
         }
 
@@ -722,7 +1016,11 @@ class OnlineRaceSessionManager(
                     _activeRoom.value = doc
                     applyClientRoomSnapshot(doc)
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                rethrowIfScopeCancellation(e)
+                com.example.data.formatUserFacingOnlineErrorOrNull(e, "Connection to online race host interrupted.")?.let {
+                    _errorBanner.value = it
+                }
             }
         }
     }
@@ -787,12 +1085,23 @@ class OnlineRaceSessionManager(
                     baseTrack
                 }
                 startPayload.initialSnapshot?.let { _raceSnapshot.value = it }
+                synchronized(this) {
+                    lastPushedThrottle = Float.NaN
+                    lastPushedSteer = Float.NaN
+                    lastInputPushMs = 0L
+                    inputDirty = true
+                    urgentInputPending = false
+                }
+                _syncPingMs.value = null
+                _usingRelayFallback.value = false
                 inRace = true
+                relaySocket.connect(doc.id)
                 startClientInputLoop(doc.id)
                 _navEvents.tryEmit(RaceNavEvent.StartRace)
             }
         }
 
+        var decodedFinishedNow = false
         if (doc.telemetryLine.startsWith("S|") && doc.telemetrySeq > clientAppliedTelemetrySeq.get()) {
             val roster = _lobbyState.value?.players.orEmpty()
             val decoded = RaceTelemetryCodec.decodeSnapshot(
@@ -802,27 +1111,44 @@ class OnlineRaceSessionManager(
                 activeTrack = _activeTrack.value
             )
             if (decoded != null) {
-                clientAppliedTelemetrySeq.set(doc.telemetrySeq)
-                val snap = decoded.snapshot
-                if (snap.gameMode == GameMode.STUNTS.name) {
-                    val vName = snap.stuntState?.variant
-                    if (vName != null && _activeTrack.value?.stuntVariant?.name != vName) {
-                        _activeTrack.value = TrackCatalog.getStuntTrack(vName)
-                    }
+                val applied = applyIncomingClientSnapshot(
+                    seq = doc.telemetrySeq,
+                    snap = decoded.snapshot,
+                    forceFinishedFromRoomDoc = (doc.status == "FINISHED")
+                )
+                if (applied && (decoded.snapshot.phase == RacePhase.FINISHED.name || doc.status == "FINISHED")) {
+                    decodedFinishedNow = true
                 }
-                _raceSnapshot.value = snap
-                if (snap.phase == RacePhase.FINISHED.name || doc.status == "FINISHED") {
-                    _lastResults.value = snap
-                    inRace = false
-                    clientInputPushJob?.cancel()
-                    if (clientFinishEmitted.compareAndSet(false, true)) {
-                        _navEvents.tryEmit(RaceNavEvent.ShowResults)
-                    }
-                }
+            }
+        }
+
+        if (!decodedFinishedNow && doc.status == "FINISHED" && (inRace || !clientFinishEmitted.get())) {
+            val fallbackSnap = if (doc.telemetryLine.startsWith("S|")) {
+                RaceTelemetryCodec.decodeSnapshot(
+                    text = doc.telemetryLine,
+                    roster = _lobbyState.value?.players.orEmpty(),
+                    previousSnapshot = _raceSnapshot.value,
+                    activeTrack = _activeTrack.value
+                )?.snapshot
+            } else {
+                null
+            } ?: _raceSnapshot.value
+            fallbackSnap?.let {
+                _raceSnapshot.value = it
+                _lastResults.value = it
+            }
+            inRace = false
+            clientInputPushJob?.cancel()
+            _usingRelayFallback.value = false
+            relaySocket.disconnect("Race finished")
+            if (clientFinishEmitted.compareAndSet(false, true)) {
+                _navEvents.tryEmit(RaceNavEvent.ShowResults)
             }
         } else if (doc.status == "OPEN" && inRace) {
             inRace = false
             clientInputPushJob?.cancel()
+            _usingRelayFallback.value = false
+            relaySocket.disconnect("Returned to lobby")
             _rematchState.value = null
             _navEvents.tryEmit(RaceNavEvent.BackToLobby)
         }
@@ -831,29 +1157,132 @@ class OnlineRaceSessionManager(
     private fun startClientInputLoop(roomId: String) {
         clientInputPushJob?.cancel()
         clientInputPushJob = scope.launch(Dispatchers.IO) {
+            var lastSentPowerSeq = localPowerUpSeq.get()
+            var lastSentMineSeq = localMineDropSeq.get()
+            var lastWsPingSentMs = 0L
+            val loopStartMs = System.currentTimeMillis()
             while (isActive && _role.value == SessionRole.OnlineClient && inRace) {
                 val nowMs = System.currentTimeMillis()
-                val inp = synchronized(this@OnlineRaceSessionManager) { localInput }
-                val changed = abs(inp.throttle - lastPushedThrottle) > 0.05f ||
-                    abs(inp.steer - lastPushedSteer) > 0.03f ||
-                    (nowMs - lastInputPushMs) >= 180L
-                if (changed) {
-                    lastPushedThrottle = inp.throttle
-                    lastPushedSteer = inp.steer
-                    lastInputPushMs = nowMs
-                    repository.pushDriverInput(
-                        roomId = roomId,
-                        seq = localInputSeq.incrementAndGet(),
-                        throttle = inp.throttle,
-                        steer = inp.steer,
-                        powerUpSeq = localPowerUpSeq.get(),
-                        mineDropSeq = localMineDropSeq.get()
+                val wsConnected = relaySocket.isConnected.value
+                val (inp, pSeq, mSeq, isUrgent, isDirty) = synchronized(this@OnlineRaceSessionManager) {
+                    SnapshotInputTuple(
+                        input = localInput,
+                        powerSeq = localPowerUpSeq.get(),
+                        mineSeq = localMineDropSeq.get(),
+                        urgent = urgentInputPending,
+                        dirty = inputDirty
                     )
                 }
-                delay(70L)
+                val actionChanged = pSeq != lastSentPowerSeq || mSeq != lastSentMineSeq
+                val deltaChanged = lastPushedThrottle.isNaN() ||
+                    lastPushedSteer.isNaN() ||
+                    abs(inp.throttle - lastPushedThrottle) > 0.04f ||
+                    abs(inp.steer - lastPushedSteer) > 0.03f
+
+                if (wsConnected) {
+                    _usingRelayFallback.value = false
+                    if ((nowMs - lastWsPingSentMs) >= 1000L) {
+                        lastWsPingSentMs = nowMs
+                        relaySocket.sendText(RaceTelemetryCodec.encodeRelayPing(currentUserId, System.nanoTime()))
+                    }
+
+                    val wsKeepaliveDue = (nowMs - lastInputPushMs) >= 120L
+                    val wsIntervalMet = (nowMs - lastInputPushMs) >= 16L
+                    val shouldSendWs = isUrgent || actionChanged || ((isDirty || deltaChanged) && wsIntervalMet) || wsKeepaliveDue
+
+                    if (shouldSendWs) {
+                        val outgoingInput = inp.copy(
+                            usePowerUp = pSeq > lastSentPowerSeq,
+                            dropMine = mSeq > lastSentMineSeq
+                        )
+                        val seq = localInputSeq.incrementAndGet()
+                        val line = RaceTelemetryCodec.encodeInputLine(
+                            playerId = currentUserId,
+                            seq = seq,
+                            input = outgoingInput,
+                            ackedHostUdpSeq = clientAppliedTelemetrySeq.get(),
+                            powerUpSeq = pSeq,
+                            mineDropSeq = mSeq
+                        )
+                        if (relaySocket.sendText(line)) {
+                            synchronized(this@OnlineRaceSessionManager) {
+                                inputDirty = false
+                                urgentInputPending = false
+                            }
+                            lastPushedThrottle = inp.throttle
+                            lastPushedSteer = inp.steer
+                            lastSentPowerSeq = pSeq
+                            lastSentMineSeq = mSeq
+                            lastInputPushMs = nowMs
+                        } else {
+                            // WebSocket dropped mid-tick; fall back immediately on next loop iteration
+                            delay(10L)
+                        }
+                    } else {
+                        val waitMs = if (isDirty || deltaChanged) {
+                            (16L - (nowMs - lastInputPushMs)).coerceIn(4L, 16L)
+                        } else {
+                            (120L - (nowMs - lastInputPushMs)).coerceIn(10L, 120L)
+                        }
+                        withTimeoutOrNull(waitMs) {
+                            inputWakeSignal.receive()
+                        }
+                    }
+                } else {
+                    if ((nowMs - loopStartMs) > 900L) {
+                        _usingRelayFallback.value = true
+                    }
+                    val keepaliveDue = (nowMs - lastInputPushMs) >= 220L
+                    val shouldSendNow = isUrgent || actionChanged || ((isDirty || deltaChanged) && (nowMs - lastInputPushMs) >= 60L) || keepaliveDue
+
+                    if (shouldSendNow) {
+                        val seq = localInputSeq.incrementAndGet()
+                        val startNs = System.nanoTime()
+                        val res = repository.pushDriverInput(
+                            roomId = roomId,
+                            seq = seq,
+                            throttle = inp.throttle,
+                            steer = inp.steer,
+                            powerUpSeq = pSeq,
+                            mineDropSeq = mSeq
+                        )
+                        if (res.isSuccess) {
+                            synchronized(this@OnlineRaceSessionManager) {
+                                inputDirty = false
+                                urgentInputPending = false
+                            }
+                            lastPushedThrottle = inp.throttle
+                            lastPushedSteer = inp.steer
+                            lastSentPowerSeq = pSeq
+                            lastSentMineSeq = mSeq
+                            lastInputPushMs = nowMs
+                            val rttMs = ((System.nanoTime() - startNs) / 1_000_000L).coerceAtLeast(1L)
+                            recordWriteLatencySample(rttMs)
+                        } else {
+                            delay(60L)
+                        }
+                    } else {
+                        val waitMs = if (isDirty || deltaChanged) {
+                            (60L - (nowMs - lastInputPushMs)).coerceIn(10L, 60L)
+                        } else {
+                            (220L - (nowMs - lastInputPushMs)).coerceIn(20L, 220L)
+                        }
+                        withTimeoutOrNull(waitMs) {
+                            inputWakeSignal.receive()
+                        }
+                    }
+                }
             }
         }
     }
+
+    private data class SnapshotInputTuple(
+        val input: ControlInput,
+        val powerSeq: Long,
+        val mineSeq: Long,
+        val urgent: Boolean,
+        val dirty: Boolean
+    )
 
     private fun updateChatCacheFromDocs(docs: List<OnlineRoomChatDoc>) {
         val mapped = docs.map { d ->
@@ -959,7 +1388,9 @@ class OnlineRaceSessionManager(
         )
         fields.putAll(extraFields)
         scope.launch {
-            repository.updateHostRoomFields(rid, fields)
+            hostRoomWriteMutex.withLock {
+                repository.updateHostRoomFields(rid, fields)
+            }
         }
     }
 
@@ -1097,6 +1528,7 @@ class OnlineRaceSessionManager(
 
         cancelRematchCountdown()
         inRace = true
+        appliedInputSeqByUser.clear()
         appliedPowerSeqByUser.clear()
         appliedMineSeqByUser.clear()
 
@@ -1157,6 +1589,12 @@ class OnlineRaceSessionManager(
 
         val initialSnap = engine.step(0.016f)
         _raceSnapshot.value = initialSnap
+        _syncPingMs.value = null
+        _usingRelayFallback.value = false
+        raceStartedAtNs = System.nanoTime()
+        lastClientRelayRxNsByUser.clear()
+        relaySocket.connect(rid)
+
         val matchSeq = hostMatchSeq.incrementAndGet()
         val initTelemetrySeq = hostTelemetrySeq.incrementAndGet()
         val initTelemetryLine = String(RaceTelemetryCodec.encodeSnapshot(initTelemetrySeq, initialSnap), Charsets.UTF_8)
@@ -1187,12 +1625,16 @@ class OnlineRaceSessionManager(
 
         physicsJob?.cancel()
         physicsJob = scope.launch(Dispatchers.Default) {
-            var tickCounter = 0
             var lastNs = System.nanoTime()
+            var lastPublishNs = 0L
+            var lastHostPingNs = 0L
+            var tickCounter = 0L
+            var minPublishIntervalNs = 65_000_000L
             val publishBusy = AtomicBoolean(false)
 
             while (isActive && inRace) {
                 delay(16L)
+                tickCounter++
                 val nowNs = System.nanoTime()
                 val dt = ((nowNs - lastNs) / 1_000_000_000f).coerceIn(0.008f, 0.04f)
                 lastNs = nowNs
@@ -1216,44 +1658,105 @@ class OnlineRaceSessionManager(
                     }
                 }
                 _raceSnapshot.value = snap
-                tickCounter++
+
+                val remoteHumanIds = latestHumanPlayers.keys.filter { it != currentUserId }.toSet()
+                val wsConnected = relaySocket.isConnected.value
 
                 if (snap.phase == RacePhase.FINISHED.name) {
                     awardOnlineSessionPoints(snap)
                     _lastResults.value = snap
                     inRace = false
+                    _usingRelayFallback.value = false
                     val finalSeq = hostTelemetrySeq.incrementAndGet()
-                    val finalLine = String(RaceTelemetryCodec.encodeSnapshot(finalSeq, snap), Charsets.UTF_8)
+                    val fullFinalLine = String(RaceTelemetryCodec.encodeSnapshot(finalSeq, snap), Charsets.UTF_8)
+                    if (wsConnected) {
+                        relaySocket.sendText(fullFinalLine)
+                    }
+                    val finalLineForFirestore = fullFinalLine.take(15_800)
                     val updatedLobbyJson = lobbyAdapter.toJson(buildHostLobbyPayload()).take(29_500)
                     scope.launch(Dispatchers.IO) {
-                        repository.updateHostRoomFields(
-                            rid,
-                            mapOf(
-                                "status" to "FINISHED",
-                                "lobbyJson" to updatedLobbyJson,
-                                "telemetrySeq" to finalSeq,
-                                "telemetryLine" to finalLine
-                            )
-                        )
+                        try {
+                            hostRoomWriteMutex.withLock {
+                                val payload = mapOf(
+                                    "status" to "FINISHED",
+                                    "lobbyJson" to updatedLobbyJson,
+                                    "telemetrySeq" to finalSeq,
+                                    "telemetryLine" to finalLineForFirestore
+                                )
+                                var attempt = 0
+                                while (attempt < 3) {
+                                    val res = repository.updateHostRoomFields(rid, payload)
+                                    if (res.isSuccess) break
+                                    attempt++
+                                    delay(250L)
+                                }
+                            }
+                        } finally {
+                            // Allow final WebSocket frame to flush over TCP before cleanly closing the room socket
+                            delay(250L)
+                            if (!inRace) {
+                                relaySocket.disconnect("Race finished")
+                            }
+                        }
                     }
                     _navEvents.tryEmit(RaceNavEvent.ShowResults)
                     startHostRematchCountdown()
                     break
-                } else if (tickCounter % 5 == 0 && publishBusy.compareAndSet(false, true)) {
+                }
+
+                if (wsConnected && remoteHumanIds.isNotEmpty() && (nowNs - lastHostPingNs) >= 1_100_000_000L) {
+                    lastHostPingNs = nowNs
+                    relaySocket.sendText(RaceTelemetryCodec.encodeRelayPing(currentUserId, nowNs))
+                }
+
+                val mirrorToFirestore = shouldHostMirrorToFirestore(
+                    hostRelayConnected = wsConnected,
+                    remoteHumanIds = remoteHumanIds,
+                    lastClientRelayRxNsByUser = lastClientRelayRxNsByUser,
+                    nowNs = nowNs,
+                    raceStartedAtNs = raceStartedAtNs
+                )
+                _usingRelayFallback.value = remoteHumanIds.isNotEmpty() && !wsConnected &&
+                    (nowNs - raceStartedAtNs) > 900_000_000L
+
+                val sendWsTick = wsConnected && (tickCounter % 2L == 0L)
+                val sendFirestoreTick = mirrorToFirestore &&
+                    (nowNs - lastPublishNs) >= minPublishIntervalNs &&
+                    publishBusy.compareAndSet(false, true)
+
+                if (sendWsTick || sendFirestoreTick) {
                     val seq = hostTelemetrySeq.incrementAndGet()
-                    val line = String(RaceTelemetryCodec.encodeSnapshot(seq, snap), Charsets.UTF_8)
-                        .take(15_800)
-                    scope.launch(Dispatchers.IO) {
-                        try {
-                            repository.updateHostRoomFields(
-                                rid,
-                                mapOf(
-                                    "telemetrySeq" to seq,
-                                    "telemetryLine" to line
-                                )
-                            )
-                        } finally {
-                            publishBusy.set(false)
+                    val fullLine = String(RaceTelemetryCodec.encodeSnapshot(seq, snap), Charsets.UTF_8)
+                    if (sendWsTick) {
+                        relaySocket.sendText(fullLine)
+                    }
+                    if (sendFirestoreTick) {
+                        lastPublishNs = nowNs
+                        val firestoreLine = fullLine.take(15_800)
+                        scope.launch(Dispatchers.IO) {
+                            try {
+                                hostRoomWriteMutex.withLock {
+                                    val startNs = System.nanoTime()
+                                    val res = repository.updateHostRoomFields(
+                                        rid,
+                                        mapOf(
+                                            "telemetrySeq" to seq,
+                                            "telemetryLine" to firestoreLine
+                                        )
+                                    )
+                                    if (res.isSuccess && !wsConnected) {
+                                        val rttMs = ((System.nanoTime() - startNs) / 1_000_000L).coerceAtLeast(1L)
+                                        recordWriteLatencySample(rttMs)
+                                        minPublishIntervalNs = when {
+                                            rttMs > 260L -> 110_000_000L
+                                            rttMs > 160L -> 85_000_000L
+                                            else -> 65_000_000L
+                                        }
+                                    }
+                                }
+                            } finally {
+                                publishBusy.set(false)
+                            }
                         }
                     }
                 }
@@ -1262,70 +1765,59 @@ class OnlineRaceSessionManager(
     }
 
     fun updateLocalControlInput(throttle: Float, steer: Float) {
+        val isOnlineClientInRace: Boolean
         synchronized(this) {
-            localInput = localInput.copy(throttle = throttle, steer = steer)
-        }
-        if (_role.value == SessionRole.OnlineClient && inRace) {
-            val rid = activeRoomId ?: return
-            val throttleFlipped = (throttle * lastPushedThrottle <= 0f) && abs(throttle - lastPushedThrottle) > 0.12f
-            val steerFlipped = (steer == 0f && abs(lastPushedSteer) > 0.02f) || (steer * lastPushedSteer < 0f)
-            if (throttleFlipped || steerFlipped) {
-                lastPushedThrottle = throttle
-                lastPushedSteer = steer
-                lastInputPushMs = System.currentTimeMillis()
-                scope.launch(Dispatchers.IO) {
-                    repository.pushDriverInput(
-                        roomId = rid,
-                        seq = localInputSeq.incrementAndGet(),
-                        throttle = throttle,
-                        steer = steer,
-                        powerUpSeq = localPowerUpSeq.get(),
-                        mineDropSeq = localMineDropSeq.get()
-                    )
+            val prev = localInput
+            localInput = prev.copy(throttle = throttle, steer = steer)
+            isOnlineClientInRace = (_role.value == SessionRole.OnlineClient && inRace)
+            if (isOnlineClientInRace) {
+                val baseT = if (lastPushedThrottle.isNaN()) prev.throttle else lastPushedThrottle
+                val baseS = if (lastPushedSteer.isNaN()) prev.steer else lastPushedSteer
+                val throttleFlipped = (throttle * baseT <= 0f) && abs(throttle - baseT) > 0.12f
+                val steerFlipped = (steer == 0f && abs(baseS) > 0.02f) || (steer * baseS < 0f)
+                val movedEnough = abs(throttle - baseT) > 0.03f || abs(steer - baseS) > 0.02f
+                if (throttleFlipped || steerFlipped) {
+                    urgentInputPending = true
+                    inputDirty = true
+                } else if (movedEnough || abs(throttle - prev.throttle) > 0.02f || abs(steer - prev.steer) > 0.02f) {
+                    inputDirty = true
                 }
             }
+        }
+        if (isOnlineClientInRace) {
+            inputWakeSignal.trySend(Unit)
         }
     }
 
     fun triggerLocalPowerUp() {
+        val isOnlineClientInRace: Boolean
         synchronized(this) {
             pendingLocalPowerUp = true
-        }
-        if (_role.value == SessionRole.OnlineClient && inRace) {
-            val rid = activeRoomId ?: return
-            val inp = synchronized(this) { localInput }
-            val nextPowerSeq = localPowerUpSeq.incrementAndGet()
-            scope.launch(Dispatchers.IO) {
-                repository.pushDriverInput(
-                    roomId = rid,
-                    seq = localInputSeq.incrementAndGet(),
-                    throttle = inp.throttle,
-                    steer = inp.steer,
-                    powerUpSeq = nextPowerSeq,
-                    mineDropSeq = localMineDropSeq.get()
-                )
+            isOnlineClientInRace = (_role.value == SessionRole.OnlineClient && inRace)
+            if (isOnlineClientInRace) {
+                localPowerUpSeq.incrementAndGet()
+                urgentInputPending = true
+                inputDirty = true
             }
+        }
+        if (isOnlineClientInRace) {
+            inputWakeSignal.trySend(Unit)
         }
     }
 
     fun triggerLocalMineDrop() {
+        val isOnlineClientInRace: Boolean
         synchronized(this) {
             pendingLocalMineDrop = true
-        }
-        if (_role.value == SessionRole.OnlineClient && inRace) {
-            val rid = activeRoomId ?: return
-            val inp = synchronized(this) { localInput }
-            val nextMineSeq = localMineDropSeq.incrementAndGet()
-            scope.launch(Dispatchers.IO) {
-                repository.pushDriverInput(
-                    roomId = rid,
-                    seq = localInputSeq.incrementAndGet(),
-                    throttle = inp.throttle,
-                    steer = inp.steer,
-                    powerUpSeq = localPowerUpSeq.get(),
-                    mineDropSeq = nextMineSeq
-                )
+            isOnlineClientInRace = (_role.value == SessionRole.OnlineClient && inRace)
+            if (isOnlineClientInRace) {
+                localMineDropSeq.incrementAndGet()
+                urgentInputPending = true
+                inputDirty = true
             }
+        }
+        if (isOnlineClientInRace) {
+            inputWakeSignal.trySend(Unit)
         }
     }
 
@@ -1363,7 +1855,9 @@ class OnlineRaceSessionManager(
         _rematchState.value = state
         val json = rematchAdapter.toJson(state).take(7800)
         scope.launch(Dispatchers.IO) {
-            repository.updateHostRoomFields(rid, mapOf("rematchJson" to json))
+            hostRoomWriteMutex.withLock {
+                repository.updateHostRoomFields(rid, mapOf("rematchJson" to json))
+            }
         }
     }
 
@@ -1521,6 +2015,8 @@ class OnlineRaceSessionManager(
         physicsJob = null
         physicsEngine = null
         inRace = false
+        _usingRelayFallback.value = false
+        relaySocket.disconnect("Returned to lobby")
         syncHostLobbyToCloud(
             extraFields = mapOf(
                 "status" to "OPEN",
@@ -1548,12 +2044,33 @@ class OnlineRaceSessionManager(
         clientInputPushJob?.cancel()
         clientInputPushJob = null
         inRace = false
+        _usingRelayFallback.value = false
+        relaySocket.disconnect("Left room")
+        lastClientRelayRxNsByUser.clear()
+        raceStartedAtNs = 0L
         activeRoomId = null
         _role.value = SessionRole.None
+        _syncPingMs.value = null
         _activeRoom.value = null
         _lobbyState.value = null
         _raceSnapshot.value = null
         _activeTrack.value = null
+        appliedInputSeqByUser.clear()
+        appliedPowerSeqByUser.clear()
+        appliedMineSeqByUser.clear()
+        localInputSeq.set(0L)
+        localPowerUpSeq.set(0L)
+        localMineDropSeq.set(0L)
+        synchronized(this) {
+            localInput = ControlInput()
+            pendingLocalPowerUp = false
+            pendingLocalMineDrop = false
+            inputDirty = false
+            urgentInputPending = false
+            lastPushedThrottle = Float.NaN
+            lastPushedSteer = Float.NaN
+            lastInputPushMs = 0L
+        }
         latestHumanPlayers.clear()
         synchronized(botPlayers) { botPlayers.clear() }
         if (rid != null) {
@@ -1561,7 +2078,12 @@ class OnlineRaceSessionManager(
         }
     }
 
+    fun disconnectRelay() {
+        relaySocket.disconnect("Session closed")
+    }
+
     fun leaveRoom() {
+        relaySocket.disconnect("Left room")
         scope.launch {
             leaveCurrentRoomInternal()
         }

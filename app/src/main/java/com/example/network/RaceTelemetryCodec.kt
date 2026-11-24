@@ -41,7 +41,19 @@ object RaceTelemetryCodec {
         val playerId: String,
         val seq: Long,
         val input: ControlInput,
-        val ackedHostUdpSeq: Long = -1L
+        val ackedHostUdpSeq: Long = -1L,
+        val powerUpSeq: Long? = null,
+        val mineDropSeq: Long? = null
+    )
+
+    data class DecodedRelayPing(
+        val senderId: String,
+        val timestampNs: Long
+    )
+
+    data class DecodedRelayPong(
+        val targetSenderId: String,
+        val timestampNs: Long
     )
 
     data class DecodedSnapshot(
@@ -76,17 +88,46 @@ object RaceTelemetryCodec {
 
     fun isUdpAck(text: String): Boolean = text.startsWith("A|")
 
+    fun encodeRelayPing(senderId: String, timestampNs: Long): String =
+        "P|${sanitizeToken(senderId)}|$timestampNs"
+
+    fun decodeRelayPing(text: String): DecodedRelayPing? {
+        if (!text.startsWith("P|")) return null
+        val parts = text.split('|')
+        val senderId = parts.getOrNull(1)?.trim()?.ifEmpty { null } ?: return null
+        val timestampNs = parts.getOrNull(2)?.trim()?.toLongOrNull() ?: return null
+        return DecodedRelayPing(senderId = senderId, timestampNs = timestampNs)
+    }
+
+    fun encodeRelayPong(targetSenderId: String, timestampNs: Long): String =
+        "Q|${sanitizeToken(targetSenderId)}|$timestampNs"
+
+    fun decodeRelayPong(text: String): DecodedRelayPong? {
+        if (!text.startsWith("Q|")) return null
+        val parts = text.split('|')
+        val targetSenderId = parts.getOrNull(1)?.trim()?.ifEmpty { null } ?: return null
+        val timestampNs = parts.getOrNull(2)?.trim()?.toLongOrNull() ?: return null
+        return DecodedRelayPong(targetSenderId = targetSenderId, timestampNs = timestampNs)
+    }
+
     fun encodeInputLine(
         playerId: String,
         seq: Long,
         input: ControlInput,
-        ackedHostUdpSeq: Long = -1L
+        ackedHostUdpSeq: Long = -1L,
+        powerUpSeq: Long? = null,
+        mineDropSeq: Long? = null
     ): String {
         val t = String.format(Locale.US, "%.2f", input.throttle)
         val s = String.format(Locale.US, "%.3f", input.steer)
         val p = if (input.usePowerUp) "1" else "0"
         val m = if (input.dropMine) "1" else "0"
-        return "I|${sanitizeToken(playerId)}|$seq|$t|$s|$p|$m|$ackedHostUdpSeq"
+        val base = "I|${sanitizeToken(playerId)}|$seq|$t|$s|$p|$m|$ackedHostUdpSeq"
+        return if (powerUpSeq != null && mineDropSeq != null) {
+            "$base|$powerUpSeq|$mineDropSeq"
+        } else {
+            base
+        }
     }
 
     fun encodeInput(
@@ -108,11 +149,15 @@ object RaceTelemetryCodec {
         val usePower = parts[5] == "1"
         val dropMine = parts.getOrNull(6) == "1"
         val ackedHostSeq = parts.getOrNull(7)?.trim()?.toLongOrNull() ?: -1L
+        val powerUpSeq = parts.getOrNull(8)?.trim()?.toLongOrNull()
+        val mineDropSeq = parts.getOrNull(9)?.trim()?.toLongOrNull()
         return DecodedInput(
             playerId = playerId,
             seq = seq,
             input = ControlInput(throttle, steer, usePower, dropMine),
-            ackedHostUdpSeq = ackedHostSeq
+            ackedHostUdpSeq = ackedHostSeq,
+            powerUpSeq = powerUpSeq,
+            mineDropSeq = mineDropSeq
         )
     }
 

@@ -68,6 +68,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -138,6 +139,9 @@ fun RaceScreen(
     onUpdateAudioSettings: (AudioSettings) -> Unit = {},
     canRestart: Boolean = false,
     isDailyChallenge: Boolean = false,
+    isOnlineSession: Boolean = false,
+    onlinePingMs: Int? = null,
+    isOnlineFallback: Boolean = false,
     onRestartRace: () -> Unit = {},
     onLeaveRace: () -> Unit
 ) {
@@ -207,25 +211,24 @@ fun RaceScreen(
 
     LaunchedEffect(
         profile.controlMode,
-        steerLeftPressed,
-        steerRightPressed,
-        sliderSteer,
-        brakePressed,
-        tiltSteer,
         isLocalActiveStuntDriver,
         stuntControlsLocked
     ) {
-        if (!isLocalActiveStuntDriver || stuntControlsLocked) {
-            onUpdateControlInput(0f, 0f)
-            return@LaunchedEffect
+        snapshotFlow {
+            if (!isLocalActiveStuntDriver || stuntControlsLocked) {
+                0f to 0f
+            } else {
+                val steer = when (profile.controlMode) {
+                    ControlMode.TILT_SENSOR -> tiltSteer
+                    ControlMode.SPRING_SLIDER -> sliderSteer
+                    ControlMode.TOUCH_OVERLAY -> (if (steerRightPressed) 1f else 0f) - (if (steerLeftPressed) 1f else 0f)
+                }
+                val throttle = if (brakePressed) -1f else 1f
+                throttle to steer
+            }
+        }.collect { (throttle, steer) ->
+            onUpdateControlInput(throttle, steer)
         }
-        val steer = when (profile.controlMode) {
-            ControlMode.TILT_SENSOR -> tiltSteer
-            ControlMode.SPRING_SLIDER -> sliderSteer
-            ControlMode.TOUCH_OVERLAY -> (if (steerRightPressed) 1f else 0f) - (if (steerLeftPressed) 1f else 0f)
-        }
-        val throttle = if (brakePressed) -1f else 1f
-        onUpdateControlInput(throttle, steer)
     }
 
     var animTimeSec by remember { mutableFloatStateOf(0f) }
@@ -236,6 +239,8 @@ fun RaceScreen(
     var lastSnapshotArrivalNanos by remember { mutableLongStateOf(0L) }
     var smoothedRacers by remember { mutableStateOf<List<RacerState>>(emptyList()) }
     val smoothPoseMap = remember { mutableMapOf<String, FloatArray>() }
+    val prevSnapAngles = remember { mutableMapOf<String, Pair<Float, Long>>() }
+    val snapAngularVelMap = remember { mutableMapOf<String, Float>() }
 
     val localRacer = snapshot?.racers?.find { it.playerId == profile.playerId }
         ?: snapshot?.racers?.firstOrNull()
@@ -264,15 +269,34 @@ fun RaceScreen(
 
     LaunchedEffect(snapshot) {
         if (snapshot != null) {
-            lastSnapshotArrivalNanos = System.nanoTime()
+            val arrivalNs = System.nanoTime()
+            lastSnapshotArrivalNanos = arrivalNs
             if (snapshot.phase == RacePhase.COUNTDOWN.name && snapshot.raceTimeMs == 0L && snapshot.countdownSec >= 3) {
                 camInitialized = false
                 smoothPoseMap.clear()
+                prevSnapAngles.clear()
+                snapAngularVelMap.clear()
+            } else {
+                snapshot.racers.forEach { r ->
+                    val prev = prevSnapAngles[r.playerId]
+                    if (prev != null) {
+                        val dtSnapSec = ((arrivalNs - prev.second) / 1_000_000_000f)
+                        if (dtSnapSec in 0.015f..0.65f) {
+                            val rawAngVel = (RacePhysicsEngine.normalizeAngle(r.angleRad - prev.first) / dtSnapSec)
+                                .coerceIn(-4.2f, 4.2f)
+                            val oldVel = snapAngularVelMap[r.playerId] ?: 0f
+                            snapAngularVelMap[r.playerId] = oldVel * 0.4f + rawAngVel * 0.6f
+                        } else if (dtSnapSec > 0.65f) {
+                            snapAngularVelMap[r.playerId] = 0f
+                        }
+                    }
+                    prevSnapAngles[r.playerId] = r.angleRad to arrivalNs
+                }
             }
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(isOnlineSession, isOnlineFallback) {
         while (true) {
             withFrameNanos { frameNanos ->
                 if (lastFrameNanos == 0L) lastFrameNanos = frameNanos
@@ -282,25 +306,46 @@ fun RaceScreen(
 
                 val snap = latestSnapshot
                 if (snap != null && snap.racers.isNotEmpty()) {
-                    val sinceSnapSec = if (lastSnapshotArrivalNanos > 0L) {
-                        ((frameNanos - lastSnapshotArrivalNanos) / 1_000_000_000f).coerceIn(0f, 0.075f)
+                    val maxExtrapolationSec = when {
+                        isOnlineSession && isOnlineFallback -> 0.34f
+                        isOnlineSession -> 0.18f
+                        else -> 0.075f
+                    }
+                    val rawSinceSec = if (lastSnapshotArrivalNanos > 0L) {
+                        ((frameNanos - lastSnapshotArrivalNanos) / 1_000_000_000f).coerceIn(0f, maxExtrapolationSec)
                     } else {
                         0f
                     }
-                    val posLerp = (dt * 22f).coerceIn(0f, 1f)
-                    val angLerp = (dt * 20f).coerceIn(0f, 1f)
+                    val sinceSnapSec = if (isOnlineSession && isOnlineFallback && rawSinceSec > 0.10f) {
+                        0.10f + (rawSinceSec - 0.10f) * 0.58f
+                    } else {
+                        rawSinceSec
+                    }
+                    val basePosRate = if (isOnlineSession && isOnlineFallback) 14f else 22f
+                    val angLerp = (dt * if (isOnlineSession && isOnlineFallback) 15f else 20f).coerceIn(0f, 1f)
 
                     val rendered = snap.racers.map { r ->
                         val predX = r.x + r.vx * sinceSnapSec
                         val predY = r.y + r.vy * sinceSnapSec
-                        val cur = smoothPoseMap[r.playerId]
-                        if (cur == null || hypot(predX - cur[0], predY - cur[1]) > 220f) {
-                            smoothPoseMap[r.playerId] = floatArrayOf(predX, predY, r.angleRad, r.jumpZ)
-                            r.copy(x = predX, y = predY)
+                        val angVel = if (isOnlineSession && snap.phase == RacePhase.RACING.name) {
+                            snapAngularVelMap[r.playerId] ?: 0f
                         } else {
+                            0f
+                        }
+                        val predAngle = RacePhysicsEngine.normalizeAngle(
+                            r.angleRad + angVel * (minOf(sinceSnapSec, 0.20f) * 0.65f)
+                        )
+                        val cur = smoothPoseMap[r.playerId]
+                        val errDist = if (cur != null) hypot(predX - cur[0], predY - cur[1]) else 0f
+                        if (cur == null || errDist > 260f) {
+                            smoothPoseMap[r.playerId] = floatArrayOf(predX, predY, predAngle, r.jumpZ)
+                            r.copy(x = predX, y = predY, angleRad = predAngle)
+                        } else {
+                            val effectiveRate = if (isOnlineSession && errDist > 95f) 20f else basePosRate
+                            val posLerp = (dt * effectiveRate).coerceIn(0f, 1f)
                             cur[0] += (predX - cur[0]) * posLerp
                             cur[1] += (predY - cur[1]) * posLerp
-                            val angDiff = RacePhysicsEngine.normalizeAngle(r.angleRad - cur[2])
+                            val angDiff = RacePhysicsEngine.normalizeAngle(predAngle - cur[2])
                             cur[2] = RacePhysicsEngine.normalizeAngle(cur[2] + angDiff * angLerp)
                             cur[3] += (r.jumpZ - cur[3]) * posLerp
                             r.copy(x = cur[0], y = cur[1], angleRad = cur[2], jumpZ = cur[3])
@@ -646,6 +691,36 @@ fun RaceScreen(
                     }
                 }
 
+                // Online WebSocket Relay Latency Pill
+                if (isOnlineSession) {
+                    val pingColor = when {
+                        isOnlineFallback -> goldAccent
+                        onlinePingMs == null -> hudMuted
+                        onlinePingMs < 90 -> tertiaryAccent
+                        onlinePingMs < 200 -> goldAccent
+                        else -> errorAccent
+                    }
+                    Surface(
+                        color = hudSurface,
+                        shape = RoundedCornerShape(50),
+                        border = BorderStroke(1.dp, pingColor.copy(alpha = 0.78f)),
+                        modifier = Modifier.testTag("online_ping_badge")
+                    ) {
+                        val pingLabel = when {
+                            isOnlineFallback && onlinePingMs != null -> "RELAY • FALLBACK ${onlinePingMs}ms"
+                            isOnlineFallback -> "RELAY • FALLBACK"
+                            onlinePingMs != null -> "RELAY • ${onlinePingMs}ms"
+                            else -> "RELAY • SYNCING"
+                        }
+                        Text(
+                            text = pingLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = pingColor,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
                 // Drift Mode Pill
                 if (isDriftMode) {
                     Surface(
@@ -987,20 +1062,32 @@ fun RaceScreen(
             if (localRacer?.finished == true && snapshot?.phase == RacePhase.RACING.name && !isStuntsMode) {
                 val graceSec = ((snapshot.postFinishGraceMs + 999L) / 1000L).coerceAtLeast(1L)
                 Surface(
-                    color = hudSurface,
-                    shape = RoundedCornerShape(50),
-                    border = BorderStroke(1.5.dp, goldAccent),
+                    color = colorScheme.primaryContainer.copy(alpha = 0.94f),
+                    shape = RoundedCornerShape(18.dp),
+                    border = BorderStroke(2.dp, goldAccent),
                     modifier = Modifier.testTag("top_event_banner")
                 ) {
-                    Text(
-                        text = "FINISHED ${ordinal(localRacer.rank)}! Waiting for rivals (${graceSec}s)",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = goldAccent,
-                        textAlign = TextAlign.Center,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp)
-                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
+                    ) {
+                        Text(
+                            text = "CHECKERED FLAG • ${ordinal(localRacer.rank).uppercase()} PLACE!",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = goldAccent,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "Finishing race in ${graceSec}s (waiting for rivals)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colorScheme.onPrimaryContainer,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             } else if (!snapshot?.eventBanner.isNullOrBlank() && snapshot?.phase != RacePhase.COUNTDOWN.name) {
                 Surface(

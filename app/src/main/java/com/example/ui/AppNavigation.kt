@@ -373,6 +373,8 @@ fun MicroRCApp(
     val onlineResults = activeOnlineVm?.let { it.lastResults.collectAsState().value }
     val onlineTrack = activeOnlineVm?.let { it.activeTrack.collectAsState().value }
     val onlineRematch = activeOnlineVm?.let { it.rematchState.collectAsState().value }
+    val onlinePingMs = activeOnlineVm?.let { it.syncPingMs.collectAsState().value }
+    val isOnlineFallback = activeOnlineVm?.let { it.usingRelayFallback.collectAsState().value } ?: false
 
     val friendsList = activeOnlineVm?.let { it.friendsList.collectAsState().value }.orEmpty()
     val incomingFriendRequests = activeOnlineVm?.let { it.incomingFriendRequests.collectAsState().value }.orEmpty()
@@ -1164,6 +1166,9 @@ fun MicroRCApp(
                     tiltController = viewModel.tiltController,
                     canRestart = !isOnlineSession && (offlineRole == SessionRole.Host || offlineRole == SessionRole.Solo),
                     isDailyChallenge = !isOnlineSession && isDailyChallengeSession,
+                    isOnlineSession = isOnlineSession,
+                    onlinePingMs = if (isOnlineSession) onlinePingMs else null,
+                    isOnlineFallback = isOnlineSession && isOnlineFallback,
                     onToggleOverviewCamera = viewModel::toggleOverviewCamera,
                     onUpdateControlInput = { throttle, steer ->
                         if (isOnlineSession) {

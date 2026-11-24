@@ -82,6 +82,8 @@ class OnlineViewModel(
     val rematchState: StateFlow<RematchCountdownState?> = sessionManager.rematchState
     val errorBanner: StateFlow<String?> = sessionManager.errorBanner
     val isBusy: StateFlow<Boolean> = sessionManager.isBusy
+    val syncPingMs: StateFlow<Int?> = sessionManager.syncPingMs
+    val usingRelayFallback: StateFlow<Boolean> = sessionManager.usingRelayFallback
     val navEvents: SharedFlow<RaceNavEvent> = sessionManager.navEvents
 
     private val _openRooms = MutableStateFlow<List<OnlineRoomDoc>>(emptyList())
@@ -1094,6 +1096,7 @@ class OnlineViewModel(
         leaderboardNotifsJob?.cancel()
         roomsSubscriptionJob?.cancel()
         leaderboardSubscriptionJob?.cancel()
+        sessionManager.disconnectRelay()
         sessionManager.leaveRoom()
     }
 }
