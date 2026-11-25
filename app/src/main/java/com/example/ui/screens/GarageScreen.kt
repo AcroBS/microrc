@@ -37,10 +37,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.PhoneAndroid
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -48,20 +44,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,55 +62,26 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import com.example.model.ControlMode
 import com.example.model.PlayerProfile
 import com.example.model.RcCarType
 import com.example.model.RcColorPresets
-import com.example.sensors.TiltSteeringController
 import com.example.ui.components.drawRcCar
 import com.example.ui.theme.adaptiveGoldColor
 
 @Composable
 fun GarageScreen(
     profile: PlayerProfile,
-    tiltController: TiltSteeringController,
     onSaveCarAndColors: (RcCarType, Long, Long) -> Unit,
-    onSaveControlSettings: (ControlMode, Float, Boolean, Float) -> Unit,
     onBack: () -> Unit
 ) {
     var selectedCar by remember(profile.carType) { mutableStateOf(profile.carType) }
     var primaryColorArgb by remember(profile.primaryColorArgb) { mutableLongStateOf(profile.primaryColorArgb) }
     var accentColorArgb by remember(profile.accentColorArgb) { mutableLongStateOf(profile.accentColorArgb) }
-    var selectedControlMode by remember(profile.controlMode) { mutableStateOf(profile.controlMode) }
-    var tiltSensitivity by remember(profile.tiltSensitivity) { mutableFloatStateOf(profile.tiltSensitivity) }
-    var sliderSensitivity by remember(profile.sliderSensitivity) { mutableFloatStateOf(profile.sliderSensitivity) }
 
     var showCustomHue by remember { mutableStateOf(false) }
     var customHue by remember { mutableFloatStateOf(16f) }
-
-    val view = LocalView.current
-    val configuration = LocalConfiguration.current
-    LaunchedEffect(view, configuration.orientation, selectedControlMode) {
-        tiltController.updateDisplayRotation(view.display?.rotation)
-    }
-
-    DisposableEffect(selectedControlMode) {
-        if (selectedControlMode == ControlMode.TILT_SENSOR) {
-            tiltController.updateDisplayRotation(view.display?.rotation)
-            tiltController.setSensitivity(tiltSensitivity)
-            tiltController.start()
-        } else {
-            tiltController.stop()
-        }
-        onDispose { tiltController.stop() }
-    }
-
-    val liveSteer by tiltController.steerValue.collectAsState()
-    var previewSliderSteer by remember { mutableFloatStateOf(0f) }
 
     val infiniteTransition = rememberInfiniteTransition(label = "garageSpin")
     val turntableAngle by infiniteTransition.animateFloat(
@@ -166,7 +129,7 @@ fun GarageScreen(
                         color = MaterialTheme.colorScheme.onBackground
                     )
                     Text(
-                        text = "Vehicle, Custom Paint & Controls",
+                        text = "Vehicle Chassis & Custom Paint",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -217,11 +180,7 @@ fun GarageScreen(
                                     carType = selectedCar,
                                     primaryColor = Color(primaryColorArgb),
                                     accentColor = Color(accentColorArgb),
-                                    steerVisual = when (selectedControlMode) {
-                                        ControlMode.TILT_SENSOR -> liveSteer
-                                        ControlMode.SPRING_SLIDER -> previewSliderSteer
-                                        ControlMode.TOUCH_OVERLAY -> 0.35f
-                                    },
+                                    steerVisual = 0.35f,
                                     scale = 2.4f
                                 )
                             }
@@ -371,194 +330,6 @@ fun GarageScreen(
                                     thumbColor = Color(primaryColorArgb),
                                     activeTrackColor = Color(primaryColorArgb)
                                 )
-                            )
-                        }
-                    }
-                }
-
-                Text("STEERING CONTROLS", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    ControlMode.entries.forEach { mode ->
-                        val active = selectedControlMode == mode
-                        Surface(
-                            color = if (active) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer,
-                            shape = RoundedCornerShape(18.dp),
-                            border = BorderStroke(
-                                1.5.dp,
-                                if (active) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outlineVariant
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(18.dp))
-                                .clickable {
-                                    selectedControlMode = mode
-                                    if (mode != ControlMode.SPRING_SLIDER) previewSliderSteer = 0f
-                                    onSaveControlSettings(mode, tiltSensitivity, true, sliderSensitivity)
-                                }
-                                .testTag("control_mode_${mode.name}")
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 14.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
-                            ) {
-                                Icon(
-                                    when (mode) {
-                                        ControlMode.TILT_SENSOR -> Icons.Default.PhoneAndroid
-                                        ControlMode.SPRING_SLIDER -> Icons.Default.SwapHoriz
-                                        ControlMode.TOUCH_OVERLAY -> Icons.Default.TouchApp
-                                    },
-                                    contentDescription = mode.label,
-                                    tint = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(26.dp)
-                                )
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = mode.label,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = mode.subtitle,
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = if (active) {
-                                            MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.82f)
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        }
-                                    )
-                                }
-                                if (active) {
-                                    Icon(
-                                        Icons.Default.Check,
-                                        contentDescription = "Selected",
-                                        tint = MaterialTheme.colorScheme.secondary,
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (selectedControlMode == ControlMode.SPRING_SLIDER) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f)),
-                        shape = RoundedCornerShape(18.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Live Spring Slider Preview", style = MaterialTheme.typography.titleMedium)
-                                Text(
-                                    text = "Steer: ${(previewSliderSteer * 100f).toInt()}%",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.secondary
-                                )
-                            }
-                            Text(
-                                text = "Slide proportionally with RC expo OR tap/hold the overlaid left/right arrows for instant full lock. Lift to snap to neutral.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            SpringSteeringSlider(
-                                onSteerChange = { previewSliderSteer = it },
-                                sensitivity = sliderSensitivity,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(88.dp)
-                                    .testTag("garage_spring_slider_preview")
-                            )
-                            Text(
-                                text = "Slider Sensitivity: ${String.format("%.2fx", sliderSensitivity)}",
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                            Slider(
-                                value = sliderSensitivity,
-                                onValueChange = {
-                                    sliderSensitivity = it
-                                    onSaveControlSettings(selectedControlMode, tiltSensitivity, true, it)
-                                },
-                                valueRange = 0.7f..2.6f,
-                                modifier = Modifier.testTag("garage_slider_sensitivity")
-                            )
-                        }
-                    }
-                }
-
-                if (selectedControlMode == ControlMode.TILT_SENSOR) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.5f)),
-                        shape = RoundedCornerShape(18.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Live Tilt Preview", style = MaterialTheme.typography.titleMedium)
-                                OutlinedButton(
-                                    onClick = { tiltController.calibrateNeutral() },
-                                    modifier = Modifier.height(40.dp)
-                                ) {
-                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Zero Tilt")
-                                }
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(14.dp)
-                                    .clip(RoundedCornerShape(50))
-                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                            ) {
-                                val fraction = ((liveSteer + 1f) / 2f).coerceIn(0.04f, 0.96f)
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth(fraction)
-                                        .height(14.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.CenterEnd)
-                                            .size(18.dp, 14.dp)
-                                            .clip(CircleShape)
-                                            .background(MaterialTheme.colorScheme.secondary)
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "Tilt Sensitivity: ${String.format("%.2fx", tiltSensitivity)}",
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                            Slider(
-                                value = tiltSensitivity,
-                                onValueChange = {
-                                    tiltSensitivity = it
-                                    tiltController.setSensitivity(it)
-                                    onSaveControlSettings(selectedControlMode, it, true, sliderSensitivity)
-                                },
-                                valueRange = 0.6f..2.2f
                             )
                         }
                     }

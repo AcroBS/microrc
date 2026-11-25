@@ -322,10 +322,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         raceManager.hostLobby(profile.value, initialRules = setupRules)
     }
 
-    fun startSolo() {
+    fun startSolo(botCount: Int = 3) {
+        val safeBots = botCount.coerceIn(0, 3)
+        if (safeBots == 0) {
+            startPureSolo()
+            return
+        }
         _lastRunWasPersonalBest.value = false
         val soloRules = rules.value.copy(gameMode = GameMode.RACE.name)
-        raceManager.startSoloSession(profile.value, initialRules = soloRules, includeBots = true)
+        raceManager.startSoloSession(
+            profile = profile.value,
+            initialRules = soloRules,
+            includeBots = true,
+            botCount = safeBots
+        )
     }
 
     fun startPureSolo() {

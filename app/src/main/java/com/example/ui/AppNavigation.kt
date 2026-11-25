@@ -469,6 +469,7 @@ fun MicroRCApp(
             cloudEntries = friendCircleEntries,
             localRecords = localLeaderboard,
             todayDateKey = currentUtcDateKey,
+            maxHighlights = 10,
             customTrackNames = customTrackNames
         )
     }
@@ -705,6 +706,7 @@ fun MicroRCApp(
                     onHostRace = { navController.navigate(Routes.HOST_SETUP) },
                     onJoinRace = { navController.navigate(Routes.BROWSER) },
                     onSoloRace = { viewModel.startSolo() },
+                    onSoloRaceWithBots = { botCount -> viewModel.startSolo(botCount) },
                     onPureSoloRace = { viewModel.startPureSolo() },
                     onOpenDailyChallenge = {
                         leaderboardInitialDaily = true
@@ -1027,9 +1029,7 @@ fun MicroRCApp(
             composable(Routes.GARAGE) {
                 GarageScreen(
                     profile = profile,
-                    tiltController = viewModel.tiltController,
                     onSaveCarAndColors = viewModel::updateCarAndColors,
-                    onSaveControlSettings = viewModel::updateControlSettings,
                     onBack = { navController.popBackStack() }
                 )
             }
@@ -1038,6 +1038,8 @@ fun MicroRCApp(
                 val canEdit = sessionRole == SessionRole.None || sessionRole.isHostLike
                 SettingsScreen(
                     rules = effectiveRules,
+                    profile = profile,
+                    tiltController = viewModel.tiltController,
                     audioSettings = audioSettings,
                     themeSettings = themeSettings,
                     dailyNotificationsEnabled = dailyNotificationsEnabled,
@@ -1050,6 +1052,7 @@ fun MicroRCApp(
                         }
                         viewModel.updateRaceRules(updatedRules)
                     },
+                    onSaveControlSettings = viewModel::updateControlSettings,
                     onUpdateAudio = viewModel::updateAudioSettings,
                     onUpdateThemeSettings = viewModel::updateThemeSettings,
                     onToggleDailyNotifications = viewModel::setDailyNotificationsEnabled,

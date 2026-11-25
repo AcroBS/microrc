@@ -129,6 +129,7 @@ data class FriendBoardStandingItem(
     val gameMode: GameMode,
     val totalLaps: Int,
     val isDaily: Boolean,
+    val isCustom: Boolean = false,
     val myRank: Int?,
     val totalDriversOnBoard: Int,
     val myTimeMs: Long,
@@ -206,7 +207,7 @@ object FriendStandingsCalculator {
         cloudEntries: List<LeaderboardEntryDoc>,
         localRecords: List<LocalLeaderboardRecord>,
         todayDateKey: String = DailyChallengeCatalog.todayDateKey(),
-        maxHighlights: Int = 3,
+        maxHighlights: Int = 8,
         customTrackNames: Map<String, String> = emptyMap()
     ): FriendStandingsSummary {
         val friendMap = friends.associateBy { it.friendUid }
@@ -350,8 +351,21 @@ object FriendStandingsCalculator {
             }
 
             val isDaily = DailyChallengeCatalog.isAnyDailyTrackId(sample.trackKey)
+            val isBuiltInRace = runCatching { com.example.model.TrackId.valueOf(sample.trackKey) }.isSuccess
+            val isBuiltInDrift = com.example.drift.DriftTrackCatalog.resolveTrackDisplayName(sample.trackKey) != null
+            val isCustom = !isDaily &&
+                !isBuiltInRace &&
+                !isBuiltInDrift &&
+                sample.trackKey != "STUNT_GAUNTLET" &&
+                sample.trackKey != "STUNTS_GAUNTLET"
             val resolvedTrackName = customTrackNames[sample.trackKey]?.takeIf { it.isNotBlank() }
-                ?: DailyChallengeCatalog.resolveTrackDisplayName(sample.trackKey)
+                ?: DailyChallengeCatalog.resolveTrackDisplayName(sample.trackKey).let { fallback ->
+                    if (isCustom && fallback == sample.trackKey && sample.trackKey.startsWith("custom_")) {
+                        "Custom Track"
+                    } else {
+                        fallback
+                    }
+                }
             boardItems.add(
                 FriendBoardStandingItem(
                     boardKey = boardKey,
@@ -360,6 +374,7 @@ object FriendStandingsCalculator {
                     gameMode = sample.gameMode,
                     totalLaps = sample.totalLaps,
                     isDaily = isDaily,
+                    isCustom = isCustom,
                     myRank = if (myIdx >= 0) myIdx + 1 else null,
                     totalDriversOnBoard = sorted.size,
                     myTimeMs = myEntry?.bestRaceTimeMs ?: 0L,
@@ -410,16 +425,37 @@ object FriendStandingsCalculator {
         val crewWithEntriesCount = boardsEntered.size
 
         // 5. Prioritize highlights for HomeScreen:
-        //    Today's Daily GP > Shared tracks with friends > Unchallenged friend records > Personal PBs
-        val highlighted = boardItems.sortedWith(
+        //    Today's Daily GP/Drift > Shared tracks with friends > Unchallenged friend records > Custom Track PBs > Personal PBs
+        val sortedBoards = boardItems.sortedWith(
             compareByDescending<FriendBoardStandingItem> {
                 it.boardKey == todayDailyBoardKey || (todayDailyDriftBoardKey.isNotEmpty() && it.boardKey == todayDailyDriftBoardKey)
             }
                 .thenByDescending { it.myRank != null && it.topFriendName != null }
                 .thenByDescending { it.myRank == null && it.topFriendName != null }
+                .thenByDescending { it.isCustom }
                 .thenByDescending { it.totalDriversOnBoard }
                 .thenBy { it.trackName }
-        ).take(maxHighlights)
+        )
+        val safeLimit = maxHighlights.coerceAtLeast(0)
+        val highlighted = if (sortedBoards.size <= safeLimit || safeLimit == 0) {
+            sortedBoards.take(safeLimit)
+        } else {
+            val initial = sortedBoards.take(safeLimit).toMutableList()
+            val missingCustoms = sortedBoards.drop(safeLimit).filter { it.isCustom }
+            if (missingCustoms.isNotEmpty()) {
+                for (customItem in missingCustoms) {
+                    val replaceIdx = initial.indexOfLast {
+                        !it.isCustom &&
+                            it.boardKey != todayDailyBoardKey &&
+                            (todayDailyDriftBoardKey.isEmpty() || it.boardKey != todayDailyDriftBoardKey)
+                    }
+                    if (replaceIdx >= 0) {
+                        initial[replaceIdx] = customItem
+                    }
+                }
+            }
+            initial
+        }
 
         return FriendStandingsSummary(
             myCrewRank = myCrewRank,

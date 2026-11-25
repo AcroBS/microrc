@@ -534,6 +534,7 @@ class WifiP2pRaceManager(
         initialRules: RaceRulesSettings = RaceRulesSettings(),
         initialCustomTrack: CustomTrackData? = null,
         includeBots: Boolean = true,
+        botCount: Int = if (includeBots) 3 else 0,
         challengeGhost: GhostRunPlayback? = null
     ) {
         leaveSession()
@@ -546,15 +547,16 @@ class WifiP2pRaceManager(
         chatLog.clear()
         playersList.clear()
         playersList.add(profile.toLobbyPlayer(isHost = true, isReady = true))
-        if (includeBots) {
+        val effectiveBotCount = if (includeBots) botCount.coerceIn(0, 3) else 0
+        if (effectiveBotCount > 0) {
             val botNames = listOf("Volt-AI", "Apex-AI", "Turbo-AI")
             val botCars = listOf(RcCarType.APEX_FORMULA, RcCarType.DRIFT_PHANTOM, RcCarType.TUNDRA_MONSTER)
-            botNames.forEachIndexed { idx, botName ->
+            for (idx in 0 until effectiveBotCount) {
                 val preset = RcColorPresets[(idx + 1) % RcColorPresets.size]
                 playersList.add(
                     LobbyPlayer(
                         id = "bot_$idx",
-                        name = botName,
+                        name = botNames[idx],
                         isHost = false,
                         isBot = true,
                         isReady = true,
@@ -564,7 +566,7 @@ class WifiP2pRaceManager(
                     )
                 )
             }
-            addSystemChat("Solo paddock ready. Customize track or tap Pure Solo (0 Bots) for time trials!")
+            addSystemChat("Solo paddock ready ($effectiveBotCount AI rival${if (effectiveBotCount == 1) "" else "s"}). Customize track or toggle bots off for Time Trials!")
         } else {
             val ghostMsg = challengeGhost?.let {
                 "Ghost Challenge loaded vs ${it.driverName} (${String.format("%.2fs", it.finishTimeMs / 1000f)})!"

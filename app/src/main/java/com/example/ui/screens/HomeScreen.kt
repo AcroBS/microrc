@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -46,6 +47,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEvents
@@ -56,16 +58,14 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.People
-import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Today
-import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -75,21 +75,23 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -112,7 +114,6 @@ import com.example.data.FriendBoardStandingItem
 import com.example.data.FriendCrewMemberRank
 import com.example.data.FriendStandingsSummary
 import com.example.data.PlayStreakState
-import com.example.model.ControlMode
 import com.example.model.GameMode
 import com.example.model.PlayerProfile
 import com.example.ui.components.drawRcCar
@@ -128,8 +129,9 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 private enum class HomeModeScope(val label: String) {
-    ONLINE("Online (Standard)"),
-    OFFLINE("Offline (Wi-Fi)")
+    ONLINE("Online"),
+    OFFLINE("Offline (Wi-Fi)"),
+    SOLO("Solo Play")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -139,6 +141,7 @@ fun HomeScreen(
     onHostRace: () -> Unit,
     onJoinRace: () -> Unit,
     onSoloRace: () -> Unit,
+    onSoloRaceWithBots: (Int) -> Unit = { onSoloRace() },
     onPureSoloRace: () -> Unit = {},
     onOpenDailyChallenge: () -> Unit = {},
     dailyChallengeTitle: String = "Daily GP",
@@ -265,97 +268,59 @@ fun HomeScreen(
                     }
 
                     // 2. Driver Tag + Active RC Car Card (compact at top)
-                    ElevatedCard(
-                        colors = CardDefaults.elevatedCardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-                        ),
-                        shape = MaterialTheme.shapes.large,
-                        modifier = Modifier.fillMaxWidth()
+                    HomeSectionCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("home_driver_card")
                     ) {
                         Column(
                             modifier = Modifier.padding(14.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .clip(MaterialTheme.shapes.small)
+                                    .clickable { showNameDialog = true }
+                                    .padding(horizontal = 4.dp, vertical = 4.dp)
+                                    .testTag("driver_tag_row")
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
+                                Box(
                                     modifier = Modifier
-                                        .weight(1f)
-                                        .defaultMinSize(minHeight = 48.dp)
-                                        .clip(MaterialTheme.shapes.small)
-                                        .clickable { showNameDialog = true }
-                                        .padding(horizontal = 4.dp, vertical = 4.dp)
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(driverBadgeBg),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(CircleShape)
-                                            .background(driverBadgeBg),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = profile.name.take(1).uppercase(),
-                                            style = MaterialTheme.typography.titleMedium,
-                                            color = driverBadgeFg
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Column {
-                                        Text(
-                                            text = "DRIVER TAG",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Text(
-                                                text = profile.name,
-                                                style = MaterialTheme.typography.titleMedium,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Icon(
-                                                Icons.Default.Edit,
-                                                contentDescription = "Edit Driver Name",
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                    }
+                                    Text(
+                                        text = profile.name.take(1).uppercase(),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = driverBadgeFg
+                                    )
                                 }
-
-                                Surface(
-                                    color = MaterialTheme.colorScheme.secondaryContainer,
-                                    shape = MaterialTheme.shapes.small,
-                                    modifier = Modifier
-                                        .defaultMinSize(minHeight = 48.dp)
-                                        .clip(MaterialTheme.shapes.small)
-                                        .clickable(onClick = onOpenGarage)
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Icon(
-                                            when (profile.controlMode) {
-                                                ControlMode.TILT_SENSOR -> Icons.Default.PhoneAndroid
-                                                ControlMode.SPRING_SLIDER -> Icons.Default.SwapHoriz
-                                                ControlMode.TOUCH_OVERLAY -> Icons.Default.TouchApp
-                                            },
-                                            contentDescription = "Control Mode",
-                                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                            modifier = Modifier.size(16.dp)
-                                        )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "DRIVER TAG",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(
-                                            text = profile.controlMode.label,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                            text = profile.name,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Icon(
+                                            Icons.Default.Edit,
+                                            contentDescription = "Edit Driver Name",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(16.dp)
                                         )
                                     }
                                 }
@@ -429,26 +394,17 @@ fun HomeScreen(
                         }
                     }
 
-                    // 3. Play Streak Counter (with 5-day milestone welcome animation) + Overall Friends Ranking & Standings Overview
-                    HomeMomentumAndStandingsCard(
-                        playStreak = playStreak,
-                        isSignedIn = isSignedIn,
-                        friendsCount = friendsCount,
-                        localRecordsCount = localRecordsCount,
-                        standings = friendStandings,
-                        onlineAccent = onlineAccent,
-                        onOpenFriends = onOpenFriends,
-                        onOpenStandingsBoard = onOpenStandingsBoard
-                    )
-
-                    // 4. Gameplay Mode Switcher: Online (Standard) vs Optional Offline (Wi-Fi)
+                    // 3. Mode Switcher (directly below Driver Tag + Car): Online | Offline (Wi-Fi) | Solo Play
                     SingleChoiceSegmentedButtonRow(
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("home_mode_tabs_row")
                     ) {
                         HomeModeScope.entries.forEachIndexed { index, scopeOption ->
                             val icon = when (scopeOption) {
                                 HomeModeScope.ONLINE -> Icons.Default.Public
                                 HomeModeScope.OFFLINE -> Icons.Default.Wifi
+                                HomeModeScope.SOLO -> Icons.Default.DirectionsCar
                             }
                             SegmentedButton(
                                 selected = modeScope == scopeOption,
@@ -459,7 +415,7 @@ fun HomeScreen(
                                 ),
                                 icon = {
                                     if (modeScope != scopeOption) {
-                                        Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Icon(icon, contentDescription = null, modifier = Modifier.size(15.dp))
                                     } else {
                                         SegmentedButtonDefaults.Icon(active = true)
                                     }
@@ -468,28 +424,63 @@ fun HomeScreen(
                             ) {
                                 Text(
                                     text = scopeOption.label,
-                                    style = MaterialTheme.typography.labelLarge,
+                                    style = MaterialTheme.typography.labelMedium,
                                     maxLines = 1,
+                                    softWrap = false,
                                     overflow = TextOverflow.Ellipsis
                                 )
                             }
                         }
                     }
 
-                    // 5. Mode Content:
-                    //    - Standard (Online): Challenges & Rankings + Live Online Multiplayer
-                    //    - Optional (Offline / Wi-Fi): Local Wi-Fi Host/Join, Hybrid Tour & Bot Practice
-                    if (modeScope == HomeModeScope.ONLINE) {
-                        if (isWideScreen) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                verticalAlignment = Alignment.Top
-                            ) {
+                    // 4. Mode Content:
+                    //    - Online: Streak & Friends Rankings + Challenges & Rankings + Live Online Multiplayer
+                    //    - Offline (Wi-Fi): Local Wi-Fi Host/Join & Wi-Fi Hybrid Tour
+                    //    - Solo Play: Time Trial / AI Bots (optional) / Solo Hybrid & Leaderboards
+                    when (modeScope) {
+                        HomeModeScope.ONLINE -> {
+                            HomeMomentumAndStandingsCard(
+                                playStreak = playStreak,
+                                isSignedIn = isSignedIn,
+                                friendsCount = friendsCount,
+                                localRecordsCount = localRecordsCount,
+                                standings = friendStandings,
+                                onlineAccent = onlineAccent,
+                                onOpenFriends = onOpenFriends,
+                                onOpenStandingsBoard = onOpenStandingsBoard
+                            )
+
+                            if (isWideScreen) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                    verticalAlignment = Alignment.Top
+                                ) {
+                                    ChallengesAndRankingsSection(
+                                        modifier = Modifier.weight(1.1f),
+                                        onOpenDailyChallenge = onOpenDailyChallenge,
+                                        onOpenLeaderboards = onOpenLeaderboards,
+                                        dailyChallengeTitle = dailyChallengeTitle,
+                                        dailyChallengeSubtitle = dailyChallengeSubtitle,
+                                        dailyChallengeResetLabel = dailyChallengeResetLabel,
+                                        dailyBestTimeMs = dailyBestTimeMs,
+                                        onOpenDailyDriftChallenge = onOpenDailyDriftChallenge,
+                                        dailyDriftTitle = dailyDriftTitle,
+                                        dailyDriftBestTimeMs = dailyDriftBestTimeMs
+                                    )
+                                    LiveOnlineGameplaySection(
+                                        modifier = Modifier.weight(0.9f),
+                                        onOpenOnlinePlay = onOpenOnlinePlay,
+                                        onOpenFriends = onOpenFriends,
+                                        onlineFriendsCount = onlineFriendsCount,
+                                        pendingRequestsCount = pendingRequestsCount,
+                                        onlineAccent = onlineAccent
+                                    )
+                                }
+                            } else {
                                 ChallengesAndRankingsSection(
-                                    modifier = Modifier.weight(1.1f),
+                                    modifier = Modifier.fillMaxWidth(),
                                     onOpenDailyChallenge = onOpenDailyChallenge,
-                                    onPureSoloRace = onPureSoloRace,
                                     onOpenLeaderboards = onOpenLeaderboards,
                                     dailyChallengeTitle = dailyChallengeTitle,
                                     dailyChallengeSubtitle = dailyChallengeSubtitle,
@@ -500,7 +491,7 @@ fun HomeScreen(
                                     dailyDriftBestTimeMs = dailyDriftBestTimeMs
                                 )
                                 LiveOnlineGameplaySection(
-                                    modifier = Modifier.weight(0.9f),
+                                    modifier = Modifier.fillMaxWidth(),
                                     onOpenOnlinePlay = onOpenOnlinePlay,
                                     onOpenFriends = onOpenFriends,
                                     onlineFriendsCount = onlineFriendsCount,
@@ -508,38 +499,24 @@ fun HomeScreen(
                                     onlineAccent = onlineAccent
                                 )
                             }
-                        } else {
-                            ChallengesAndRankingsSection(
-                                modifier = Modifier.fillMaxWidth(),
-                                onOpenDailyChallenge = onOpenDailyChallenge,
-                                onPureSoloRace = onPureSoloRace,
-                                onOpenLeaderboards = onOpenLeaderboards,
-                                dailyChallengeTitle = dailyChallengeTitle,
-                                dailyChallengeSubtitle = dailyChallengeSubtitle,
-                                dailyChallengeResetLabel = dailyChallengeResetLabel,
-                                dailyBestTimeMs = dailyBestTimeMs,
-                                onOpenDailyDriftChallenge = onOpenDailyDriftChallenge,
-                                dailyDriftTitle = dailyDriftTitle,
-                                dailyDriftBestTimeMs = dailyDriftBestTimeMs
-                            )
-                            LiveOnlineGameplaySection(
-                                modifier = Modifier.fillMaxWidth(),
-                                onOpenOnlinePlay = onOpenOnlinePlay,
-                                onOpenFriends = onOpenFriends,
-                                onlineFriendsCount = onlineFriendsCount,
-                                pendingRequestsCount = pendingRequestsCount,
-                                onlineAccent = onlineAccent
-                            )
                         }
-                    } else {
-                        AnimatedVisibility(visible = modeScope == HomeModeScope.OFFLINE) {
+
+                        HomeModeScope.OFFLINE -> {
                             OfflineEntrySection(
                                 modifier = Modifier.fillMaxWidth(),
                                 onHostRace = onHostRace,
                                 onJoinRace = onJoinRace,
-                                onPureSoloRace = onPureSoloRace,
-                                onSoloRace = onSoloRace,
                                 onOpenHybridSetup = onOpenHybridSetup
+                            )
+                        }
+
+                        HomeModeScope.SOLO -> {
+                            SoloPlaySection(
+                                modifier = Modifier.fillMaxWidth(),
+                                onPureSoloRace = onPureSoloRace,
+                                onSoloRaceWithBots = onSoloRaceWithBots,
+                                onOpenHybridSetup = onOpenHybridSetup,
+                                onOpenLeaderboards = onOpenLeaderboards
                             )
                         }
                     }
@@ -583,10 +560,25 @@ fun HomeScreen(
 }
 
 @Composable
+private fun HomeSectionCard(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+        shape = MaterialTheme.shapes.large,
+        modifier = modifier,
+        content = content
+    )
+}
+
+@Composable
 private fun ChallengesAndRankingsSection(
     modifier: Modifier = Modifier,
     onOpenDailyChallenge: () -> Unit,
-    onPureSoloRace: () -> Unit,
     onOpenLeaderboards: () -> Unit,
     dailyChallengeTitle: String,
     dailyChallengeSubtitle: String,
@@ -596,11 +588,7 @@ private fun ChallengesAndRankingsSection(
     dailyDriftTitle: String = "Daily Drift",
     dailyDriftBestTimeMs: Long? = null
 ) {
-    ElevatedCard(
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
-        shape = MaterialTheme.shapes.large,
+    HomeSectionCard(
         modifier = modifier.testTag("home_challenges_section")
     ) {
         Column(
@@ -638,7 +626,7 @@ private fun ChallengesAndRankingsSection(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.tertiaryContainer
                 ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
                 shape = MaterialTheme.shapes.medium,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -725,7 +713,7 @@ private fun ChallengesAndRankingsSection(
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.secondaryContainer
                     ),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.6f)),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
                     shape = MaterialTheme.shapes.medium,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -789,47 +777,40 @@ private fun ChallengesAndRankingsSection(
                 }
             }
 
-            // 2. Consolidated Track Leaderboards & Solo Time Trial
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            // 2. Consolidated Track Leaderboards & Ghosts (Solo moved to dedicated Solo Play tab)
+            FilledTonalButton(
+                onClick = onOpenLeaderboards,
+                shape = MaterialTheme.shapes.medium,
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(58.dp)
+                    .testTag("leaderboards_button")
             ) {
-                FilledTonalButton(
-                    onClick = onOpenLeaderboards,
-                    shape = MaterialTheme.shapes.medium,
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                    ),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(58.dp)
-                        .testTag("leaderboards_button")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Icon(Icons.Default.Leaderboard, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(7.dp))
-                    Column {
-                        Text("Tracks & Ghosts", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("Rankings & records", style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(Icons.Default.Leaderboard, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Column {
+                            Text("Tracks & Ghosts", style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("Rankings, custom tracks & ghost records", style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
-                }
-
-                FilledTonalButton(
-                    onClick = onPureSoloRace,
-                    shape = MaterialTheme.shapes.medium,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(58.dp)
-                        .testTag("pure_solo_button")
-                ) {
-                    Icon(Icons.Default.Timer, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(7.dp))
-                    Column {
-                        Text("Solo Time Trial", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("Quick track run", style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
         }
@@ -845,12 +826,7 @@ private fun LiveOnlineGameplaySection(
     pendingRequestsCount: Int,
     onlineAccent: Color
 ) {
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-        ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f)),
-        shape = MaterialTheme.shapes.large,
+    HomeSectionCard(
         modifier = modifier.testTag("home_online_section")
     ) {
         Column(
@@ -983,15 +959,9 @@ private fun OfflineEntrySection(
     modifier: Modifier = Modifier,
     onHostRace: () -> Unit,
     onJoinRace: () -> Unit,
-    onPureSoloRace: () -> Unit,
-    onSoloRace: () -> Unit,
     onOpenHybridSetup: () -> Unit
 ) {
-    ElevatedCard(
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
-        shape = MaterialTheme.shapes.large,
+    HomeSectionCard(
         modifier = modifier.testTag("home_offline_section")
     ) {
         Column(
@@ -1072,45 +1042,6 @@ private fun OfflineEntrySection(
                 }
             }
 
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
-
-            Text(
-                text = "SOLO & HYBRID PRACTICE",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                FilledTonalButton(
-                    onClick = onPureSoloRace,
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(52.dp)
-                        .testTag("pure_solo_button")
-                ) {
-                    Icon(Icons.Default.Timer, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Solo Time Trial", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-
-                FilledTonalButton(
-                    onClick = onSoloRace,
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(52.dp)
-                        .testTag("solo_race_button")
-                ) {
-                    Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Solo vs Bots", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-
             FilledTonalButton(
                 onClick = onOpenHybridSetup,
                 shape = MaterialTheme.shapes.medium,
@@ -1133,13 +1064,221 @@ private fun OfflineEntrySection(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text("Hybrid Tour", style = MaterialTheme.typography.labelLarge)
+                        Text("Hybrid Tour (Wi-Fi)", style = MaterialTheme.typography.labelLarge)
                     }
                     Text(
                         text = "Circuit • Arena • Stunts",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SoloPlaySection(
+    modifier: Modifier = Modifier,
+    onPureSoloRace: () -> Unit,
+    onSoloRaceWithBots: (Int) -> Unit,
+    onOpenHybridSetup: () -> Unit,
+    onOpenLeaderboards: () -> Unit
+) {
+    var includeBots by rememberSaveable { mutableStateOf(false) }
+    var botCount by rememberSaveable { mutableIntStateOf(3) }
+
+    HomeSectionCard(
+        modifier = modifier.testTag("home_solo_section")
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.DirectionsCar,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                Text(
+                    text = "SOLO PLAY",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+
+            // Optional AI Bots selector card
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                shape = MaterialTheme.shapes.medium,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SmartToy,
+                            contentDescription = null,
+                            tint = if (includeBots) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Include AI Bots",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = if (includeBots) {
+                                    "Race with $botCount AI opponent${if (botCount == 1) "" else "s"}"
+                                } else {
+                                    "0 Bots • Time Trial & Ghost recording"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = includeBots,
+                            onCheckedChange = { includeBots = it },
+                            modifier = Modifier.testTag("solo_bots_switch")
+                        )
+                    }
+
+                    AnimatedVisibility(visible = includeBots) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(1, 2, 3).forEach { count ->
+                                FilterChip(
+                                    selected = botCount == count,
+                                    onClick = { botCount = count },
+                                    label = {
+                                        Text(
+                                            text = "$count Bot${if (count == 1) "" else "s"}",
+                                            style = MaterialTheme.typography.labelMedium
+                                        )
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("solo_bot_count_$count")
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Button(
+                onClick = {
+                    if (includeBots) {
+                        onSoloRaceWithBots(botCount)
+                    } else {
+                        onPureSoloRace()
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp)
+                    .testTag(if (includeBots) "solo_race_button" else "pure_solo_button")
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (includeBots) Icons.Default.Speed else Icons.Default.Timer,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Column {
+                            Text(
+                                text = if (includeBots) {
+                                    "Solo Race vs $botCount AI Bot${if (botCount == 1) "" else "s"}"
+                                } else {
+                                    "Solo Time Trial (0 Bots)"
+                                },
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                text = if (includeBots) {
+                                    "Pick track & mode in solo paddock"
+                                } else {
+                                    "Set Personal Best times & record Ghosts"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
+                            )
+                        }
+                    }
+                    Icon(
+                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                FilledTonalButton(
+                    onClick = onOpenLeaderboards,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                        .testTag("solo_tracks_ghosts_button")
+                ) {
+                    Icon(Icons.Default.Leaderboard, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Tracks & Ghosts", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+
+                FilledTonalButton(
+                    onClick = onOpenHybridSetup,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                        .testTag("solo_hybrid_tour_button")
+                ) {
+                    Icon(Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Hybrid Tour", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -1278,11 +1417,7 @@ private fun HomeMomentumAndStandingsCard(
         label = "milestoneBadgeScale"
     )
 
-    ElevatedCard(
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
-        shape = MaterialTheme.shapes.large,
+    HomeSectionCard(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("home_streak_standings_card")
@@ -1601,8 +1736,8 @@ private fun HomeMomentumAndStandingsCard(
                 }
             }
 
-            // Today's Daily & Track-by-Track Standings List
-            if (isSignedIn && friendsCount > 0 && summary.highlightBoards.isNotEmpty()) {
+            // Today's Daily & Track-by-Track Standings List (includes built-in, daily, and custom tracks)
+            if (isSignedIn && summary.highlightBoards.isNotEmpty()) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
                 Text(
@@ -1627,7 +1762,8 @@ private fun HomeMomentumAndStandingsCard(
                         )
                     }
                 }
-            } else if (!isSignedIn || friendsCount == 0) {
+            }
+            if (!isSignedIn || friendsCount == 0) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1809,10 +1945,10 @@ private fun HomeStandingBoardRow(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = if (item.isDaily || isStunts) {
-                        item.trackName
-                    } else {
-                        "${item.trackName} • ${item.totalLaps}L"
+                    text = when {
+                        item.isDaily || isStunts -> item.trackName
+                        item.isCustom -> "${item.trackName} • Custom • ${item.totalLaps}L"
+                        else -> "${item.trackName} • ${item.totalLaps}L"
                     },
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurface,

@@ -423,7 +423,82 @@ class StreakAndStandingsUnitTest {
         assertEquals(1, summary.trailingBoardsCount)
         val highlight = summary.highlightBoards.firstOrNull { it.trackKey == customId }
         assertNotNull(highlight)
-        assertEquals("Alex Hairpin", highlight!!.trackName)
+        assertTrue(highlight!!.isCustom)
+        assertEquals("Alex Hairpin", highlight.trackName)
         assertEquals(700L, highlight.deltaVsTopFriendMs)
+    }
+
+    @Test
+    fun friendStandingsCalculator_includesCustomTrackBestTimesAlongsideDailyAndBuiltInBoards() {
+        val myUid = "uid_me"
+        val customId = "custom_1760000123_z9y8"
+        val customBoardKey = com.example.model.LeaderboardBoardKey.build(GameMode.RACE, customId, 3)
+        val todayDate = "20261124"
+        val dailyTrack = DailyChallengeCatalog.trackIdForDate(todayDate)
+        val dailyBoard = DailyChallengeCatalog.boardKeyForDate(todayDate)
+
+        val localRecords = listOf(
+            LocalLeaderboardRecord(
+                boardKey = dailyBoard,
+                gameMode = GameMode.RACE.name,
+                trackKey = dailyTrack,
+                totalLaps = 3,
+                driverName = "MeDriver",
+                carType = RcCarType.VOLT_BUGGY.name,
+                primaryColorArgb = 0xFFFF5722,
+                accentColorArgb = 0xFFFFD54F,
+                bestRaceTimeMs = 41_200L
+            ),
+            LocalLeaderboardRecord(
+                boardKey = "RACE_LIVING_ROOM_GP_3L",
+                gameMode = GameMode.RACE.name,
+                trackKey = "LIVING_ROOM_GP",
+                totalLaps = 3,
+                driverName = "MeDriver",
+                carType = RcCarType.VOLT_BUGGY.name,
+                primaryColorArgb = 0xFFFF5722,
+                accentColorArgb = 0xFFFFD54F,
+                bestRaceTimeMs = 32_100L
+            ),
+            LocalLeaderboardRecord(
+                boardKey = "RACE_GP_APEX_3L",
+                gameMode = GameMode.RACE.name,
+                trackKey = "GP_APEX",
+                totalLaps = 3,
+                driverName = "MeDriver",
+                carType = RcCarType.VOLT_BUGGY.name,
+                primaryColorArgb = 0xFFFF5722,
+                accentColorArgb = 0xFFFFD54F,
+                bestRaceTimeMs = 35_400L
+            ),
+            LocalLeaderboardRecord(
+                boardKey = customBoardKey,
+                gameMode = GameMode.RACE.name,
+                trackKey = customId,
+                totalLaps = 3,
+                driverName = "MeDriver",
+                carType = RcCarType.VOLT_BUGGY.name,
+                primaryColorArgb = 0xFFFF5722,
+                accentColorArgb = 0xFFFFD54F,
+                bestRaceTimeMs = 27_850L
+            )
+        )
+
+        val summary = FriendStandingsCalculator.compute(
+            myUid = myUid,
+            myName = "MeDriver",
+            friends = emptyList(),
+            cloudEntries = emptyList(),
+            localRecords = localRecords,
+            todayDateKey = todayDate,
+            customTrackNames = mapOf(customId to "Basement Driftway")
+        )
+
+        assertEquals(dailyBoard, summary.highlightBoards.first().boardKey)
+        val customHighlight = summary.highlightBoards.find { it.trackKey == customId }
+        assertNotNull("Custom track best time must be included in highlightBoards", customHighlight)
+        assertTrue(customHighlight!!.isCustom)
+        assertEquals("Basement Driftway", customHighlight.trackName)
+        assertEquals(27_850L, customHighlight.myTimeMs)
     }
 }

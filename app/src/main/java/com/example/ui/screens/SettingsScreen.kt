@@ -6,6 +6,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -24,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -31,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.BrightnessAuto
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DirectionsCar
@@ -42,11 +47,14 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Thunderstorm
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material3.Button
@@ -64,15 +72,27 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -80,17 +100,23 @@ import com.example.BuildConfig
 import com.example.model.AppThemeMode
 import com.example.model.AudioSettings
 import com.example.model.CarSpeedPreset
+import com.example.model.ControlMode
 import com.example.model.GameMode
+import com.example.model.PlayerProfile
 import com.example.model.RaceRulesSettings
 import com.example.model.ThemeSettings
 import com.example.model.WinCondition
+import com.example.sensors.TiltSteeringController
 import com.example.util.AppUpdateUiState
 import com.example.util.SessionNotificationHelper
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     rules: RaceRulesSettings,
+    profile: PlayerProfile = PlayerProfile(playerId = "local"),
+    tiltController: TiltSteeringController? = null,
     audioSettings: AudioSettings = AudioSettings(),
     themeSettings: ThemeSettings = ThemeSettings(),
     dailyNotificationsEnabled: Boolean = true,
@@ -98,6 +124,7 @@ fun SettingsScreen(
     inSession: Boolean,
     hasBottomNav: Boolean = false,
     onUpdateRules: (RaceRulesSettings) -> Unit,
+    onSaveControlSettings: (ControlMode, Float, Boolean, Float) -> Unit = { _, _, _, _ -> },
     onUpdateAudio: (AudioSettings) -> Unit = {},
     onUpdateThemeSettings: (ThemeSettings) -> Unit = {},
     onToggleDailyNotifications: (Boolean) -> Unit = {},
@@ -176,7 +203,8 @@ fun SettingsScreen(
                     )
 
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
                         shape = RoundedCornerShape(18.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -245,7 +273,20 @@ fun SettingsScreen(
                         }
                     }
 
-                    // 2. Audio & Alerts (this device)
+                    // 2. Steering Controls (moved out of Garage & Driver Tag)
+                    Text(
+                        text = "STEERING CONTROLS",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    SteeringControlsSection(
+                        profile = profile,
+                        tiltController = tiltController,
+                        onSaveControlSettings = onSaveControlSettings
+                    )
+
+                    // 3. Audio & Alerts (this device)
                     Text(
                         text = "AUDIO & ALERTS",
                         style = MaterialTheme.typography.labelLarge,
@@ -253,7 +294,8 @@ fun SettingsScreen(
                     )
 
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
                         shape = RoundedCornerShape(18.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -320,7 +362,8 @@ fun SettingsScreen(
                     )
 
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
                         shape = RoundedCornerShape(18.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -497,7 +540,8 @@ fun SettingsScreen(
                     )
 
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
                         shape = RoundedCornerShape(18.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -786,13 +830,26 @@ fun SettingsScreen(
                     }
 
                     Text(
+                        text = "STEERING CONTROLS (THIS DEVICE)",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    SteeringControlsSection(
+                        profile = profile,
+                        tiltController = tiltController,
+                        onSaveControlSettings = onSaveControlSettings
+                    )
+
+                    Text(
                         text = "AUDIO & HAPTICS (THIS DEVICE)",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
                     Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
                         shape = RoundedCornerShape(18.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -834,6 +891,240 @@ fun SettingsScreen(
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SteeringControlsSection(
+    profile: PlayerProfile,
+    tiltController: TiltSteeringController?,
+    onSaveControlSettings: (ControlMode, Float, Boolean, Float) -> Unit
+) {
+    var selectedControlMode by remember(profile.controlMode) { mutableStateOf(profile.controlMode) }
+    var tiltSensitivity by remember(profile.tiltSensitivity) { mutableFloatStateOf(profile.tiltSensitivity) }
+    var sliderSensitivity by remember(profile.sliderSensitivity) { mutableFloatStateOf(profile.sliderSensitivity) }
+    var previewSliderSteer by remember { mutableFloatStateOf(0f) }
+
+    val view = LocalView.current
+    val configuration = LocalConfiguration.current
+    LaunchedEffect(view, configuration.orientation, selectedControlMode, tiltController) {
+        tiltController?.updateDisplayRotation(view.display?.rotation)
+    }
+
+    DisposableEffect(selectedControlMode, tiltController) {
+        if (tiltController != null && selectedControlMode == ControlMode.TILT_SENSOR) {
+            tiltController.updateDisplayRotation(view.display?.rotation)
+            tiltController.setSensitivity(tiltSensitivity)
+            tiltController.start()
+        } else {
+            tiltController?.stop()
+        }
+        onDispose { tiltController?.stop() }
+    }
+
+    val liveSteer = if (tiltController != null) {
+        tiltController.steerValue.collectAsState().value
+    } else {
+        0f
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("settings_steering_controls_section")
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            ControlMode.entries.forEach { mode ->
+                val active = selectedControlMode == mode
+                Surface(
+                    color = if (active) {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainer
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    border = BorderStroke(
+                        width = if (active) 1.5.dp else 1.dp,
+                        color = if (active) {
+                            MaterialTheme.colorScheme.secondary
+                        } else {
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+                        }
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 48.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable {
+                            selectedControlMode = mode
+                            if (mode != ControlMode.SPRING_SLIDER) previewSliderSteer = 0f
+                            onSaveControlSettings(mode, tiltSensitivity, true, sliderSensitivity)
+                        }
+                        .testTag("control_mode_${mode.name}")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = when (mode) {
+                                ControlMode.TILT_SENSOR -> Icons.Default.PhoneAndroid
+                                ControlMode.SPRING_SLIDER -> Icons.Default.SwapHoriz
+                                ControlMode.TOUCH_OVERLAY -> Icons.Default.TouchApp
+                            },
+                            contentDescription = mode.label,
+                            tint = if (active) {
+                                MaterialTheme.colorScheme.onSecondaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = mode.label,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = if (active) {
+                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                }
+                            )
+                            Text(
+                                text = mode.subtitle,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (active) {
+                                    MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.82f)
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        }
+                        if (active) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Selected",
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (selectedControlMode == ControlMode.SPRING_SLIDER) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Live Spring Slider Preview", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            text = "Steer: ${(previewSliderSteer * 100f).toInt()}%",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
+                    Text(
+                        text = "Slide proportionally with RC expo OR tap/hold the overlaid left/right arrows for instant full lock. Lift to snap to neutral.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    SpringSteeringSlider(
+                        onSteerChange = { previewSliderSteer = it },
+                        sensitivity = sliderSensitivity,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(88.dp)
+                            .testTag("settings_spring_slider_preview")
+                    )
+                    Text(
+                        text = "Slider Sensitivity: ${String.format(Locale.US, "%.2fx", sliderSensitivity)}",
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    Slider(
+                        value = sliderSensitivity,
+                        onValueChange = {
+                            sliderSensitivity = it
+                            onSaveControlSettings(selectedControlMode, tiltSensitivity, true, it)
+                        },
+                        valueRange = 0.7f..2.6f,
+                        modifier = Modifier.testTag("settings_slider_sensitivity")
+                    )
+                }
+            }
+
+            if (selectedControlMode == ControlMode.TILT_SENSOR) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Live Tilt Preview", style = MaterialTheme.typography.titleSmall)
+                        OutlinedButton(
+                            onClick = { tiltController?.calibrateNeutral() },
+                            enabled = tiltController != null,
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 48.dp)
+                                .testTag("settings_tilt_calibrate_button")
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Zero Tilt")
+                        }
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(14.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                    ) {
+                        val fraction = ((liveSteer + 1f) / 2f).coerceIn(0.04f, 0.96f)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(fraction)
+                                .height(14.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.CenterEnd)
+                                    .size(18.dp, 14.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.secondary)
+                            )
+                        }
+                    }
+                    Text(
+                        text = "Tilt Sensitivity: ${String.format(Locale.US, "%.2fx", tiltSensitivity)}",
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                    Slider(
+                        value = tiltSensitivity,
+                        onValueChange = {
+                            tiltSensitivity = it
+                            tiltController?.setSensitivity(it)
+                            onSaveControlSettings(selectedControlMode, it, true, sliderSensitivity)
+                        },
+                        valueRange = 0.6f..2.2f,
+                        modifier = Modifier.testTag("settings_tilt_sensitivity")
+                    )
+                }
             }
         }
     }
@@ -911,8 +1202,8 @@ private fun AboutAndVersionSection(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Card(
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
             shape = RoundedCornerShape(18.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -963,7 +1254,7 @@ private fun AboutAndVersionSection(
                 containerColor = if (hasUpdate) {
                     MaterialTheme.colorScheme.primaryContainer
                 } else {
-                    MaterialTheme.colorScheme.surfaceContainer
+                    MaterialTheme.colorScheme.surfaceContainerLow
                 }
             ),
             border = BorderStroke(
@@ -971,7 +1262,7 @@ private fun AboutAndVersionSection(
                 color = if (hasUpdate) {
                     MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
                 } else {
-                    MaterialTheme.colorScheme.outlineVariant
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
                 }
             ),
             shape = RoundedCornerShape(18.dp),

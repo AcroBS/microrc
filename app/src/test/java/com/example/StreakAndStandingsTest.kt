@@ -144,10 +144,21 @@ class StreakAndStandingsTest {
                     boardKey = "RACE_GP_APEX_3L",
                     totalLaps = 3L,
                     bestRaceTimeMs = 35_600L
+                ),
+                LeaderboardEntryDoc(
+                    id = "uid_me_RACE_custom_neon_1_3L",
+                    userId = "uid_me",
+                    driverName = "Alex",
+                    gameMode = GameMode.RACE.name,
+                    trackKey = "custom_neon_1",
+                    boardKey = "RACE_custom_neon_1_3L",
+                    totalLaps = 3L,
+                    bestRaceTimeMs = 28_450L
                 )
             ),
             localRecords = emptyList(),
-            todayDateKey = "20261123"
+            todayDateKey = "20261123",
+            customTrackNames = mapOf("custom_neon_1" to "Neon Hairpin")
         )
 
         var openedBoard: Triple<String, GameMode, Boolean>? = null
@@ -188,6 +199,8 @@ class StreakAndStandingsTest {
         composeTestRule.onNodeWithTag("home_overall_friend_rank_0").assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_standings_board_row_0").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("-1.50s").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_standings_board_row_1").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Neon Hairpin • Custom • 3L").performScrollTo().assertIsDisplayed()
 
         composeTestRule.onNodeWithTag("home_challenges_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
@@ -227,12 +240,19 @@ class StreakAndStandingsTest {
         composeTestRule.onNodeWithTag("home_challenges_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_offline_section").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("home_solo_section").assertDoesNotExist()
 
         composeTestRule.onNodeWithTag("home_scope_offline").performScrollTo().performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("home_offline_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_streak_standings_card").assertDoesNotExist()
         composeTestRule.onNodeWithTag("home_challenges_section").assertDoesNotExist()
         composeTestRule.onNodeWithTag("home_online_section").assertDoesNotExist()
+
+        composeTestRule.onNodeWithTag("home_scope_solo").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_solo_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_streak_standings_card").assertDoesNotExist()
     }
 
     @Test
