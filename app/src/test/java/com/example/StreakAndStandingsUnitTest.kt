@@ -501,4 +501,38 @@ class StreakAndStandingsUnitTest {
         assertEquals("Basement Driftway", customHighlight.trackName)
         assertEquals(27_850L, customHighlight.myTimeMs)
     }
+
+    @Test
+    fun proceduralRandomTrackIds_formatCleanlyWithoutAlteringUnderlyingId() {
+        val rawId = "rand_1795082654369"
+        assertEquals("Procedural #2654", DailyChallengeCatalog.resolveTrackDisplayName(rawId))
+        assertEquals(
+            "Procedural Drift #2654",
+            DailyChallengeCatalog.resolveTrackDisplayName("drift_rand_1795082654369")
+        )
+
+        val summary = FriendStandingsCalculator.compute(
+            myUid = "uid_me",
+            myName = "Alex",
+            friends = emptyList(),
+            cloudEntries = listOf(
+                LeaderboardEntryDoc(
+                    id = "uid_me_RACE_${rawId}_3L",
+                    userId = "uid_me",
+                    driverName = "Alex",
+                    gameMode = GameMode.RACE.name,
+                    trackKey = rawId,
+                    boardKey = "RACE_${rawId}_3L",
+                    totalLaps = 3L,
+                    bestRaceTimeMs = 31_400L
+                )
+            ),
+            localRecords = emptyList(),
+            todayDateKey = "20261125"
+        )
+        val row = summary.highlightBoards.firstOrNull { it.trackKey == rawId }
+        assertNotNull(row)
+        assertEquals(rawId, row!!.trackKey)
+        assertEquals("Procedural #2654", row.trackName)
+    }
 }

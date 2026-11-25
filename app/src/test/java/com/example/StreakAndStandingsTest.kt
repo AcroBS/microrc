@@ -391,4 +391,221 @@ class StreakAndStandingsTest {
         composeTestRule.onNodeWithTag("cancel_friend_challenge_button").performClick()
         assertTrue(cancelled)
     }
+
+    @Test
+    fun homeStandings_capsToTopThreeWithViewAllToggleAndCompactFriendsCardPlacesNotifyInline() {
+        val summary = FriendStandingsCalculator.compute(
+            myUid = "uid_me",
+            myName = "Alex",
+            friends = listOf(
+                FriendUiModel(
+                    friendshipId = "f1",
+                    friendUid = "uid_riley",
+                    displayName = "Riley",
+                    friendCode = "RCRILEY9",
+                    carType = RcCarType.VOLT_BUGGY,
+                    primaryColorArgb = 0xFF00E5FF,
+                    accentColorArgb = 0xFFFFD54F,
+                    effectivelyOnline = true,
+                    activityStatus = "ONLINE",
+                    activeRoomId = "",
+                    activeRoomCode = "",
+                    activeRoomName = "",
+                    statusLabel = "Online"
+                )
+            ),
+            cloudEntries = listOf(
+                LeaderboardEntryDoc(
+                    id = "uid_me_1",
+                    userId = "uid_me",
+                    driverName = "Alex",
+                    gameMode = GameMode.RACE.name,
+                    trackKey = "GP_APEX",
+                    boardKey = "RACE_GP_APEX_3L",
+                    totalLaps = 3L,
+                    bestRaceTimeMs = 34_100L
+                ),
+                LeaderboardEntryDoc(
+                    id = "uid_me_2",
+                    userId = "uid_me",
+                    driverName = "Alex",
+                    gameMode = GameMode.RACE.name,
+                    trackKey = "LIVING_ROOM_GP",
+                    boardKey = "RACE_LIVING_ROOM_GP_3L",
+                    totalLaps = 3L,
+                    bestRaceTimeMs = 28_500L
+                ),
+                LeaderboardEntryDoc(
+                    id = "uid_me_3",
+                    userId = "uid_me",
+                    driverName = "Alex",
+                    gameMode = GameMode.RACE.name,
+                    trackKey = "WORKSHOP_GP",
+                    boardKey = "RACE_WORKSHOP_GP_3L",
+                    totalLaps = 3L,
+                    bestRaceTimeMs = 30_200L
+                ),
+                LeaderboardEntryDoc(
+                    id = "uid_me_4",
+                    userId = "uid_me",
+                    driverName = "Alex",
+                    gameMode = GameMode.RACE.name,
+                    trackKey = "BACKYARD_GP",
+                    boardKey = "RACE_BACKYARD_GP_3L",
+                    totalLaps = 3L,
+                    bestRaceTimeMs = 33_800L
+                )
+            ),
+            localRecords = emptyList(),
+            todayDateKey = "20261125"
+        )
+
+        composeTestRule.setContent {
+            MicroRCTheme {
+                HomeScreen(
+                    profile = PlayerProfile(playerId = "uid_me", name = "Alex"),
+                    onHostRace = {},
+                    onJoinRace = {},
+                    onSoloRace = {},
+                    onOpenGarage = {},
+                    onUpdateDriverName = {},
+                    isSignedIn = true,
+                    friendsCount = 1,
+                    friendStandings = summary
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("home_standings_board_row_0").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_standings_board_row_2").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_standings_board_row_3").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("home_standings_view_all_toggle").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_standings_board_row_3").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun friendsScreen_placesNotifyInlineAndReservesBottomAreaForCustomTracksOnly() {
+        val friendNoTracks = FriendUiModel(
+            friendshipId = "f1",
+            friendUid = "uid_riley",
+            displayName = "Riley",
+            friendCode = "RCRILEY9",
+            carType = RcCarType.VOLT_BUGGY,
+            primaryColorArgb = 0xFF00E5FF,
+            accentColorArgb = 0xFFFFD54F,
+            effectivelyOnline = true,
+            activityStatus = "ONLINE",
+            activeRoomId = "",
+            activeRoomCode = "",
+            activeRoomName = "",
+            statusLabel = "Online"
+        )
+        val friendWithTrack = FriendUiModel(
+            friendshipId = "f2",
+            friendUid = "uid_sam",
+            displayName = "Sam",
+            friendCode = "RCSAM123",
+            carType = RcCarType.APEX_FORMULA,
+            primaryColorArgb = 0xFFFF5722,
+            accentColorArgb = 0xFFFFFFFF,
+            effectivelyOnline = false,
+            activityStatus = "OFFLINE",
+            activeRoomId = "",
+            activeRoomCode = "",
+            activeRoomName = "",
+            statusLabel = "Offline"
+        )
+        val samTrack = com.example.model.CustomTrackData(
+            id = "custom_sam_1",
+            name = "Sam Circuit",
+            controlPoints = listOf(
+                com.example.model.TrackPoint(0f, 0f),
+                com.example.model.TrackPoint(300f, 0f),
+                com.example.model.TrackPoint(300f, 300f),
+                com.example.model.TrackPoint(0f, 300f)
+            ),
+            creatorUid = "uid_sam",
+            creatorName = "Sam"
+        )
+        var notifiedUid: String? = null
+
+        composeTestRule.setContent {
+            MicroRCTheme {
+                com.example.ui.screens.FriendsScreen(
+                    profile = PlayerProfile(playerId = "uid_me", name = "Alex"),
+                    myFriendCode = "RCALEX01",
+                    activeOnlineRoom = null,
+                    friends = listOf(friendNoTracks, friendWithTrack),
+                    friendCustomTracksByUid = mapOf("uid_sam" to listOf(samTrack)),
+                    incomingRequests = emptyList(),
+                    outgoingRequests = emptyList(),
+                    searchResults = emptyList(),
+                    isSearching = false,
+                    feedbackMessage = null,
+                    onDismissFeedback = {},
+                    onAddFriendByCode = {},
+                    onSearchDrivers = {},
+                    onAddDriverFromSearch = {},
+                    onAcceptRequest = {},
+                    onDeclineOrRemoveFriendship = { _, _ -> },
+                    onNotifyFriendToJoin = { notifiedUid = it.friendUid },
+                    onNotifyAllOnlineFriends = {},
+                    onJoinFriendLobby = {},
+                    onOpenOnlineHub = {},
+                    onBack = {}
+                )
+            }
+        }
+
+        val notifyRiley = composeTestRule.onNodeWithTag("notify_friend_button_uid_riley").performScrollTo()
+        val removeRiley = composeTestRule.onNodeWithTag("remove_friend_button_uid_riley")
+        notifyRiley.assertIsDisplayed()
+        removeRiley.assertIsDisplayed()
+
+        // Inline Notify sits on the same horizontal row as Remove Friend
+        val notifyY = notifyRiley.fetchSemanticsNode().positionInRoot.y
+        val removeY = removeRiley.fetchSemanticsNode().positionInRoot.y
+        assertTrue(
+            "Inline notify pill ($notifyY) should align horizontally with remove icon ($removeY)",
+            kotlin.math.abs(notifyY - removeY) < 28f
+        )
+
+        composeTestRule.onNodeWithTag("challenge_friend_custom_track_uid_riley").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("challenge_friend_custom_track_uid_sam").performScrollTo().assertIsDisplayed()
+        notifyRiley.performClick()
+        assertEquals("uid_riley", notifiedUid)
+    }
+
+    @Test
+    fun onlineHubScreen_rendersStartingModesInSingleHorizontalRow() {
+        composeTestRule.setContent {
+            MicroRCTheme {
+                com.example.ui.screens.OnlineHubScreen(
+                    profile = PlayerProfile(playerId = "uid_me", name = "Alex"),
+                    accountLabel = "alex@example.com",
+                    initialRules = com.example.model.RaceRulesSettings(),
+                    openRooms = emptyList(),
+                    isBusy = false,
+                    errorBanner = null,
+                    onDismissError = {},
+                    onCreateRoom = { _, _, _, _, _ -> },
+                    onJoinRoom = { _, _ -> },
+                    onJoinRoomByCode = { _, _, _ -> },
+                    onOpenLeaderboards = {},
+                    onSignOut = {},
+                    onBack = {}
+                )
+            }
+        }
+
+        val rowNode = composeTestRule.onNodeWithTag("online_starting_mode_row").performScrollTo()
+        rowNode.assertIsDisplayed()
+        val raceY = composeTestRule.onNodeWithTag("online_mode_RACE").fetchSemanticsNode().positionInRoot.y
+        val driftY = composeTestRule.onNodeWithTag("online_mode_DRIFT").fetchSemanticsNode().positionInRoot.y
+        assertTrue(
+            "Starting mode chips must stay on a single row ($raceY vs $driftY)",
+            kotlin.math.abs(raceY - driftY) < 4f
+        )
+    }
 }

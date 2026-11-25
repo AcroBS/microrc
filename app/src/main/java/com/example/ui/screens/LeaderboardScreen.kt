@@ -11,8 +11,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,6 +27,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -49,7 +48,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -70,6 +68,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.util.SessionNotificationHelper
@@ -86,6 +85,8 @@ import com.example.model.RcCarType
 import com.example.model.TrackId
 import com.example.ui.components.drawRcCar
 import com.example.ui.components.drawTrackMiniMap
+import com.example.ui.theme.JetBrainsMonoFontFamily
+import com.example.ui.theme.PlusJakartaFontFamily
 import com.example.ui.theme.adaptiveGhostAccentColor
 import com.example.ui.theme.adaptiveGoldColor
 
@@ -98,7 +99,6 @@ enum class LeaderboardFilterTab {
     DAILY_DRIFT
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LeaderboardScreen(
     localRecords: List<LocalLeaderboardRecord>,
@@ -322,24 +322,13 @@ fun LeaderboardScreen(
                     }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = when (selectedTab) {
-                                LeaderboardFilterTab.DAILY -> "DAILY CHALLENGE"
-                                LeaderboardFilterTab.DAILY_DRIFT -> "DAILY DRIFT"
-                                else -> "LEADERBOARDS & GHOSTS"
-                            },
+                            text = "Tracks & Ghosts",
                             style = MaterialTheme.typography.titleLarge,
                             color = MaterialTheme.colorScheme.onBackground
                         )
                         Text(
-                            text = when (selectedTab) {
-                                LeaderboardFilterTab.DAILY ->
-                                    "1 fixed random track per UTC day • 0 bots • fair for every run"
-                                LeaderboardFilterTab.DAILY_DRIFT ->
-                                    "1 fixed drift obstacle course per UTC day • 1x Nitro/Lap • 0 powerups"
-                                else ->
-                                    "Pure Solo high scores & virtual Ghost Car challenges"
-                            },
-                            style = MaterialTheme.typography.labelSmall,
+                            text = "Leaderboards, custom tracks & rival ghosts",
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlusJakartaFontFamily),
                             color = MaterialTheme.colorScheme.secondary
                         )
                     }
@@ -348,88 +337,140 @@ fun LeaderboardScreen(
                 if (!cloudStatusMessage.isNullOrBlank()) {
                     Surface(
                         color = MaterialTheme.colorScheme.secondaryContainer,
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
                             text = cloudStatusMessage,
-                            style = MaterialTheme.typography.bodySmall,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlusJakartaFontFamily),
                             color = MaterialTheme.colorScheme.onSecondaryContainer,
                             modifier = Modifier.padding(12.dp)
                         )
                     }
                 }
 
-                // Mode Filter (Daily GP / Daily Drift / Drifting / Circuit Time Trial / Custom Tracks / Stunt Gauntlet)
-                FlowRow(
+                // Single-row horizontal LazyRow for Mode Filter Chips
+                LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    contentPadding = PaddingValues(horizontal = 2.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("leaderboard_mode_filter_row")
                 ) {
-                    FilterChip(
-                        selected = selectedTab == LeaderboardFilterTab.DAILY,
-                        onClick = { selectedTab = LeaderboardFilterTab.DAILY },
-                        leadingIcon = {
-                            Icon(Icons.Default.Today, contentDescription = null, modifier = Modifier.size(16.dp))
-                        },
-                        label = { Text("Daily Challenge") },
-                        modifier = Modifier.testTag("leaderboard_mode_DAILY")
-                    )
-                    if (com.example.drift.DriftFeature.ENABLED) {
+                    item(key = "DAILY") {
                         FilterChip(
-                            selected = selectedTab == LeaderboardFilterTab.DAILY_DRIFT,
-                            onClick = { selectedTab = LeaderboardFilterTab.DAILY_DRIFT },
+                            selected = selectedTab == LeaderboardFilterTab.DAILY,
+                            onClick = { selectedTab = LeaderboardFilterTab.DAILY },
                             leadingIcon = {
                                 Icon(Icons.Default.Today, contentDescription = null, modifier = Modifier.size(16.dp))
                             },
-                            label = { Text("Daily Drift") },
-                            modifier = Modifier.testTag("leaderboard_mode_DAILY_DRIFT")
+                            label = {
+                                Text(
+                                    text = "Daily Challenge",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = PlusJakartaFontFamily),
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            },
+                            modifier = Modifier.testTag("leaderboard_mode_DAILY")
                         )
+                    }
+                    if (com.example.drift.DriftFeature.ENABLED) {
+                        item(key = "DAILY_DRIFT") {
+                            FilterChip(
+                                selected = selectedTab == LeaderboardFilterTab.DAILY_DRIFT,
+                                onClick = { selectedTab = LeaderboardFilterTab.DAILY_DRIFT },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Today, contentDescription = null, modifier = Modifier.size(16.dp))
+                                },
+                                label = {
+                                    Text(
+                                        text = "Daily Drift",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = PlusJakartaFontFamily),
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                },
+                                modifier = Modifier.testTag("leaderboard_mode_DAILY_DRIFT")
+                            )
+                        }
+                        item(key = "DRIFT") {
+                            FilterChip(
+                                selected = selectedTab == LeaderboardFilterTab.DRIFT,
+                                onClick = { selectedTab = LeaderboardFilterTab.DRIFT },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(16.dp))
+                                },
+                                label = {
+                                    Text(
+                                        text = "Drifting",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = PlusJakartaFontFamily),
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                },
+                                modifier = Modifier.testTag("leaderboard_mode_DRIFT")
+                            )
+                        }
+                    }
+                    item(key = "RACE") {
                         FilterChip(
-                            selected = selectedTab == LeaderboardFilterTab.DRIFT,
-                            onClick = { selectedTab = LeaderboardFilterTab.DRIFT },
+                            selected = selectedTab == LeaderboardFilterTab.RACE,
+                            onClick = { selectedTab = LeaderboardFilterTab.RACE },
                             leadingIcon = {
                                 Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(16.dp))
                             },
-                            label = { Text("Drifting") },
-                            modifier = Modifier.testTag("leaderboard_mode_DRIFT")
+                            label = {
+                                Text(
+                                    text = "Circuit Time Trial",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = PlusJakartaFontFamily),
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            },
+                            modifier = Modifier.testTag("leaderboard_mode_RACE")
                         )
                     }
-                    FilterChip(
-                        selected = selectedTab == LeaderboardFilterTab.RACE,
-                        onClick = { selectedTab = LeaderboardFilterTab.RACE },
-                        leadingIcon = {
-                            Icon(Icons.Default.Speed, contentDescription = null, modifier = Modifier.size(16.dp))
-                        },
-                        label = { Text("Circuit Time Trial") },
-                        modifier = Modifier.testTag("leaderboard_mode_RACE")
-                    )
-                    FilterChip(
-                        selected = selectedTab == LeaderboardFilterTab.CUSTOM,
-                        onClick = { selectedTab = LeaderboardFilterTab.CUSTOM },
-                        leadingIcon = {
-                            Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(16.dp))
-                        },
-                        label = {
-                            Text(
-                                if (customTracks.isNotEmpty()) {
-                                    "Custom Tracks (${customTracks.size})"
-                                } else {
-                                    "Custom Tracks"
-                                }
-                            )
-                        },
-                        modifier = Modifier.testTag("leaderboard_mode_CUSTOM")
-                    )
-                    FilterChip(
-                        selected = selectedTab == LeaderboardFilterTab.STUNTS,
-                        onClick = { selectedTab = LeaderboardFilterTab.STUNTS },
-                        leadingIcon = {
-                            Icon(Icons.Default.FlightTakeoff, contentDescription = null, modifier = Modifier.size(16.dp))
-                        },
-                        label = { Text("Stunt Gauntlet (4R)") },
-                        modifier = Modifier.testTag("leaderboard_mode_STUNTS")
-                    )
+                    item(key = "CUSTOM") {
+                        FilterChip(
+                            selected = selectedTab == LeaderboardFilterTab.CUSTOM,
+                            onClick = { selectedTab = LeaderboardFilterTab.CUSTOM },
+                            leadingIcon = {
+                                Icon(Icons.Default.Map, contentDescription = null, modifier = Modifier.size(16.dp))
+                            },
+                            label = {
+                                Text(
+                                    text = if (customTracks.isNotEmpty()) {
+                                        "Custom Tracks (${customTracks.size})"
+                                    } else {
+                                        "Custom Tracks"
+                                    },
+                                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = PlusJakartaFontFamily),
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            },
+                            modifier = Modifier.testTag("leaderboard_mode_CUSTOM")
+                        )
+                    }
+                    item(key = "STUNTS") {
+                        FilterChip(
+                            selected = selectedTab == LeaderboardFilterTab.STUNTS,
+                            onClick = { selectedTab = LeaderboardFilterTab.STUNTS },
+                            leadingIcon = {
+                                Icon(Icons.Default.FlightTakeoff, contentDescription = null, modifier = Modifier.size(16.dp))
+                            },
+                            label = {
+                                Text(
+                                    text = "Stunt Gauntlet",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontFamily = PlusJakartaFontFamily),
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            },
+                            modifier = Modifier.testTag("leaderboard_mode_STUNTS")
+                        )
+                    }
                 }
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotifPerm) {
@@ -451,13 +492,14 @@ fun LeaderboardScreen(
                                 )
                                 Text(
                                     text = "Get system notifications when new Daily tracks drop or friends post a track record.",
-                                    style = MaterialTheme.typography.labelSmall,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = PlusJakartaFontFamily),
                                     color = MaterialTheme.colorScheme.onTertiaryContainer
                                 )
                             }
                             Spacer(modifier = Modifier.width(8.dp))
                             Button(
                                 onClick = { notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                                shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier
                                     .height(48.dp)
                                     .testTag("daily_enable_notifications_button")
@@ -480,7 +522,7 @@ fun LeaderboardScreen(
                             1.5.dp,
                             if (isDailyDriftTab) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.tertiary
                         ),
-                        shape = RoundedCornerShape(22.dp),
+                        shape = RoundedCornerShape(24.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag(if (isDailyDriftTab) "daily_drift_challenge_card" else "daily_challenge_card")
@@ -523,7 +565,7 @@ fun LeaderboardScreen(
                                 }
                                 Surface(
                                     color = MaterialTheme.colorScheme.tertiaryContainer,
-                                    shape = RoundedCornerShape(50)
+                                    shape = CircleShape
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -538,7 +580,7 @@ fun LeaderboardScreen(
                                         )
                                         Text(
                                             text = dailyResetLabel,
-                                            style = MaterialTheme.typography.labelSmall,
+                                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMonoFontFamily),
                                             color = MaterialTheme.colorScheme.onTertiaryContainer
                                         )
                                     }
@@ -561,7 +603,7 @@ fun LeaderboardScreen(
                             // Optional Ghost Car Toggle (shown when another player or PB already placed a time)
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                shape = RoundedCornerShape(14.dp),
+                                shape = RoundedCornerShape(16.dp),
                                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
@@ -679,7 +721,7 @@ fun LeaderboardScreen(
                         Card(
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            shape = RoundedCornerShape(20.dp),
+                            shape = RoundedCornerShape(24.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("custom_tracks_empty_card")
@@ -699,7 +741,7 @@ fun LeaderboardScreen(
                                     } else {
                                         "Build your own circuit in Track Studio, or sign in with Google to see and challenge your friends' self-designed tracks."
                                     },
-                                    style = MaterialTheme.typography.bodySmall,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlusJakartaFontFamily),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Row(
@@ -708,7 +750,7 @@ fun LeaderboardScreen(
                                 ) {
                                     Button(
                                         onClick = onOpenTrackEditor,
-                                        shape = RoundedCornerShape(14.dp),
+                                        shape = RoundedCornerShape(16.dp),
                                         modifier = Modifier
                                             .weight(1f)
                                             .height(48.dp)
@@ -721,7 +763,7 @@ fun LeaderboardScreen(
                                     if (!isSignedIn) {
                                         OutlinedButton(
                                             onClick = onRequestSignIn,
-                                            shape = RoundedCornerShape(14.dp),
+                                            shape = RoundedCornerShape(16.dp),
                                             modifier = Modifier
                                                 .weight(1f)
                                                 .height(48.dp)
@@ -822,7 +864,7 @@ fun LeaderboardScreen(
                         Card(
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                             border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
-                            shape = RoundedCornerShape(20.dp),
+                            shape = RoundedCornerShape(24.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(
@@ -856,7 +898,7 @@ fun LeaderboardScreen(
                                     }
                                     Surface(
                                         color = MaterialTheme.colorScheme.secondaryContainer,
-                                        shape = RoundedCornerShape(50)
+                                        shape = CircleShape
                                     ) {
                                         Text(
                                             text = selectedPreviewDef.id.displayName,
@@ -871,7 +913,7 @@ fun LeaderboardScreen(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(124.dp)
-                                        .clip(RoundedCornerShape(14.dp))
+                                        .clip(RoundedCornerShape(16.dp))
                                         .background(Color(selectedPreviewDef.id.baseBgColorHex).copy(alpha = 0.9f))
                                 ) {
                                     Canvas(modifier = Modifier.fillMaxSize()) {
@@ -1020,12 +1062,12 @@ fun LeaderboardScreen(
                     }
                 }
 
-                // Personal Best Card (Device Local + Ghost Replay)
+                // Personal Best Card (Device Local; launch handled by primary CTA & Rival Ghost rows)
                 if (selectedTab != LeaderboardFilterTab.CUSTOM || selectedCustomTrack != null) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.6f)),
-                        shape = RoundedCornerShape(20.dp),
+                        shape = RoundedCornerShape(24.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(
@@ -1065,83 +1107,42 @@ fun LeaderboardScreen(
                                         LeaderboardFilterTab.RACE ->
                                             "No time recorded on ${selectedTrack.displayName} (${selectedLaps}L) yet. Complete a Solo run to save your Ghost car!"
                                     },
-                                    style = MaterialTheme.typography.bodySmall,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlusJakartaFontFamily),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                        } else {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = localPb.driverName,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
+                            } else {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = localPb.driverName,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = if (selectedMode == GameMode.STUNTS) {
+                                                "4-Round Stunt Total"
+                                            } else {
+                                                "Best Lap: ${if (localPb.bestLapTimeMs > 0L) formatRaceTime(localPb.bestLapTimeMs) else "--"}"
+                                            },
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontFamily = if (selectedMode == GameMode.STUNTS) PlusJakartaFontFamily else JetBrainsMonoFontFamily
+                                            ),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                     Text(
                                         text = if (selectedMode == GameMode.STUNTS) {
-                                            "4-Round Stunt Total"
+                                            "${localPb.bestScore} PTS"
                                         } else {
-                                            "Best Lap: ${if (localPb.bestLapTimeMs > 0L) formatRaceTime(localPb.bestLapTimeMs) else "--"}"
+                                            formatRaceTime(localPb.bestRaceTimeMs)
                                         },
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        style = MaterialTheme.typography.headlineSmall.copy(fontFamily = JetBrainsMonoFontFamily),
+                                        color = adaptiveGoldColor()
                                     )
-                                }
-                                Text(
-                                    text = if (selectedMode == GameMode.STUNTS) {
-                                        "${localPb.bestScore} PTS"
-                                    } else {
-                                        formatRaceTime(localPb.bestRaceTimeMs)
-                                    },
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    color = adaptiveGoldColor()
-                                )
-                            }
-
-                                if (localGhostPlayback != null) {
-                                    FilledTonalButton(
-                                        onClick = {
-                                            when (selectedTab) {
-                                                LeaderboardFilterTab.DAILY ->
-                                                    onStartDailyChallenge(todayKey, localGhostPlayback)
-                                                LeaderboardFilterTab.DAILY_DRIFT ->
-                                                    onStartDailyDriftChallenge(todayKey, localGhostPlayback)
-                                                LeaderboardFilterTab.DRIFT ->
-                                                    onStartPureSoloForDriftTrack(
-                                                        selectedDriftTrack,
-                                                        selectedLaps,
-                                                        localGhostPlayback
-                                                    )
-                                                LeaderboardFilterTab.CUSTOM ->
-                                                    selectedCustomTrack?.let { cTrack ->
-                                                        onStartPureSoloForCustomTrack(
-                                                            cTrack,
-                                                            selectedLaps,
-                                                            localGhostPlayback
-                                                        )
-                                                    }
-                                                else ->
-                                                    onStartPureSoloForTrack(
-                                                        GameMode.RACE,
-                                                        selectedTrack,
-                                                        selectedLaps,
-                                                        localGhostPlayback
-                                                    )
-                                            }
-                                        },
-                                        shape = RoundedCornerShape(12.dp),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(48.dp)
-                                            .testTag("challenge_local_pb_ghost_button")
-                                    ) {
-                                        Icon(Icons.Default.DirectionsCar, contentDescription = null, modifier = Modifier.size(18.dp))
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Text("Race Against Your Saved Ghost Car")
-                                    }
                                 }
                             }
                         }
@@ -1175,7 +1176,7 @@ fun LeaderboardScreen(
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        shape = RoundedCornerShape(20.dp),
+                        shape = RoundedCornerShape(24.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(
@@ -1189,12 +1190,12 @@ fun LeaderboardScreen(
                             )
                             Text(
                                 text = "Sign in with Google to sync Daily Challenge & Solo times to the cloud leaderboard, notify friends on new records, and race live against their Ghost RC cars.",
-                                style = MaterialTheme.typography.bodySmall,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlusJakartaFontFamily),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             OutlinedButton(
                                 onClick = onRequestSignIn,
-                                shape = RoundedCornerShape(14.dp),
+                                shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(48.dp)
@@ -1209,7 +1210,7 @@ fun LeaderboardScreen(
                 } else if (cloudEntries.isEmpty() && !isLoadingCloud) {
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainer,
-                        shape = RoundedCornerShape(18.dp),
+                        shape = RoundedCornerShape(24.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -1219,7 +1220,7 @@ fun LeaderboardScreen(
                             } else {
                                 "No cloud records posted for this board yet — be the first to set the benchmark & upload a Ghost!"
                             },
-                            style = MaterialTheme.typography.bodySmall,
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlusJakartaFontFamily),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(18.dp)
                         )
@@ -1243,7 +1244,7 @@ fun LeaderboardScreen(
 
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceContainer,
-                                shape = RoundedCornerShape(18.dp),
+                                shape = RoundedCornerShape(16.dp),
                                 border = BorderStroke(
                                     if (isMe) 1.5.dp else 1.dp,
                                     if (isMe) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outlineVariant
@@ -1258,7 +1259,7 @@ fun LeaderboardScreen(
                                 ) {
                                     Text(
                                         text = ordinal(rank),
-                                        style = MaterialTheme.typography.titleMedium,
+                                        style = MaterialTheme.typography.titleMedium.copy(fontFamily = JetBrainsMonoFontFamily),
                                         color = medalColor,
                                         modifier = Modifier.width(40.dp)
                                     )

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -72,7 +73,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.model.CustomTrackData
@@ -83,6 +87,8 @@ import com.example.model.OnlineRoomDoc
 import com.example.model.PlayerProfile
 import com.example.model.RcCarType
 import com.example.ui.components.drawRcCar
+import com.example.ui.theme.JetBrainsMonoFontFamily
+import com.example.ui.theme.PlusJakartaFontFamily
 import com.example.ui.theme.adaptiveOnlineColor
 import com.example.util.InviteLinkHelper
 import com.example.util.SessionNotificationHelper
@@ -276,7 +282,7 @@ fun FriendsScreen(
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    shape = RoundedCornerShape(20.dp),
+                    shape = RoundedCornerShape(24.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -348,7 +354,7 @@ fun FriendsScreen(
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    shape = RoundedCornerShape(20.dp),
+                    shape = RoundedCornerShape(24.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -473,7 +479,7 @@ fun FriendsScreen(
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.6f)),
-                        shape = RoundedCornerShape(20.dp),
+                        shape = RoundedCornerShape(24.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(
@@ -603,7 +609,7 @@ fun FriendsScreen(
                 if (friends.isEmpty()) {
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainer,
-                        shape = RoundedCornerShape(18.dp),
+                        shape = RoundedCornerShape(24.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -691,7 +697,7 @@ private fun FriendStatusCard(
 
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(24.dp),
         border = BorderStroke(
             1.dp,
             if (friend.effectivelyOnline) {
@@ -714,8 +720,8 @@ private fun FriendStatusCard(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(48.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .size(46.dp)
+                        .clip(RoundedCornerShape(16.dp))
                         .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                 ) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
@@ -733,7 +739,7 @@ private fun FriendStatusCard(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(3.dp)
-                            .size(11.dp)
+                            .size(10.dp)
                             .clip(CircleShape)
                             .background(
                                 if (friend.effectivelyOnline) liveOnlineColor else MaterialTheme.colorScheme.outline
@@ -741,7 +747,7 @@ private fun FriendStatusCard(
                     )
                 }
 
-                Spacer(modifier = Modifier.width(12.dp))
+                Spacer(modifier = Modifier.width(10.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
                     Row(
@@ -753,18 +759,19 @@ private fun FriendStatusCard(
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
                         )
                         Text(
                             text = "#${friend.friendCode}",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMonoFontFamily),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
                         )
                     }
                     Text(
                         text = friend.statusLabel,
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = PlusJakartaFontFamily),
                         color = if (friend.effectivelyOnline) {
                             liveOnlineColor
                         } else {
@@ -773,6 +780,66 @@ private fun FriendStatusCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                }
+
+                Spacer(modifier = Modifier.width(4.dp))
+
+                // Compact inline "Notify" pill next to the delete icon (48.dp touch target)
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 48.dp)
+                        .clip(CircleShape)
+                        .clickable(onClick = onNotifyToJoin)
+                        .semantics {
+                            contentDescription = if (currentRoomCode != null) {
+                                "Notify ${friend.displayName} to Join #$currentRoomCode"
+                            } else {
+                                "Notify ${friend.displayName} to Join Session"
+                            }
+                        }
+                        .padding(horizontal = 2.dp, vertical = 6.dp)
+                        .testTag("notify_friend_button_${friend.friendUid}")
+                ) {
+                    Surface(
+                        color = if (friend.effectivelyOnline) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHigh
+                        },
+                        contentColor = if (friend.effectivelyOnline) {
+                            MaterialTheme.colorScheme.onPrimary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                        border = if (friend.effectivelyOnline) {
+                            null
+                        } else {
+                            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        },
+                        shape = CircleShape
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.NotificationsActive,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = if (currentRoomCode != null) "Invite" else "Notify",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontFamily = PlusJakartaFontFamily,
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
                 }
 
                 IconButton(
@@ -789,70 +856,29 @@ private fun FriendStatusCard(
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = onNotifyToJoin,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (friend.effectivelyOnline) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.secondaryContainer
-                        },
-                        contentColor = if (friend.effectivelyOnline) {
-                            MaterialTheme.colorScheme.onPrimary
-                        } else {
-                            MaterialTheme.colorScheme.onSecondaryContainer
-                        }
-                    ),
-                    shape = RoundedCornerShape(12.dp),
+            if (canJoinTheirRoom) {
+                FilledTonalButton(
+                    onClick = onJoinFriendLobby,
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
-                        .weight(1f)
+                        .fillMaxWidth()
                         .height(48.dp)
-                        .testTag("notify_friend_button_${friend.friendUid}")
+                        .testTag("join_friend_lobby_button_${friend.friendUid}")
                 ) {
                     Icon(
-                        Icons.Default.NotificationsActive,
+                        Icons.AutoMirrored.Filled.Login,
                         contentDescription = null,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (currentRoomCode != null) {
-                            "Notify to Join #$currentRoomCode"
-                        } else {
-                            "Notify to Join Session"
-                        },
-                        style = MaterialTheme.typography.labelMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        text = "Join #${friend.activeRoomCode}",
+                        style = MaterialTheme.typography.labelMedium.copy(fontFamily = PlusJakartaFontFamily)
                     )
-                }
-
-                if (canJoinTheirRoom) {
-                    FilledTonalButton(
-                        onClick = onJoinFriendLobby,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .height(48.dp)
-                            .testTag("join_friend_lobby_button_${friend.friendUid}")
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Login,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Join #${friend.activeRoomCode}",
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                    }
                 }
             }
 
+            // Reserve full-width bottom button area solely when the friend has shared custom tracks to challenge
             if (customTracks.isNotEmpty()) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(
@@ -875,7 +901,7 @@ private fun FriendStatusCard(
                         val soleTrack = customTracks.first()
                         FilledTonalButton(
                             onClick = { onChallengeCustomTrack(soleTrack) },
-                            shape = RoundedCornerShape(12.dp),
+                            shape = RoundedCornerShape(16.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(48.dp)
@@ -900,7 +926,7 @@ private fun FriendStatusCard(
                                 val cTrack = customTracks[idx]
                                 FilledTonalButton(
                                     onClick = { onChallengeCustomTrack(cTrack) },
-                                    shape = RoundedCornerShape(12.dp),
+                                    shape = RoundedCornerShape(16.dp),
                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                     modifier = Modifier
                                         .height(48.dp)

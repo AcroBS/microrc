@@ -361,7 +361,8 @@ object FriendStandingsCalculator {
             val resolvedTrackName = customTrackNames[sample.trackKey]?.takeIf { it.isNotBlank() }
                 ?: DailyChallengeCatalog.resolveTrackDisplayName(sample.trackKey).let { fallback ->
                     if (isCustom && fallback == sample.trackKey && sample.trackKey.startsWith("custom_")) {
-                        "Custom Track"
+                        val suffix = sample.trackKey.filter { it.isDigit() }.takeLast(4)
+                        if (suffix.isNotEmpty()) "Custom #$suffix" else "Custom Track"
                     } else {
                         fallback
                     }

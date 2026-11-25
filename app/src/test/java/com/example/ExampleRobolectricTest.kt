@@ -4,12 +4,14 @@ import android.content.Context
 import android.view.Surface
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
 import com.example.sensors.TiltSteeringController
@@ -410,9 +412,9 @@ class ExampleRobolectricTest {
     @Test
     fun hybridSetupScreen_configuresGameTypesAndOpensHybridLobby() {
         composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("home_scope_offline").performScrollTo().performClick()
+        composeTestRule.onNodeWithTag("home_scope_solo").performScrollTo().performClick()
         composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("home_hybrid_tour_button").performScrollTo().performClick()
+        composeTestRule.onNodeWithTag("solo_hybrid_tour_button").performScrollTo().performClick()
         composeTestRule.waitForIdle()
 
         // Verify Hybrid Event Setup screen game type switches & play order controls
@@ -504,12 +506,28 @@ class ExampleRobolectricTest {
     fun pureSoloAndLeaderboards_openZeroBotSoloLobbyAndRecordsScreen() {
         composeTestRule.waitForIdle()
 
-        // 1. Open Leaderboards & Ghosts screen from Home Online tab
+        // 1. Open Tracks & Ghosts screen from Home Online tab
         composeTestRule.onNodeWithTag("leaderboards_button").performScrollTo().performClick()
         composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Tracks & Ghosts").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Leaderboards, custom tracks & rival ghosts").assertIsDisplayed()
+        val filterRow = composeTestRule.onNodeWithTag("leaderboard_mode_filter_row").assertIsDisplayed()
+        val dailyChipY = composeTestRule.onNodeWithTag("leaderboard_mode_DAILY")
+            .assertIsDisplayed()
+            .fetchSemanticsNode().positionInRoot.y
+        filterRow.performScrollToNode(hasTestTag("leaderboard_mode_RACE"))
         composeTestRule.onNodeWithTag("leaderboard_mode_RACE").assertIsDisplayed()
+        filterRow.performScrollToNode(hasTestTag("leaderboard_mode_CUSTOM"))
         composeTestRule.onNodeWithTag("leaderboard_mode_CUSTOM").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("leaderboard_mode_STUNTS").assertIsDisplayed()
+        filterRow.performScrollToNode(hasTestTag("leaderboard_mode_STUNTS"))
+        val stuntsChipY = composeTestRule.onNodeWithTag("leaderboard_mode_STUNTS")
+            .assertIsDisplayed()
+            .fetchSemanticsNode().positionInRoot.y
+        assertTrue(
+            "Tracks & Ghosts category chips must stay in a single horizontal row ($dailyChipY vs $stuntsChipY)",
+            kotlin.math.abs(dailyChipY - stuntsChipY) < 4f
+        )
+        composeTestRule.onNodeWithTag("challenge_local_pb_ghost_button").assertDoesNotExist()
         composeTestRule.onNodeWithTag("leaderboard_start_solo_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("leaderboard_back_button").performClick()
         composeTestRule.waitForIdle()
@@ -739,7 +757,8 @@ class ExampleRobolectricTest {
                 .fetchSemanticsNodes().size
         )
 
-        // Driver tag + active car card stays at top above Mode Tabs, which stay above Streak & Standings
+        // Driver tag pill overlays hero banner above Active Car Card -> Mode Tabs -> Online Lobbies -> Challenges -> Standings
+        composeTestRule.onNodeWithTag("driver_tag_row").assertIsDisplayed()
         composeTestRule.onNodeWithTag("open_garage_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_scope_online").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_scope_offline").assertIsDisplayed()
@@ -750,47 +769,63 @@ class ExampleRobolectricTest {
         val tabsNode = composeTestRule.onNodeWithTag("home_mode_tabs_row").fetchSemanticsNode()
         val tabsTop = tabsNode.positionInRoot.y
         val tabsBottom = tabsTop + tabsNode.size.height
+        val onlineSectionNode = composeTestRule.onNodeWithTag("home_online_section").fetchSemanticsNode()
+        val onlineTop = onlineSectionNode.positionInRoot.y
+        val onlineBottom = onlineTop + onlineSectionNode.size.height
+        val challengesNode = composeTestRule.onNodeWithTag("home_challenges_section").fetchSemanticsNode()
+        val challengesTop = challengesNode.positionInRoot.y
+        val challengesBottom = challengesTop + challengesNode.size.height
         val standingsTop = composeTestRule.onNodeWithTag("home_streak_standings_card")
             .fetchSemanticsNode().positionInRoot.y
         assertTrue(
-            "Tabs must sit right below Driver Tag card ($driverBottom <= $tabsTop)",
+            "Tabs must sit right below Active Car card ($driverBottom <= $tabsTop)",
             driverBottom <= tabsTop + 2f
         )
         assertTrue(
-            "Tabs must sit above Streak & Standings ($tabsBottom <= $standingsTop)",
-            tabsBottom <= standingsTop + 2f
+            "Online Lobbies CTA must sit right below Mode Tabs ($tabsBottom <= $onlineTop)",
+            tabsBottom <= onlineTop + 2f
+        )
+        assertTrue(
+            "Challenges & Tracks grid must sit below Online Lobbies ($onlineBottom <= $challengesTop)",
+            onlineBottom <= challengesTop + 2f
+        )
+        assertTrue(
+            "Rivalry & Standings must sit below Challenges ($challengesBottom <= $standingsTop)",
+            challengesBottom <= standingsTop + 2f
         )
 
-        // 2. Online tab is default: Streak & Standings + Challenges & Rankings (no solo button) + Live Online
-        composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().assertIsDisplayed()
+        // 2. Online tab is default (Action First, Stats Second) with header friends icon
+        composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("online_play_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_challenges_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("daily_challenge_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("leaderboards_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("pure_solo_button").assertDoesNotExist()
-        composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("online_play_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_friends_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_offline_section").assertDoesNotExist()
         composeTestRule.onNodeWithTag("home_solo_section").assertDoesNotExist()
 
-        // 3. Selecting Offline (Wi-Fi) hides rankings & challenges and shows Wi-Fi lobbies + Wi-Fi Hybrid
+        // 3. Selecting Offline (Wi-Fi) shows ONLY Host Race + Join Race (no Hybrid Tour, no rankings)
         composeTestRule.onNodeWithTag("home_scope_offline").performScrollTo().performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("home_offline_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("host_race_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("join_race_button").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("home_hybrid_tour_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_hybrid_tour_button").assertDoesNotExist()
         composeTestRule.onNodeWithTag("home_streak_standings_card").assertDoesNotExist()
         composeTestRule.onNodeWithTag("home_online_section").assertDoesNotExist()
         composeTestRule.onNodeWithTag("home_challenges_section").assertDoesNotExist()
         composeTestRule.onNodeWithTag("home_solo_section").assertDoesNotExist()
 
-        // 4. Selecting Solo Play shows Solo Time Trial + optional AI bots toggle + Hybrid/Tracks shortcuts
+        // 4. Selecting Solo Play shows AI Bots toggle + Solo Time Trial/Quick Race + Hybrid Tour (no Tracks & Ghosts)
         composeTestRule.onNodeWithTag("home_scope_solo").performScrollTo().performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("home_solo_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("solo_bots_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("pure_solo_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("solo_hybrid_tour_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("solo_tracks_ghosts_button").assertDoesNotExist()
         composeTestRule.onNodeWithTag("solo_bots_switch").performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("solo_bot_count_2").performScrollTo().performClick()
@@ -798,12 +833,12 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("home_streak_standings_card").assertDoesNotExist()
         composeTestRule.onNodeWithTag("home_offline_section").assertDoesNotExist()
 
-        // 5. Switching back to Online restores Standings + Challenges & Rankings + Live Online
+        // 5. Switching back to Online restores Online Lobbies + Challenges + Standings
         composeTestRule.onNodeWithTag("home_scope_online").performScrollTo().performClick()
         composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("home_challenges_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_challenges_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_offline_section").assertDoesNotExist()
         composeTestRule.onNodeWithTag("home_solo_section").assertDoesNotExist()
     }

@@ -120,10 +120,30 @@ object DailyChallengeCatalog {
         if (dateKey != null) {
             return "Daily GP (${displayDateLabel(dateKey)})"
         }
+        formatProceduralTrackNameOrNull(trackKey)?.let { return it }
         return when (trackKey) {
-            "STUNT_GAUNTLET" -> "Stunt Gauntlet"
+            "STUNT_GAUNTLET", "STUNTS_GAUNTLET" -> "Stunt Gauntlet"
             else -> runCatching { TrackId.valueOf(trackKey).displayName }.getOrDefault(trackKey)
         }
+    }
+
+    fun formatProceduralTrackNameOrNull(trackKey: String?): String? {
+        if (trackKey.isNullOrBlank()) return null
+        val isDriftProc = trackKey.startsWith("drift_rand_")
+        val isRaceProc = trackKey.startsWith("rand_")
+        if (!isDriftProc && !isRaceProc) return null
+        val rawBody = when {
+            isDriftProc -> trackKey.removePrefix("drift_rand_")
+            else -> trackKey.removePrefix("rand_")
+        }
+        val primarySegment = rawBody.substringBefore('_')
+        val digits = primarySegment.filter { it.isDigit() }.ifEmpty { rawBody.filter { it.isDigit() } }
+        val shortCode = when {
+            digits.length >= 7 -> digits.drop(digits.length - 7).take(4)
+            digits.isNotEmpty() -> digits.takeLast(4).padStart(4, '0')
+            else -> (trackKey.hashCode() and 0x7FFFFFFF).toString().takeLast(4).padStart(4, '0')
+        }
+        return if (isDriftProc) "Procedural Drift #$shortCode" else "Procedural #$shortCode"
     }
 
     fun millisUntilNextUtcReset(epochMillis: Long = System.currentTimeMillis()): Long {

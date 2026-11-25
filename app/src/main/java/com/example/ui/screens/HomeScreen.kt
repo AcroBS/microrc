@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Shuffle
@@ -79,6 +80,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
@@ -100,15 +102,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.FriendBoardStandingItem
 import com.example.data.FriendCrewMemberRank
@@ -117,6 +123,8 @@ import com.example.data.PlayStreakState
 import com.example.model.GameMode
 import com.example.model.PlayerProfile
 import com.example.ui.components.drawRcCar
+import com.example.ui.theme.JetBrainsMonoFontFamily
+import com.example.ui.theme.PlusJakartaFontFamily
 import com.example.ui.theme.adaptiveGoldColor
 import com.example.ui.theme.adaptiveOnlineColor
 import com.example.util.AppUpdateUiState
@@ -215,12 +223,12 @@ fun HomeScreen(
                     modifier = Modifier.widthIn(max = if (isWideScreen) 860.dp else 640.dp),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    // 1. Compact Material You Hero Banner
+                    // 1. Compact Material You Hero Banner + Overlaid Driver Tag Pill
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(112.dp)
-                            .clip(MaterialTheme.shapes.large)
+                            .height(118.dp)
+                            .clip(RoundedCornerShape(24.dp))
                     ) {
                         Image(
                             painter = painterResource(id = R.drawable.img_hero_paddock),
@@ -234,12 +242,71 @@ fun HomeScreen(
                                 .background(
                                     Brush.verticalGradient(
                                         colors = listOf(
-                                            Color.Black.copy(alpha = 0.14f),
-                                            Color(0xFF0B0E14).copy(alpha = 0.88f)
+                                            Color.Black.copy(alpha = 0.22f),
+                                            Color(0xFF0B0E14).copy(alpha = 0.90f)
                                         )
                                     )
                                 )
                         )
+
+                        // Compact semi-transparent Driver Tag pill overlay in top-right corner
+                        Box(
+                            contentAlignment = Alignment.TopEnd,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .defaultMinSize(minHeight = 48.dp)
+                                .clip(CircleShape)
+                                .clickable { showNameDialog = true }
+                                .padding(10.dp)
+                                .testTag("driver_tag_row")
+                        ) {
+                            Surface(
+                                color = Color(0xFF0E131B).copy(alpha = 0.72f),
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+                                shape = CircleShape
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                                    modifier = Modifier.padding(start = 6.dp, end = 10.dp, top = 5.dp, bottom = 5.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .clip(CircleShape)
+                                            .background(driverBadgeBg),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = profile.name.take(1).uppercase(),
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontFamily = PlusJakartaFontFamily,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.sp
+                                            ),
+                                            color = driverBadgeFg
+                                        )
+                                    }
+                                    Text(
+                                        text = profile.name,
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            fontFamily = PlusJakartaFontFamily,
+                                            fontWeight = FontWeight.SemiBold
+                                        ),
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Icon(
+                                        Icons.Default.Edit,
+                                        contentDescription = "Edit Driver Name",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                            }
+                        }
+
                         Column(
                             modifier = Modifier
                                 .align(Alignment.BottomStart)
@@ -252,7 +319,7 @@ fun HomeScreen(
                             )
                             Text(
                                 text = "Top-down RC racing & arenas",
-                                style = MaterialTheme.typography.bodySmall,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlusJakartaFontFamily),
                                 color = Color.White.copy(alpha = 0.84f)
                             )
                         }
@@ -267,134 +334,116 @@ fun HomeScreen(
                         )
                     }
 
-                    // 2. Driver Tag + Active RC Car Card (compact at top)
+                    // 2. Active RC Car Card (compact above the fold with scaled car sprite + drop shadow + inline stat bars)
                     HomeSectionCard(
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("home_driver_card")
                     ) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
+                            Box(
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .defaultMinSize(minHeight = 48.dp)
-                                    .clip(MaterialTheme.shapes.small)
-                                    .clickable { showNameDialog = true }
-                                    .padding(horizontal = 4.dp, vertical = 4.dp)
-                                    .testTag("driver_tag_row")
+                                    .size(72.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(driverBadgeBg),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = profile.name.take(1).uppercase(),
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = driverBadgeFg
+                                Canvas(modifier = Modifier.fillMaxSize()) {
+                                    val cx = size.width / 2f
+                                    val cy = size.height / 2f
+                                    // Subtle drop shadow under the spinning RC car
+                                    drawOval(
+                                        brush = Brush.radialGradient(
+                                            colors = listOf(
+                                                Color.Black.copy(alpha = 0.34f),
+                                                Color.Transparent
+                                            ),
+                                            center = Offset(cx + 2.dp.toPx(), cy + 5.dp.toPx()),
+                                            radius = size.minDimension * 0.44f
+                                        ),
+                                        topLeft = Offset(cx - size.minDimension * 0.40f, cy - size.minDimension * 0.34f + 4.dp.toPx()),
+                                        size = Size(size.minDimension * 0.80f, size.minDimension * 0.72f)
                                     )
-                                }
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "DRIVER TAG",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    val carScale = ((size.minDimension * 0.78f) / 48f).coerceIn(1.75f, 3.3f)
+                                    drawRcCar(
+                                        x = cx,
+                                        y = cy,
+                                        angleRad = spinAngle,
+                                        carType = profile.carType,
+                                        primaryColor = Color(profile.primaryColorArgb),
+                                        accentColor = Color(profile.accentColorArgb),
+                                        scale = carScale
                                     )
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = profile.name,
-                                            style = MaterialTheme.typography.titleMedium,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Icon(
-                                            Icons.Default.Edit,
-                                            contentDescription = "Edit Driver Name",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
                                 }
                             }
-
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(64.dp)
-                                        .clip(MaterialTheme.shapes.medium)
-                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                                    contentAlignment = Alignment.Center
+                                Text(
+                                    text = profile.carType.displayName,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Canvas(modifier = Modifier.fillMaxSize()) {
-                                        drawRcCar(
-                                            x = size.width / 2f,
-                                            y = size.height / 2f,
-                                            angleRad = spinAngle,
-                                            carType = profile.carType,
-                                            primaryColor = Color(profile.primaryColorArgb),
-                                            accentColor = Color(profile.accentColorArgb),
-                                            scale = 1.05f
-                                        )
-                                    }
-                                }
-                                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                                    Text(
-                                        text = profile.carType.displayName,
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                    CompactStatBar(
+                                        label = "SPD",
+                                        value = profile.carType.topSpeedStat,
+                                        accentColor = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.weight(1f)
                                     )
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        MiniStatBadge(
-                                            label = "SPD ${profile.carType.topSpeedStat}",
-                                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                        )
-                                        MiniStatBadge(
-                                            label = "HDL ${profile.carType.handlingStat}",
-                                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                                        )
-                                        MiniStatBadge(
-                                            label = "GRP ${profile.carType.gripStat}",
-                                            containerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer
-                                        )
-                                    }
+                                    CompactStatBar(
+                                        label = "HDL",
+                                        value = profile.carType.handlingStat,
+                                        accentColor = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    CompactStatBar(
+                                        label = "GRP",
+                                        value = profile.carType.gripStat,
+                                        accentColor = MaterialTheme.colorScheme.tertiary,
+                                        modifier = Modifier.weight(1f)
+                                    )
                                 }
-                                FilledTonalButton(
-                                    onClick = onOpenGarage,
-                                    shape = MaterialTheme.shapes.medium,
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                                    modifier = Modifier
-                                        .height(48.dp)
-                                        .testTag("open_garage_button")
-                                ) {
-                                    Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Garage", style = MaterialTheme.typography.labelLarge)
-                                }
+                            }
+                            FilledTonalButton(
+                                onClick = onOpenGarage,
+                                shape = RoundedCornerShape(16.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    contentColor = MaterialTheme.colorScheme.onSurface
+                                ),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                                modifier = Modifier
+                                    .height(48.dp)
+                                    .testTag("open_garage_button")
+                            ) {
+                                Icon(Icons.Default.Build, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Garage",
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontFamily = PlusJakartaFontFamily,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                )
                             }
                         }
                     }
 
-                    // 3. Mode Switcher (directly below Driver Tag + Car): Online | Offline (Wi-Fi) | Solo Play
+                    // 3. Mode Switcher (directly below Active Car Card): Online | Offline (Wi-Fi) | Solo Play
                     SingleChoiceSegmentedButtonRow(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -424,7 +473,11 @@ fun HomeScreen(
                             ) {
                                 Text(
                                     text = scopeOption.label,
-                                    style = MaterialTheme.typography.labelMedium,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontFamily = PlusJakartaFontFamily,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 13.sp
+                                    ),
                                     maxLines = 1,
                                     softWrap = false,
                                     overflow = TextOverflow.Ellipsis
@@ -433,80 +486,48 @@ fun HomeScreen(
                         }
                     }
 
-                    // 4. Mode Content:
-                    //    - Online: Streak & Friends Rankings + Challenges & Rankings + Live Online Multiplayer
-                    //    - Offline (Wi-Fi): Local Wi-Fi Host/Join & Wi-Fi Hybrid Tour
-                    //    - Solo Play: Time Trial / AI Bots (optional) / Solo Hybrid & Leaderboards
+                    // 4. Mode Content (Action First, Stats Second):
+                    //    - Online: Online Lobbies CTA -> 2-col Daily grid + Tracks & Ghosts -> Rivalry & Leaderboards
+                    //    - Offline (Wi-Fi): Host Race + Join Race side-by-side
+                    //    - Solo Play: AI Bots toggle -> Solo Time Trial / Quick Race CTA -> Hybrid Tour
                     when (modeScope) {
                         HomeModeScope.ONLINE -> {
+                            LiveOnlineGameplaySection(
+                                modifier = Modifier.fillMaxWidth(),
+                                onOpenOnlinePlay = onOpenOnlinePlay
+                            )
+
+                            ChallengesAndRankingsSection(
+                                modifier = Modifier.fillMaxWidth(),
+                                onOpenDailyChallenge = onOpenDailyChallenge,
+                                onOpenLeaderboards = onOpenLeaderboards,
+                                dailyChallengeTitle = dailyChallengeTitle,
+                                dailyChallengeResetLabel = dailyChallengeResetLabel,
+                                dailyBestTimeMs = dailyBestTimeMs,
+                                onOpenDailyDriftChallenge = onOpenDailyDriftChallenge,
+                                dailyDriftTitle = dailyDriftTitle,
+                                dailyDriftBestTimeMs = dailyDriftBestTimeMs
+                            )
+
                             HomeMomentumAndStandingsCard(
                                 playStreak = playStreak,
                                 isSignedIn = isSignedIn,
                                 friendsCount = friendsCount,
+                                onlineFriendsCount = onlineFriendsCount,
+                                pendingRequestsCount = pendingRequestsCount,
                                 localRecordsCount = localRecordsCount,
                                 standings = friendStandings,
                                 onlineAccent = onlineAccent,
                                 onOpenFriends = onOpenFriends,
                                 onOpenStandingsBoard = onOpenStandingsBoard
                             )
-
-                            if (isWideScreen) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                                    verticalAlignment = Alignment.Top
-                                ) {
-                                    ChallengesAndRankingsSection(
-                                        modifier = Modifier.weight(1.1f),
-                                        onOpenDailyChallenge = onOpenDailyChallenge,
-                                        onOpenLeaderboards = onOpenLeaderboards,
-                                        dailyChallengeTitle = dailyChallengeTitle,
-                                        dailyChallengeSubtitle = dailyChallengeSubtitle,
-                                        dailyChallengeResetLabel = dailyChallengeResetLabel,
-                                        dailyBestTimeMs = dailyBestTimeMs,
-                                        onOpenDailyDriftChallenge = onOpenDailyDriftChallenge,
-                                        dailyDriftTitle = dailyDriftTitle,
-                                        dailyDriftBestTimeMs = dailyDriftBestTimeMs
-                                    )
-                                    LiveOnlineGameplaySection(
-                                        modifier = Modifier.weight(0.9f),
-                                        onOpenOnlinePlay = onOpenOnlinePlay,
-                                        onOpenFriends = onOpenFriends,
-                                        onlineFriendsCount = onlineFriendsCount,
-                                        pendingRequestsCount = pendingRequestsCount,
-                                        onlineAccent = onlineAccent
-                                    )
-                                }
-                            } else {
-                                ChallengesAndRankingsSection(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    onOpenDailyChallenge = onOpenDailyChallenge,
-                                    onOpenLeaderboards = onOpenLeaderboards,
-                                    dailyChallengeTitle = dailyChallengeTitle,
-                                    dailyChallengeSubtitle = dailyChallengeSubtitle,
-                                    dailyChallengeResetLabel = dailyChallengeResetLabel,
-                                    dailyBestTimeMs = dailyBestTimeMs,
-                                    onOpenDailyDriftChallenge = onOpenDailyDriftChallenge,
-                                    dailyDriftTitle = dailyDriftTitle,
-                                    dailyDriftBestTimeMs = dailyDriftBestTimeMs
-                                )
-                                LiveOnlineGameplaySection(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    onOpenOnlinePlay = onOpenOnlinePlay,
-                                    onOpenFriends = onOpenFriends,
-                                    onlineFriendsCount = onlineFriendsCount,
-                                    pendingRequestsCount = pendingRequestsCount,
-                                    onlineAccent = onlineAccent
-                                )
-                            }
                         }
 
                         HomeModeScope.OFFLINE -> {
                             OfflineEntrySection(
                                 modifier = Modifier.fillMaxWidth(),
                                 onHostRace = onHostRace,
-                                onJoinRace = onJoinRace,
-                                onOpenHybridSetup = onOpenHybridSetup
+                                onJoinRace = onJoinRace
                             )
                         }
 
@@ -515,8 +536,7 @@ fun HomeScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 onPureSoloRace = onPureSoloRace,
                                 onSoloRaceWithBots = onSoloRaceWithBots,
-                                onOpenHybridSetup = onOpenHybridSetup,
-                                onOpenLeaderboards = onOpenLeaderboards
+                                onOpenHybridSetup = onOpenHybridSetup
                             )
                         }
                     }
@@ -569,7 +589,7 @@ private fun HomeSectionCard(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         ),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
-        shape = MaterialTheme.shapes.large,
+        shape = RoundedCornerShape(24.dp),
         modifier = modifier,
         content = content
     )
@@ -581,7 +601,6 @@ private fun ChallengesAndRankingsSection(
     onOpenDailyChallenge: () -> Unit,
     onOpenLeaderboards: () -> Unit,
     dailyChallengeTitle: String,
-    dailyChallengeSubtitle: String,
     dailyChallengeResetLabel: String,
     dailyBestTimeMs: Long?,
     onOpenDailyDriftChallenge: () -> Unit = {},
@@ -601,214 +620,302 @@ private fun ChallengesAndRankingsSection(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Surface(
-                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                    shape = MaterialTheme.shapes.small,
-                    modifier = Modifier.size(36.dp)
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = CircleShape,
+                    modifier = Modifier.size(34.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Default.EmojiEvents,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            tint = MaterialTheme.colorScheme.tertiary,
                             modifier = Modifier.size(18.dp)
                         )
                     }
                 }
                 Text(
-                    text = "CHALLENGES & RANKINGS",
+                    text = "DAILY CHALLENGES & GHOSTS",
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
             }
 
-            // 1. Daily Race Challenge Card
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
-                ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
-                shape = MaterialTheme.shapes.medium,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(MaterialTheme.shapes.medium)
-                    .clickable(onClick = onOpenDailyChallenge)
-                    .testTag("daily_challenge_button")
+            // 2-column grid for Daily Challenge & Daily Drift
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Row(
+                // Daily Challenge tile
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        .weight(1f)
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable(onClick = onOpenDailyChallenge)
+                        .testTag("daily_challenge_button")
                 ) {
-                    Box(
+                    Column(
                         modifier = Modifier
-                            .size(40.dp)
-                            .clip(MaterialTheme.shapes.small)
-                            .background(MaterialTheme.colorScheme.tertiary.copy(alpha = 0.18f)),
-                        contentAlignment = Alignment.Center
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            Icons.Default.Today,
-                            contentDescription = "Daily Race Challenge",
-                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    Column(modifier = Modifier.weight(1f)) {
                         Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "DAILY CHALLENGE",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
-                            )
+                            Surface(
+                                color = MaterialTheme.colorScheme.tertiaryContainer,
+                                shape = CircleShape,
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Today,
+                                        contentDescription = "Daily Challenge",
+                                        tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
                             if (dailyChallengeResetLabel.isNotBlank()) {
                                 Surface(
-                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.35f),
-                                    shape = RoundedCornerShape(50)
+                                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    shape = CircleShape
                                 ) {
                                     Text(
                                         text = dailyChallengeResetLabel,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontFamily = JetBrainsMonoFontFamily
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
                                     )
                                 }
                             }
                         }
-                        Text(
-                            text = "$dailyChallengeTitle • $dailyChallengeSubtitle",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Icon(
-                            Icons.Default.Bolt,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Text(
-                            text = if (dailyBestTimeMs != null && dailyBestTimeMs > 0L) {
-                                String.format(Locale.US, "%.2fs", dailyBestTimeMs / 1000f)
-                            } else {
-                                "RACE"
-                            },
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onTertiaryContainer
-                        )
-                    }
-                }
-            }
 
-            // 1b. Daily Drift Challenge Card (modular / gated via DriftFeature.ENABLED)
-            if (com.example.drift.DriftFeature.ENABLED) {
-                Card(
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer
-                    ),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(MaterialTheme.shapes.medium)
-                        .clickable(onClick = onOpenDailyDriftChallenge)
-                        .testTag("daily_drift_challenge_button")
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(MaterialTheme.shapes.small)
-                                .background(MaterialTheme.colorScheme.secondary.copy(alpha = 0.18f)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.Speed,
-                                contentDescription = "Daily Drift Challenge",
-                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
-                                text = "DAILY DRIFT",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                text = "Daily Challenge",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = "$dailyDriftTitle • Obstacles • 1 Nitro/Lap",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f),
+                                text = dailyChallengeTitle,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlusJakartaFontFamily),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Icon(
-                                Icons.Default.Bolt,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.size(18.dp)
-                            )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text(
-                                text = if (dailyDriftBestTimeMs != null && dailyDriftBestTimeMs > 0L) {
-                                    String.format(Locale.US, "%.2fs", dailyDriftBestTimeMs / 1000f)
+                                text = if (dailyBestTimeMs != null && dailyBestTimeMs > 0L) {
+                                    "PB ${String.format(Locale.US, "%.2fs", dailyBestTimeMs / 1000f)}"
                                 } else {
-                                    "DRIFT"
+                                    "No PB yet"
                                 },
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontFamily = if (dailyBestTimeMs != null && dailyBestTimeMs > 0L) {
+                                        JetBrainsMonoFontFamily
+                                    } else {
+                                        PlusJakartaFontFamily
+                                    }
+                                ),
+                                color = MaterialTheme.colorScheme.tertiary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
+                            Icon(
+                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Daily Drift tile
+                if (com.example.drift.DriftFeature.ENABLED) {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable(onClick = onOpenDailyDriftChallenge)
+                            .testTag("daily_drift_challenge_button")
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                    shape = CircleShape,
+                                    modifier = Modifier.size(30.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Default.Speed,
+                                            contentDescription = "Daily Drift",
+                                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    shape = CircleShape
+                                ) {
+                                    Text(
+                                        text = "DRIFT",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontFamily = PlusJakartaFontFamily,
+                                            fontWeight = FontWeight.SemiBold
+                                        ),
+                                        color = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
+
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = "Daily Drift",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = dailyDriftTitle,
+                                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlusJakartaFontFamily),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (dailyDriftBestTimeMs != null && dailyDriftBestTimeMs > 0L) {
+                                        "PB ${String.format(Locale.US, "%.2fs", dailyDriftBestTimeMs / 1000f)}"
+                                    } else {
+                                        "No PB yet"
+                                    },
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontFamily = if (dailyDriftBestTimeMs != null && dailyDriftBestTimeMs > 0L) {
+                                            JetBrainsMonoFontFamily
+                                        } else {
+                                            PlusJakartaFontFamily
+                                        }
+                                    ),
+                                    color = MaterialTheme.colorScheme.secondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Icon(
+                                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            // 2. Consolidated Track Leaderboards & Ghosts (Solo moved to dedicated Solo Play tab)
-            FilledTonalButton(
-                onClick = onOpenLeaderboards,
-                shape = MaterialTheme.shapes.medium,
-                colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+            // Full-width Tracks & Ghosts accent card
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                 ),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.45f)),
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(58.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable(onClick = onOpenLeaderboards)
                     .testTag("leaderboards_button")
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 56.dp)
+                        .padding(horizontal = 14.dp, vertical = 11.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f)
                     ) {
-                        Icon(Icons.Default.Leaderboard, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Surface(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = CircleShape,
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.Leaderboard,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                         Column {
-                            Text("Tracks & Ghosts", style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text("Rankings, custom tracks & ghost records", style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                text = "Tracks & Ghosts",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "Leaderboards, custom tracks & rival ghosts",
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlusJakartaFontFamily),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
                     }
                     Icon(
                         Icons.AutoMirrored.Filled.KeyboardArrowRight,
                         contentDescription = null,
+                        tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -820,11 +927,7 @@ private fun ChallengesAndRankingsSection(
 @Composable
 private fun LiveOnlineGameplaySection(
     modifier: Modifier = Modifier,
-    onOpenOnlinePlay: () -> Unit,
-    onOpenFriends: () -> Unit,
-    onlineFriendsCount: Int,
-    pendingRequestsCount: Int,
-    onlineAccent: Color
+    onOpenOnlinePlay: () -> Unit
 ) {
     HomeSectionCard(
         modifier = modifier.testTag("home_online_section")
@@ -839,15 +942,15 @@ private fun LiveOnlineGameplaySection(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    shape = MaterialTheme.shapes.small,
-                    modifier = Modifier.size(36.dp)
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = CircleShape,
+                    modifier = Modifier.size(34.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Default.Groups,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -862,13 +965,13 @@ private fun LiveOnlineGameplaySection(
             Button(
                 onClick = onOpenOnlinePlay,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.secondary,
-                    contentColor = MaterialTheme.colorScheme.onSecondary
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 ),
-                shape = MaterialTheme.shapes.medium,
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(58.dp)
+                    .height(60.dp)
                     .testTag("online_play_button")
             ) {
                 Row(
@@ -884,9 +987,9 @@ private fun LiveOnlineGameplaySection(
                         Column {
                             Text("Online Lobbies (2–4P)", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                text = "Host or join live rooms",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSecondary.copy(alpha = 0.85f)
+                                text = "Host or join live multiplayer rooms",
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlusJakartaFontFamily),
+                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
                             )
                         }
                     }
@@ -897,59 +1000,6 @@ private fun LiveOnlineGameplaySection(
                     )
                 }
             }
-
-            FilledTonalButton(
-                onClick = onOpenFriends,
-                shape = MaterialTheme.shapes.medium,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .testTag("home_friends_button")
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Icon(Icons.Default.People, contentDescription = null, modifier = Modifier.size(20.dp))
-                        Column {
-                            Text("Friends & Live Invites", style = MaterialTheme.typography.titleSmall)
-                            Text(
-                                text = when {
-                                    onlineFriendsCount > 0 -> "$onlineFriendsCount online • Invite to live lobby"
-                                    pendingRequestsCount > 0 -> "$pendingRequestsCount friend request waiting"
-                                    else -> "Friend codes & crew status"
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                    if (onlineFriendsCount > 0 || pendingRequestsCount > 0) {
-                        Surface(
-                            color = if (onlineFriendsCount > 0) {
-                                onlineAccent.copy(alpha = 0.16f)
-                            } else {
-                                MaterialTheme.colorScheme.primaryContainer
-                            },
-                            shape = RoundedCornerShape(50)
-                        ) {
-                            Text(
-                                text = if (onlineFriendsCount > 0) "$onlineFriendsCount ONLINE" else "$pendingRequestsCount NEW",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (onlineFriendsCount > 0) onlineAccent else MaterialTheme.colorScheme.onPrimaryContainer,
-                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp)
-                            )
-                        }
-                    }
-                }
-            }
         }
     }
 }
@@ -958,8 +1008,7 @@ private fun LiveOnlineGameplaySection(
 private fun OfflineEntrySection(
     modifier: Modifier = Modifier,
     onHostRace: () -> Unit,
-    onJoinRace: () -> Unit,
-    onOpenHybridSetup: () -> Unit
+    onJoinRace: () -> Unit
 ) {
     HomeSectionCard(
         modifier = modifier.testTag("home_offline_section")
@@ -974,15 +1023,15 @@ private fun OfflineEntrySection(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = MaterialTheme.shapes.small,
-                    modifier = Modifier.size(36.dp)
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = CircleShape,
+                    modifier = Modifier.size(34.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Default.Wifi,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -994,7 +1043,7 @@ private fun OfflineEntrySection(
                 )
             }
 
-            // Wi-Fi Lobby Entry Points
+            // Only two side-by-side cards: Host Race (primary CTA) & Join Race (secondary surfaceContainerHigh card)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -1005,72 +1054,68 @@ private fun OfflineEntrySection(
                         containerColor = MaterialTheme.colorScheme.primary,
                         contentColor = MaterialTheme.colorScheme.onPrimary
                     ),
-                    shape = MaterialTheme.shapes.medium,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .height(64.dp)
+                        .height(68.dp)
                         .testTag("host_race_button")
                 ) {
                     Icon(Icons.Default.Hub, contentDescription = null, modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Column {
-                        Text("Host Race", style = MaterialTheme.typography.labelLarge, maxLines = 1)
-                        Text("Wi-Fi Lobby", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                        Text("Host Race", style = MaterialTheme.typography.titleSmall, maxLines = 1)
+                        Text(
+                            text = "Wi-Fi Lobby",
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlusJakartaFontFamily),
+                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f),
+                            maxLines = 1
+                        )
                     }
                 }
 
-                FilledTonalButton(
-                    onClick = onJoinRace,
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                     ),
-                    shape = MaterialTheme.shapes.medium,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .height(64.dp)
+                        .height(68.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .clickable(onClick = onJoinRace)
                         .testTag("join_race_button")
                 ) {
-                    Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Column {
-                        Text("Join Race", style = MaterialTheme.typography.labelLarge, maxLines = 1)
-                        Text("Scan Wi-Fi", style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                    }
-                }
-            }
-
-            FilledTonalButton(
-                onClick = onOpenHybridSetup,
-                shape = MaterialTheme.shapes.medium,
-                colors = ButtonDefaults.filledTonalButtonColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    contentColor = MaterialTheme.colorScheme.onSurface
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .testTag("home_hybrid_tour_button")
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
                     Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.Center
                     ) {
-                        Icon(Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text("Hybrid Tour (Wi-Fi)", style = MaterialTheme.typography.labelLarge)
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Join Race",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1
+                            )
+                            Text(
+                                text = "Scan Wi-Fi",
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlusJakartaFontFamily),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        }
                     }
-                    Text(
-                        text = "Circuit • Arena • Stunts",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
             }
         }
@@ -1082,8 +1127,7 @@ private fun SoloPlaySection(
     modifier: Modifier = Modifier,
     onPureSoloRace: () -> Unit,
     onSoloRaceWithBots: (Int) -> Unit,
-    onOpenHybridSetup: () -> Unit,
-    onOpenLeaderboards: () -> Unit
+    onOpenHybridSetup: () -> Unit
 ) {
     var includeBots by rememberSaveable { mutableStateOf(false) }
     var botCount by rememberSaveable { mutableIntStateOf(3) }
@@ -1101,15 +1145,15 @@ private fun SoloPlaySection(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = MaterialTheme.shapes.small,
-                    modifier = Modifier.size(36.dp)
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = CircleShape,
+                    modifier = Modifier.size(34.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             Icons.Default.DirectionsCar,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -1121,10 +1165,10 @@ private fun SoloPlaySection(
                 )
             }
 
-            // Optional AI Bots selector card
+            // 1. Include AI Bots toggle/stepper at the top
             Surface(
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = RoundedCornerShape(16.dp),
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -1153,9 +1197,9 @@ private fun SoloPlaySection(
                                 text = if (includeBots) {
                                     "Race with $botCount AI opponent${if (botCount == 1) "" else "s"}"
                                 } else {
-                                    "0 Bots • Time Trial & Ghost recording"
+                                    "0 Bots • Pure solo driving"
                                 },
-                                style = MaterialTheme.typography.bodySmall,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlusJakartaFontFamily),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -1178,7 +1222,10 @@ private fun SoloPlaySection(
                                     label = {
                                         Text(
                                             text = "$count Bot${if (count == 1) "" else "s"}",
-                                            style = MaterialTheme.typography.labelMedium
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                fontFamily = PlusJakartaFontFamily,
+                                                fontWeight = FontWeight.Medium
+                                            )
                                         )
                                     },
                                     modifier = Modifier
@@ -1191,6 +1238,7 @@ private fun SoloPlaySection(
                 }
             }
 
+            // 2. Primary CTA: Solo Time Trial / Quick Race
             Button(
                 onClick = {
                     if (includeBots) {
@@ -1203,10 +1251,10 @@ private fun SoloPlaySection(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary
                 ),
-                shape = MaterialTheme.shapes.medium,
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(60.dp)
+                    .height(62.dp)
                     .testTag(if (includeBots) "solo_race_button" else "pure_solo_button")
             ) {
                 Row(
@@ -1216,7 +1264,8 @@ private fun SoloPlaySection(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
                     ) {
                         Icon(
                             imageVector = if (includeBots) Icons.Default.Speed else Icons.Default.Timer,
@@ -1225,60 +1274,77 @@ private fun SoloPlaySection(
                         )
                         Column {
                             Text(
-                                text = if (includeBots) {
-                                    "Solo Race vs $botCount AI Bot${if (botCount == 1) "" else "s"}"
-                                } else {
-                                    "Solo Time Trial (0 Bots)"
-                                },
-                                style = MaterialTheme.typography.titleMedium
+                                text = "Solo Time Trial / Quick Race",
+                                style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = if (includeBots) {
-                                    "Pick track & mode in solo paddock"
-                                } else {
-                                    "Set Personal Best times & record Ghosts"
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
+                                text = "Practice lines or race against AI bots",
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlusJakartaFontFamily),
+                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
-                    Icon(
-                        Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Surface(
+                        color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.18f),
+                        shape = CircleShape
+                    ) {
+                        Text(
+                            text = if (includeBots) "$botCount BOT${if (botCount == 1) "" else "S"}" else "0 BOTS",
+                            style = MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMonoFontFamily),
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            // 3. Hybrid Tour secondary card below (Tracks & Ghosts removed from Solo Play)
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .clickable(onClick = onOpenHybridSetup)
+                    .testTag("solo_hybrid_tour_button")
             ) {
-                FilledTonalButton(
-                    onClick = onOpenLeaderboards,
-                    shape = MaterialTheme.shapes.medium,
+                Row(
                     modifier = Modifier
-                        .weight(1f)
-                        .height(52.dp)
-                        .testTag("solo_tracks_ghosts_button")
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 52.dp)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Icon(Icons.Default.Leaderboard, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Tracks & Ghosts", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-
-                FilledTonalButton(
-                    onClick = onOpenHybridSetup,
-                    shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(52.dp)
-                        .testTag("solo_hybrid_tour_button")
-                ) {
-                    Icon(Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text("Hybrid Tour", style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Shuffle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Hybrid Tour",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Text(
+                        text = "Circuit • Arena • Stunts",
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlusJakartaFontFamily),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
@@ -1385,6 +1451,8 @@ private fun HomeMomentumAndStandingsCard(
     playStreak: PlayStreakState,
     isSignedIn: Boolean,
     friendsCount: Int,
+    onlineFriendsCount: Int = 0,
+    pendingRequestsCount: Int = 0,
     localRecordsCount: Int,
     standings: FriendStandingsSummary?,
     onlineAccent: Color,
@@ -1397,6 +1465,7 @@ private fun HomeMomentumAndStandingsCard(
     val isMilestone = playStreak.isFiveDayMilestone
     var milestoneDismissed by rememberSaveable(playStreak.currentStreakDays) { mutableStateOf(false) }
     var showAllFriends by rememberSaveable { mutableStateOf(false) }
+    var showAllStandings by rememberSaveable { mutableStateOf(false) }
 
     val milestoneAnim = remember(playStreak.currentStreakDays) { Animatable(0f) }
     LaunchedEffect(playStreak.currentStreakDays, isMilestone) {
@@ -1423,7 +1492,7 @@ private fun HomeMomentumAndStandingsCard(
             .testTag("home_streak_standings_card")
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
+            modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // Welcome Animation Banner for every 5-day streak milestone (5, 10, 15, ...)
@@ -1434,15 +1503,14 @@ private fun HomeMomentumAndStandingsCard(
                 Surface(
                     color = MaterialTheme.colorScheme.tertiaryContainer,
                     border = BorderStroke(1.5.dp, goldAccent.copy(alpha = 0.75f)),
-                    shape = MaterialTheme.shapes.medium,
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("home_streak_milestone_banner")
                 ) {
                     Box(modifier = Modifier.fillMaxWidth()) {
                         Canvas(
-                            modifier = Modifier
-                                .matchParentSize()
+                            modifier = Modifier.matchParentSize()
                         ) {
                             val cx = size.width * 0.12f
                             val cy = size.height * 0.5f
@@ -1503,7 +1571,7 @@ private fun HomeMomentumAndStandingsCard(
                                 )
                                 Text(
                                     text = "5-day tier unlocked — keep your racing momentum rolling!",
-                                    style = MaterialTheme.typography.labelSmall,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = PlusJakartaFontFamily),
                                     color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.86f),
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis
@@ -1527,41 +1595,50 @@ private fun HomeMomentumAndStandingsCard(
                 }
             }
 
-            // Top summary row: Play Streak Counter + Informational Overall All-Friends Rank
+            // 2-column summary tiles: Streak + Friends Rank (styled consistently with surfaceContainerHigh & 16.dp)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
-                    color = if (playStreak.activeToday) {
-                        MaterialTheme.colorScheme.tertiaryContainer
-                    } else if (streakActive) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerHigh
-                    },
-                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(
+                        1.dp,
+                        if (playStreak.activeToday) {
+                            goldAccent.copy(alpha = 0.55f)
+                        } else {
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                        }
+                    ),
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .weight(1f)
                         .testTag("home_streak_badge")
                 ) {
-                    val streakFg = when {
-                        playStreak.activeToday -> MaterialTheme.colorScheme.onTertiaryContainer
-                        streakActive -> MaterialTheme.colorScheme.onPrimaryContainer
-                        else -> MaterialTheme.colorScheme.onSurface
-                    }
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.LocalFireDepartment,
-                            contentDescription = "Daily Play Streak",
-                            tint = if (streakActive) goldAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(22.dp)
-                        )
+                        Surface(
+                            color = if (streakActive) {
+                                goldAccent.copy(alpha = 0.18f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerHighest
+                            },
+                            shape = CircleShape,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.LocalFireDepartment,
+                                    contentDescription = "Daily Play Streak",
+                                    tint = if (streakActive) goldAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                         Column {
                             Text(
                                 text = when {
@@ -1570,7 +1647,7 @@ private fun HomeMomentumAndStandingsCard(
                                     else -> "0 Day Streak"
                                 },
                                 style = MaterialTheme.typography.titleSmall,
-                                color = streakFg,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -1581,8 +1658,8 @@ private fun HomeMomentumAndStandingsCard(
                                     playStreak.bestStreakDays > 0 -> "Best ${playStreak.bestStreakDays}d"
                                     else -> "Finish any race today"
                                 },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = streakFg.copy(alpha = 0.8f),
+                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMonoFontFamily),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -1590,28 +1667,26 @@ private fun HomeMomentumAndStandingsCard(
                     }
                 }
 
-                // Overall Friends Rank summary badge (informational when signed in with friends)
                 val needsFriendSetup = !isSignedIn || friendsCount == 0
                 Surface(
-                    color = if (summary.myCrewRank == 1 && summary.leadingBoardsCount > 0) {
-                        MaterialTheme.colorScheme.secondaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerHigh
-                    },
-                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    border = BorderStroke(
+                        1.dp,
+                        if (summary.myCrewRank == 1 && summary.leadingBoardsCount > 0) {
+                            MaterialTheme.colorScheme.secondary.copy(alpha = 0.55f)
+                        } else {
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                        }
+                    ),
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
                         .weight(1f)
-                        .clip(MaterialTheme.shapes.medium)
+                        .clip(RoundedCornerShape(16.dp))
                         .then(
                             if (needsFriendSetup) Modifier.clickable(onClick = onOpenFriends) else Modifier
                         )
                         .testTag("home_standings_rank_badge")
                 ) {
-                    val rankFg = if (summary.myCrewRank == 1 && summary.leadingBoardsCount > 0) {
-                        MaterialTheme.colorScheme.onSecondaryContainer
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    }
                     val totalRoster = maxOf(summary.totalCrewCount, friendsCount + 1)
                     val contestedTotal = summary.leadingBoardsCount + summary.trailingBoardsCount
                     Row(
@@ -1619,20 +1694,32 @@ private fun HomeMomentumAndStandingsCard(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(
-                            imageVector = if (isSignedIn && friendsCount > 0) {
-                                Icons.Default.Leaderboard
+                        Surface(
+                            color = if (summary.myCrewRank == 1 && summary.leadingBoardsCount > 0) {
+                                goldAccent.copy(alpha = 0.18f)
                             } else {
-                                Icons.Default.EmojiEvents
+                                MaterialTheme.colorScheme.surfaceContainerHighest
                             },
-                            contentDescription = "Overall Friends Standings",
-                            tint = if (summary.myCrewRank == 1 && summary.leadingBoardsCount > 0) {
-                                goldAccent
-                            } else {
-                                MaterialTheme.colorScheme.primary
-                            },
-                            modifier = Modifier.size(22.dp)
-                        )
+                            shape = CircleShape,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (isSignedIn && friendsCount > 0) {
+                                        Icons.Default.Leaderboard
+                                    } else {
+                                        Icons.Default.EmojiEvents
+                                    },
+                                    contentDescription = "Overall Friends Standings",
+                                    tint = if (summary.myCrewRank == 1 && summary.leadingBoardsCount > 0) {
+                                        goldAccent
+                                    } else {
+                                        MaterialTheme.colorScheme.primary
+                                    },
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                         Column {
                             Text(
                                 text = when {
@@ -1647,7 +1734,7 @@ private fun HomeMomentumAndStandingsCard(
                                     else -> "Set First Time"
                                 },
                                 style = MaterialTheme.typography.titleSmall,
-                                color = rankFg,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -1663,8 +1750,8 @@ private fun HomeMomentumAndStandingsCard(
                                         "${summary.unchallengedFriendBoardsCount} friend time${if (summary.unchallengedFriendBoardsCount == 1) "" else "s"} to beat"
                                     else -> "Overall across $friendsCount friends"
                                 },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = rankFg.copy(alpha = 0.8f),
+                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = PlusJakartaFontFamily),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -1673,38 +1760,73 @@ private fun HomeMomentumAndStandingsCard(
                 }
             }
 
-            // Overall Ranking Across All Friends
-            if (isSignedIn && friendsCount > 0 && summary.crewLeaderboard.isNotEmpty()) {
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                val displayedCrew = if (showAllFriends || summary.crewLeaderboard.size <= 4) {
-                    summary.crewLeaderboard
-                } else {
-                    summary.crewLeaderboard.take(4)
+            // Overall Friends Ranking Header + Invite / Manage Friends IconButton (replaces bottom Friends button)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = if (isSignedIn && friendsCount > 0 && summary.crewLeaderboard.isNotEmpty()) {
+                            "OVERALL FRIENDS RANKING (${summary.crewLeaderboard.size})"
+                        } else {
+                            "OVERALL FRIENDS RANKING"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    if (onlineFriendsCount > 0 || pendingRequestsCount > 0) {
+                        Surface(
+                            color = if (onlineFriendsCount > 0) {
+                                onlineAccent.copy(alpha = 0.16f)
+                            } else {
+                                MaterialTheme.colorScheme.tertiaryContainer
+                            },
+                            shape = CircleShape
+                        ) {
+                            Text(
+                                text = if (onlineFriendsCount > 0) {
+                                    "$onlineFriendsCount online"
+                                } else {
+                                    "$pendingRequestsCount req"
+                                },
+                                style = MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMonoFontFamily),
+                                color = if (onlineFriendsCount > 0) {
+                                    onlineAccent
+                                } else {
+                                    MaterialTheme.colorScheme.onTertiaryContainer
+                                },
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
                 }
 
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    Text(
-                        text = "OVERALL FRIENDS RANKING (${summary.crewLeaderboard.size})",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (summary.crewLeaderboard.size > 4) {
+                    if (isSignedIn && friendsCount > 0 && summary.crewLeaderboard.size > 4) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .defaultMinSize(minHeight = 48.dp)
-                                .clip(MaterialTheme.shapes.small)
+                                .clip(CircleShape)
                                 .clickable { showAllFriends = !showAllFriends }
-                                .padding(horizontal = 6.dp)
+                                .padding(horizontal = 8.dp)
                                 .testTag("home_overall_friends_toggle")
                         ) {
                             Text(
-                                text = if (showAllFriends) "Show Top 4" else "Show All",
+                                text = if (showAllFriends) "Top 4" else "All",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -1720,10 +1842,32 @@ private fun HomeMomentumAndStandingsCard(
                             )
                         }
                     }
+
+                    IconButton(
+                        onClick = onOpenFriends,
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("home_friends_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PersonAdd,
+                            contentDescription = "Invite or Manage Friends",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+
+            if (isSignedIn && friendsCount > 0 && summary.crewLeaderboard.isNotEmpty()) {
+                val displayedCrew = if (showAllFriends || summary.crewLeaderboard.size <= 4) {
+                    summary.crewLeaderboard
+                } else {
+                    summary.crewLeaderboard.take(4)
                 }
 
                 Column(
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.testTag("home_overall_friends_ranking")
                 ) {
                     displayedCrew.forEachIndexed { index, member ->
@@ -1736,21 +1880,73 @@ private fun HomeMomentumAndStandingsCard(
                 }
             }
 
-            // Today's Daily & Track-by-Track Standings List (includes built-in, daily, and custom tracks)
+            // Today's Daily & Track-by-Track Standings List (top 3 + View All toggle)
             if (isSignedIn && summary.highlightBoards.isNotEmpty()) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                Text(
-                    text = "TRACK & TODAY'S DAILY TIMES",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "TRACK & TODAY'S DAILY TIMES",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (summary.highlightBoards.size > 3) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            shape = CircleShape,
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 48.dp)
+                                .clip(CircleShape)
+                                .clickable { showAllStandings = !showAllStandings }
+                                .testTag("home_standings_view_all_toggle")
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = if (showAllStandings) {
+                                        "Top 3"
+                                    } else {
+                                        "View All (${summary.highlightBoards.size})"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = PlusJakartaFontFamily,
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Icon(
+                                    imageVector = if (showAllStandings) {
+                                        Icons.Default.KeyboardArrowUp
+                                    } else {
+                                        Icons.Default.KeyboardArrowDown
+                                    },
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                val displayedBoards = if (showAllStandings || summary.highlightBoards.size <= 3) {
+                    summary.highlightBoards
+                } else {
+                    summary.highlightBoards.take(3)
+                }
 
                 Column(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.testTag("home_standings_list")
                 ) {
-                    summary.highlightBoards.forEachIndexed { index, item ->
+                    displayedBoards.forEachIndexed { index, item ->
                         HomeStandingBoardRow(
                             item = item,
                             index = index,
@@ -1763,6 +1959,7 @@ private fun HomeMomentumAndStandingsCard(
                     }
                 }
             }
+
             if (!isSignedIn || friendsCount == 0) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1775,7 +1972,7 @@ private fun HomeMomentumAndStandingsCard(
                         } else {
                             "Add friends to unlock overall standings."
                         },
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlusJakartaFontFamily),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -1808,17 +2005,17 @@ private fun HomeOverallFriendRankRow(
     val rowBg = if (member.isSelf) {
         MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
     } else {
-        MaterialTheme.colorScheme.surfaceContainer
+        MaterialTheme.colorScheme.surfaceContainerHigh
     }
     Surface(
         color = rowBg,
-        shape = MaterialTheme.shapes.small,
+        shape = RoundedCornerShape(16.dp),
         modifier = Modifier
             .fillMaxWidth()
             .testTag("home_overall_friend_rank_$index")
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -1826,19 +2023,19 @@ private fun HomeOverallFriendRankRow(
                 color = when {
                     member.rank == 1 && member.boardsEntered > 0 -> goldAccent.copy(alpha = 0.22f)
                     member.isSelf -> MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
-                    else -> MaterialTheme.colorScheme.surfaceContainerHigh
+                    else -> MaterialTheme.colorScheme.surfaceContainerHighest
                 },
-                shape = RoundedCornerShape(6.dp)
+                shape = CircleShape
             ) {
                 Text(
                     text = "#${member.rank}",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMonoFontFamily),
                     color = when {
                         member.rank == 1 && member.boardsEntered > 0 -> goldAccent
                         member.isSelf -> MaterialTheme.colorScheme.primary
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
-                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                 )
             }
             Text(
@@ -1853,9 +2050,11 @@ private fun HomeOverallFriendRankRow(
                 text = if (member.boardsEntered == 0) {
                     "No times yet"
                 } else {
-                    "${member.contestedWins}W • ${member.h2hMatchupsWon} H2H • ${member.boardsEntered} boards"
+                    "${member.contestedWins}W • ${member.h2hMatchupsWon} H2H • ${member.boardsEntered}B"
                 },
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontFamily = if (member.boardsEntered == 0) PlusJakartaFontFamily else JetBrainsMonoFontFamily
+                ),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1
             )
@@ -1874,7 +2073,8 @@ private fun HomeStandingBoardRow(
     val isStunts = item.gameMode == GameMode.STUNTS
     val myRank = item.myRank
     val hasMyEntry = myRank != null
-    val leading = myRank == 1 && item.topFriendName != null
+    val isUncontestedSolo = hasMyEntry && item.totalDriversOnBoard <= 1
+    val leading = myRank == 1 && item.totalDriversOnBoard > 1 && item.topFriendName != null
 
     val myMetric = if (hasMyEntry) {
         if (isStunts) "${item.myScore} PTS" else SessionNotificationHelper.formatNotifTimeMs(item.myTimeMs)
@@ -1885,7 +2085,7 @@ private fun HomeStandingBoardRow(
         val raw = if (isStunts) "${item.topFriendScore} PTS" else SessionNotificationHelper.formatNotifTimeMs(item.topFriendTimeMs)
         "${item.topFriendName}: $raw"
     } else {
-        "No friend time yet"
+        "Solo record"
     }
 
     val deltaText: String? = when {
@@ -1909,37 +2109,41 @@ private fun HomeStandingBoardRow(
     }
 
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+        shape = RoundedCornerShape(16.dp),
         modifier = Modifier
             .fillMaxWidth()
             .defaultMinSize(minHeight = 48.dp)
-            .clip(MaterialTheme.shapes.small)
+            .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
             .testTag("home_standings_board_row_$index")
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            // Muted slate badge for uncontested #1/1 solo records so multi-player podium badges stand out
             Surface(
                 color = when {
-                    leading -> goldAccent.copy(alpha = 0.2f)
+                    isUncontestedSolo -> MaterialTheme.colorScheme.surfaceContainerHighest
+                    leading -> goldAccent.copy(alpha = 0.22f)
                     hasMyEntry -> MaterialTheme.colorScheme.primaryContainer
                     else -> MaterialTheme.colorScheme.tertiaryContainer
                 },
-                shape = RoundedCornerShape(8.dp)
+                shape = CircleShape
             ) {
                 Text(
                     text = if (hasMyEntry) "#$myRank/${item.totalDriversOnBoard}" else "BEAT",
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMonoFontFamily),
                     color = when {
+                        isUncontestedSolo -> MaterialTheme.colorScheme.onSurfaceVariant
                         leading -> goldAccent
                         hasMyEntry -> MaterialTheme.colorScheme.onPrimaryContainer
                         else -> MaterialTheme.colorScheme.onTertiaryContainer
                     },
-                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                 )
             }
 
@@ -1957,7 +2161,7 @@ private fun HomeStandingBoardRow(
                 )
                 Text(
                     text = "You: $myMetric  •  $friendMetric",
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = JetBrainsMonoFontFamily),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -1971,11 +2175,11 @@ private fun HomeStandingBoardRow(
                     } else {
                         MaterialTheme.colorScheme.errorContainer
                     },
-                    shape = RoundedCornerShape(50)
+                    shape = CircleShape
                 ) {
                     Text(
                         text = deltaText,
-                        style = MaterialTheme.typography.labelSmall,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = JetBrainsMonoFontFamily),
                         color = if (isAhead) onlineAccent else MaterialTheme.colorScheme.onErrorContainer,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     )
@@ -1993,20 +2197,49 @@ private fun HomeStandingBoardRow(
 }
 
 @Composable
-private fun MiniStatBadge(
+private fun CompactStatBar(
     label: String,
-    containerColor: Color,
-    contentColor: Color
+    value: Int,
+    accentColor: Color,
+    modifier: Modifier = Modifier
 ) {
-    Surface(
-        color = containerColor,
-        shape = RoundedCornerShape(8.dp)
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = contentColor,
-            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontFamily = PlusJakartaFontFamily,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 10.sp
+                ),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = value.toString(),
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontFamily = JetBrainsMonoFontFamily,
+                    fontSize = 10.sp
+                ),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+        LinearProgressIndicator(
+            progress = { (value / 100f).coerceIn(0f, 1f) },
+            color = accentColor,
+            trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            strokeCap = StrokeCap.Round,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(CircleShape)
         )
     }
 }
+

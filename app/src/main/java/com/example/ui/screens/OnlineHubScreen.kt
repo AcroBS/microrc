@@ -6,8 +6,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,6 +20,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -78,11 +78,11 @@ import com.example.model.GameMode
 import com.example.model.OnlineRoomDoc
 import com.example.model.PlayerProfile
 import com.example.model.RaceRulesSettings
+import com.example.ui.theme.PlusJakartaFontFamily
 import com.example.ui.theme.adaptiveGoldColor
 import com.example.ui.theme.adaptiveOnlineColor
 import com.example.util.InviteLinkHelper
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun OnlineHubScreen(
     profile: PlayerProfile,
@@ -291,7 +291,7 @@ fun OnlineHubScreen(
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    shape = RoundedCornerShape(20.dp),
+                    shape = RoundedCornerShape(24.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -394,7 +394,7 @@ fun OnlineHubScreen(
                                     }
                                 },
                                 enabled = !isBusy,
-                                shape = RoundedCornerShape(14.dp),
+                                shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier
                                     .height(54.dp)
                                     .testTag("join_room_code_button")
@@ -409,7 +409,7 @@ fun OnlineHubScreen(
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)),
-                    shape = RoundedCornerShape(22.dp),
+                    shape = RoundedCornerShape(24.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -465,21 +465,31 @@ fun OnlineHubScreen(
                             }
                         }
 
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Text(
                                 text = "STARTING MODE",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            FlowRow(
+                            LazyRow(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                contentPadding = PaddingValues(horizontal = 2.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("online_starting_mode_row")
                             ) {
-                                com.example.drift.DriftFeature.selectableGameModes().forEach { mode ->
+                                items(com.example.drift.DriftFeature.selectableGameModes(), key = { it.name }) { mode ->
                                     FilterChip(
                                         selected = selectedMode == mode,
                                         onClick = { selectedMode = mode },
-                                        label = { Text(mode.displayName, style = MaterialTheme.typography.labelSmall) },
+                                        label = {
+                                            Text(
+                                                text = mode.displayName,
+                                                style = MaterialTheme.typography.labelMedium.copy(fontFamily = PlusJakartaFontFamily),
+                                                maxLines = 1,
+                                                softWrap = false
+                                            )
+                                        },
                                         modifier = Modifier.testTag("online_mode_${mode.name}")
                                     )
                                 }
@@ -489,7 +499,7 @@ fun OnlineHubScreen(
                         // Password Protection Toggle
                         Surface(
                             color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            shape = RoundedCornerShape(14.dp),
+                            shape = RoundedCornerShape(16.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(
@@ -656,7 +666,7 @@ fun OnlineHubScreen(
                 if (openRooms.isEmpty()) {
                     Surface(
                         color = MaterialTheme.colorScheme.surfaceContainer,
-                        shape = RoundedCornerShape(18.dp),
+                        shape = RoundedCornerShape(24.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -692,14 +702,14 @@ fun OnlineHubScreen(
                             val lockGold = adaptiveGoldColor()
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceContainer,
-                                shape = RoundedCornerShape(18.dp),
+                                shape = RoundedCornerShape(24.dp),
                                 border = BorderStroke(
                                     1.dp,
                                     if (room.passwordProtected) lockGold.copy(alpha = 0.65f) else MaterialTheme.colorScheme.outlineVariant
                                 ),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(18.dp))
+                                    .clip(RoundedCornerShape(24.dp))
                                     .clickable(enabled = !isBusy && !isFull) {
                                         if (room.passwordProtected) {
                                             joinPasswordDraft = ""
