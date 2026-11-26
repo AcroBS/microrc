@@ -352,13 +352,33 @@ class GarageCosmeticsAndStreakTest {
         }
         composeTestRule.waitForIdle()
 
-        // Streak & Token header pill
-        composeTestRule.onNodeWithTag("garage_tokens_pill").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Available Upgrade Tokens: 1").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Next unlock in 5 streak days • Streak: 5d").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("garage_saved_badge").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Saved to Garage").assertIsDisplayed()
-        composeTestRule.onNodeWithText("0/7 Equipped").assertIsDisplayed()
+        // Streak & Token header pill + workbench preview
+        composeTestRule.onNodeWithTag("garage_tokens_pill").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Available Upgrade Tokens: 1").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Next unlock in 5 streak days • Streak: 5d").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("garage_saved_badge").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Saved to Garage").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("0/8 Equipped").performScrollTo().assertIsDisplayed()
+
+        // Carousel arrows removed; chassis silhouettes live inside the 4 chassis pills
+        composeTestRule.onNodeWithTag("garage_prev_car_button").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("garage_next_car_button").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("car_option_VOLT_BUGGY").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("car_silhouette_VOLT_BUGGY", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("car_option_APEX_FORMULA").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("car_silhouette_APEX_FORMULA", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("car_option_TUNDRA_MONSTER").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("car_silhouette_TUNDRA_MONSTER", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("car_option_DRIFT_PHANTOM").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("car_silhouette_DRIFT_PHANTOM", useUnmergedTree = true).assertIsDisplayed()
+
+        // Preview locked RC Whip Antenna on workbench without spending token
+        composeTestRule.onNodeWithTag("cosmetic_card_whip_antenna").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("garage_previewing_badge").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Previewing • RC Whip Antenna").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("cosmetic_card_whip_antenna").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("previewing_badge_whip_antenna", useUnmergedTree = true).assertIsDisplayed()
 
         // Base stats for Apex Formula: 96 / 74 / 78 / 64
         composeTestRule.onNodeWithText("96").performScrollTo().assertIsDisplayed()
@@ -366,16 +386,16 @@ class GarageCosmeticsAndStreakTest {
         composeTestRule.onNodeWithText("78").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("64").performScrollTo().assertIsDisplayed()
 
-        // Unlock Rear Spoiler using the 1 available streak token
-        val unlockSpoiler = composeTestRule.onNodeWithTag("unlock_upgrade_rear_spoiler").performScrollTo()
-        unlockSpoiler.assertIsDisplayed()
-        unlockSpoiler.assertIsEnabled()
-        unlockSpoiler.performClick()
+        // Unlock 8th cosmetic slot (Underglow Neon Kit) using the 1 available streak token
+        val unlockUnderglow = composeTestRule.onNodeWithTag("unlock_upgrade_underglow_neon").performScrollTo()
+        unlockUnderglow.assertIsDisplayed()
+        unlockUnderglow.assertIsEnabled()
+        unlockUnderglow.performClick()
         composeTestRule.waitForIdle()
 
         // Token spent -> 0 available; remaining locked parts now disabled with streak prompt
         composeTestRule.onNodeWithText("Available Upgrade Tokens: 0").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithText("1/7 Equipped").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("1/8 Equipped").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("unlock_upgrade_bigger_tires").performScrollTo().assertIsNotEnabled()
         composeTestRule.onNodeWithText("Equipped").performScrollTo().assertIsDisplayed()
 
@@ -385,11 +405,76 @@ class GarageCosmeticsAndStreakTest {
         composeTestRule.onNodeWithText("78").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("64").performScrollTo().assertIsDisplayed()
 
-        // Toggle Rear Spoiler off via instant switch -> stays unlocked ("Unequipped"), equipped count returns to 0/7
-        composeTestRule.onNodeWithTag("toggle_upgrade_rear_spoiler").performScrollTo().performClick()
+        // Toggle Underglow Neon off via instant switch -> stays unlocked ("Unequipped"), equipped count returns to 0/8
+        composeTestRule.onNodeWithTag("toggle_upgrade_underglow_neon").performScrollTo().performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithText("Unequipped").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithText("0/7 Equipped").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithText("Apex Formula • 1/7 Unlocked").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("0/8 Equipped").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Apex Formula • 1/8 Unlocked").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun garageScreen_shuffleLook_randomizesPaintAndUnlockedPartsOnly() {
+        val initialPrimary = 0xFFFF5722
+        val initialAccent = 0xFFFFD54F
+        val unlockedMask = CosmeticUpgradeSlot.REAR_SPOILER.bitFlag or CosmeticUpgradeSlot.UNDERGLOW_NEON.bitFlag
+        val initialProfile = PlayerProfile(
+            playerId = "uid_shuffle",
+            name = "Acro",
+            carType = RcCarType.APEX_FORMULA,
+            primaryColorArgb = initialPrimary,
+            accentColorArgb = initialAccent,
+            earnedUpgradeTokens = 2,
+            carUpgradesByCarId = mapOf(
+                RcCarType.APEX_FORMULA.storageId to CarVisualUpgrades(
+                    unlockedMask = unlockedMask,
+                    equippedMask = 0
+                )
+            )
+        )
+        var latestProfile = initialProfile
+
+        composeTestRule.setContent {
+            var profileState by remember { mutableStateOf(initialProfile) }
+            MicroRCTheme {
+                GarageScreen(
+                    profile = profileState,
+                    playStreak = PlayStreakState(currentStreakDays = 10, bestStreakDays = 10),
+                    onSaveCarAndColors = { car, p, a ->
+                        profileState = profileState.copy(carType = car, primaryColorArgb = p, accentColorArgb = a)
+                        latestProfile = profileState
+                    },
+                    onApplyCarLook = { car, p, a, equippedMask ->
+                        val map = profileState.carUpgradesByCarId.toMutableMap()
+                        val cur = profileState.upgradesFor(car)
+                        map[car.storageId] = cur.copy(equippedMask = equippedMask and cur.sanitizedUnlockedMask)
+                        profileState = profileState.copy(
+                            carType = car,
+                            primaryColorArgb = p,
+                            accentColorArgb = a,
+                            carUpgradesByCarId = map
+                        )
+                        latestProfile = profileState
+                    },
+                    onUnlockUpgrade = { _, _ -> },
+                    onToggleUpgrade = { _, _, _ -> },
+                    onBack = {}
+                )
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("garage_shuffle_button").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+
+        // Never unlocks locked slots and equips only from unlocked slots
+        val afterUpgrades = latestProfile.upgradesFor(RcCarType.APEX_FORMULA)
+        assertEquals(unlockedMask, afterUpgrades.sanitizedUnlockedMask)
+        assertEquals(0, afterUpgrades.sanitizedEquippedMask and unlockedMask.inv())
+        assertTrue(
+            latestProfile.primaryColorArgb != initialPrimary ||
+                latestProfile.accentColorArgb != initialAccent ||
+                afterUpgrades.sanitizedEquippedMask != 0
+        )
     }
 }

@@ -145,6 +145,7 @@ fun RaceScreen(
     isOnlineSession: Boolean = false,
     onlinePingMs: Int? = null,
     isOnlineFallback: Boolean = false,
+    personalBestLapMs: Long? = null,
     onRestartRace: () -> Unit = {},
     onLeaveRace: () -> Unit
 ) {
@@ -704,6 +705,43 @@ fun RaceScreen(
                     }
                 }
 
+                // Live Lap Delta (+/- vs PB) Pill
+                if (profile.showLiveLapDelta &&
+                    !isArenaMode &&
+                    !isStuntsMode &&
+                    snapshot?.phase == RacePhase.RACING.name &&
+                    localRacer != null &&
+                    track.centerline.isNotEmpty()
+                ) {
+                    val deltaMs = computeLiveLapDeltaMs(
+                        raceTimeMs = snapshot.raceTimeMs,
+                        lap = localRacer.lap,
+                        checkpointIndex = localRacer.checkpointIndex,
+                        sectorMask = localRacer.sectorMask,
+                        currentLapStartMs = localRacer.currentLapStartMs,
+                        sessionBestLapMs = localRacer.bestLapMs?.takeIf { it > 0L },
+                        storedPbLapMs = personalBestLapMs,
+                        trackPointCount = track.centerline.size
+                    )
+                    if (deltaMs != null) {
+                        val isAhead = deltaMs <= 0L
+                        val deltaColor = if (isAhead) tertiaryAccent else errorAccent
+                        Surface(
+                            color = hudSurface,
+                            shape = RoundedCornerShape(50),
+                            border = BorderStroke(1.dp, deltaColor.copy(alpha = 0.8f)),
+                            modifier = Modifier.testTag("live_lap_delta_badge")
+                        ) {
+                            Text(
+                                text = "LAP DELTA ${formatLapDeltaSeconds(deltaMs)} vs PB",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = deltaColor,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+
                 // Online WebSocket Relay Latency Pill
                 if (isOnlineSession) {
                     val pingColor = when {
@@ -866,7 +904,7 @@ fun RaceScreen(
                     }
                 }
 
-                if (!overviewCamera) {
+                if (!overviewCamera && profile.showTrackMiniMap) {
                     Surface(
                         color = hudSurface,
                         shape = RoundedCornerShape(14.dp),
@@ -1247,11 +1285,7 @@ fun RaceScreen(
                     }
                 }
             } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Bottom
-            ) {
+            val steeringControlsContent: @Composable () -> Unit = {
                 when (profile.controlMode) {
                     ControlMode.TOUCH_OVERLAY -> {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1340,9 +1374,11 @@ fun RaceScreen(
                         }
                     }
                 }
+            }
 
+            val actionAndBrakeControlsContent: @Composable () -> Unit = {
                 Column(
-                    horizontalAlignment = Alignment.End,
+                    horizontalAlignment = if (profile.swapControls) Alignment.Start else Alignment.End,
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(
@@ -1474,6 +1510,22 @@ fun RaceScreen(
                             .testTag("brake_button"),
                         onPressedChange = { brakePressed = it }
                     )
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("race_controls_row"),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                if (profile.swapControls) {
+                    actionAndBrakeControlsContent()
+                    steeringControlsContent()
+                } else {
+                    steeringControlsContent()
+                    actionAndBrakeControlsContent()
                 }
             }
             }
@@ -2021,6 +2073,39 @@ private fun StatusChip(text: String, color: Color) {
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
         )
     }
+}
+
+internal fun computeLiveLapDeltaMs(
+    raceTimeMs: Long,
+    lap: Int,
+    checkpointIndex: Int,
+    sectorMask: Int,
+    currentLapStartMs: Long,
+    sessionBestLapMs: Long?,
+    storedPbLapMs: Long?,
+    trackPointCount: Int
+): Long? {
+    val refPbMs = listOfNotNull(
+        storedPbLapMs?.takeIf { it > 0L },
+        sessionBestLapMs?.takeIf { it > 0L }
+    ).minOrNull() ?: return null
+    if (trackPointCount <= 0) return null
+    if (lap <= 1 && (sectorMask and 0b0001) == 0 && checkpointIndex > trackPointCount * 0.75f) {
+        return null
+    }
+    val curLapElapsedMs = (raceTimeMs - currentLapStartMs).coerceAtLeast(0L)
+    if (curLapElapsedMs < 600L) return null
+    val fraction = (checkpointIndex.toFloat() / trackPointCount.toFloat()).coerceIn(0.02f, 0.99f)
+    val expectedElapsedMs = (refPbMs.toDouble() * fraction.toDouble()).toLong()
+    return curLapElapsedMs - expectedElapsedMs
+}
+
+internal fun formatLapDeltaSeconds(deltaMs: Long): String {
+    val sign = if (deltaMs >= 0L) "+" else "-"
+    val absHundredths = kotlin.math.abs(deltaMs) / 10L
+    val secs = absHundredths / 100L
+    val rem = absHundredths % 100L
+    return String.format(java.util.Locale.US, "%s%d.%02ds", sign, secs, rem)
 }
 
 fun formatRaceTime(ms: Long): String {

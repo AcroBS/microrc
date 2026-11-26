@@ -149,7 +149,7 @@
         },
         "equippedUpgradesMask": {
           "type": "integer",
-          "description": "Optional 7-bit mask (0..127) of equipped purely visual cosmetic upgrades."
+          "description": "Optional 8-bit mask (0..255) of equipped purely visual cosmetic upgrades."
         },
         "ready": {
           "type": "boolean",
@@ -316,7 +316,7 @@
         },
         "equippedUpgradesMask": {
           "type": "integer",
-          "description": "Optional 7-bit mask (0..127) of equipped purely visual cosmetic upgrades."
+          "description": "Optional 8-bit mask (0..255) of equipped purely visual cosmetic upgrades."
         },
         "gameMode": {
           "type": "string",
@@ -417,7 +417,7 @@
         },
         "equippedUpgradesMask": {
           "type": "integer",
-          "description": "Optional 7-bit mask (0..127) of equipped purely visual cosmetic upgrades."
+          "description": "Optional 8-bit mask (0..255) of equipped purely visual cosmetic upgrades."
         },
         "boardKey": {
           "type": "string",
@@ -510,7 +510,7 @@
         },
         "equippedUpgradesMask": {
           "type": "integer",
-          "description": "Optional 7-bit mask (0..127) of equipped purely visual cosmetic upgrades for the active car."
+          "description": "Optional 8-bit mask (0..255) of equipped purely visual cosmetic upgrades for the active car."
         },
         "carVisualsJson": {
           "type": "string",

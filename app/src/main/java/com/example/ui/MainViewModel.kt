@@ -275,6 +275,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun applyCarLook(
+        carType: RcCarType,
+        primaryArgb: Long,
+        accentArgb: Long,
+        equippedMask: Int
+    ) {
+        viewModelScope.launch {
+            prefsRepo.applyCarLook(carType, primaryArgb, accentArgb, equippedMask)
+            val cur = profile.value
+            val existing = cur.upgradesFor(carType)
+            val cleanUnlocked = existing.sanitizedUnlockedMask
+            val cleanEquipped = CarVisualUpgrades.sanitizeMask(equippedMask) and cleanUnlocked
+            val nextMap = cur.carUpgradesByCarId.toMutableMap().apply {
+                put(carType.storageId, CarVisualUpgrades(cleanUnlocked, cleanEquipped))
+            }
+            val updated = cur.copy(
+                carType = carType,
+                primaryColorArgb = primaryArgb,
+                accentColorArgb = accentArgb,
+                carUpgradesByCarId = nextMap
+            )
+            raceManager.updateLocalProfile(updated)
+        }
+    }
+
     fun mergeCloudGarageState(
         cloudEarnedTokens: Int,
         cloudUpgradesByCarId: Map<String, CarVisualUpgrades>
@@ -293,6 +318,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             prefsRepo.updateControlSettings(mode, sensitivity, autoGasInTilt, sliderSensitivity)
             tiltController.setSensitivity(sensitivity)
+        }
+    }
+
+    fun updateSwapControls(enabled: Boolean) {
+        viewModelScope.launch {
+            prefsRepo.updateSwapControls(enabled)
+        }
+    }
+
+    fun updateShowLiveLapDelta(enabled: Boolean) {
+        viewModelScope.launch {
+            prefsRepo.updateShowLiveLapDelta(enabled)
+        }
+    }
+
+    fun updateShowTrackMiniMap(enabled: Boolean) {
+        viewModelScope.launch {
+            prefsRepo.updateShowTrackMiniMap(enabled)
         }
     }
 

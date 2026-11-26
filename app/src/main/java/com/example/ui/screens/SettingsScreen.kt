@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Palette
@@ -54,6 +55,7 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Thunderstorm
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Vibration
@@ -125,6 +127,9 @@ fun SettingsScreen(
     hasBottomNav: Boolean = false,
     onUpdateRules: (RaceRulesSettings) -> Unit,
     onSaveControlSettings: (ControlMode, Float, Boolean, Float) -> Unit = { _, _, _, _ -> },
+    onUpdateSwapControls: (Boolean) -> Unit = {},
+    onUpdateShowLiveLapDelta: (Boolean) -> Unit = {},
+    onUpdateShowTrackMiniMap: (Boolean) -> Unit = {},
     onUpdateAudio: (AudioSettings) -> Unit = {},
     onUpdateThemeSettings: (ThemeSettings) -> Unit = {},
     onToggleDailyNotifications: (Boolean) -> Unit = {},
@@ -283,7 +288,10 @@ fun SettingsScreen(
                     SteeringControlsSection(
                         profile = profile,
                         tiltController = tiltController,
-                        onSaveControlSettings = onSaveControlSettings
+                        onSaveControlSettings = onSaveControlSettings,
+                        onUpdateSwapControls = onUpdateSwapControls,
+                        onUpdateShowLiveLapDelta = onUpdateShowLiveLapDelta,
+                        onUpdateShowTrackMiniMap = onUpdateShowTrackMiniMap
                     )
 
                     // 3. Audio & Alerts (this device)
@@ -310,6 +318,17 @@ fun SettingsScreen(
                                 switchTestTag = "setting_music_switch",
                                 onCheckedChange = { onUpdateAudio(audioSettings.copy(musicEnabled = it)) }
                             )
+                            if (audioSettings.musicEnabled) {
+                                AudioVolumeSliderRow(
+                                    label = "Music Volume",
+                                    value = audioSettings.musicVolume,
+                                    accent = MaterialTheme.colorScheme.primary,
+                                    sliderTestTag = "setting_music_volume_slider",
+                                    onValueChange = { vol ->
+                                        onUpdateAudio(audioSettings.copy(musicVolume = vol))
+                                    }
+                                )
+                            }
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
                             GroupedSwitchRow(
                                 icon = Icons.Default.DirectionsCar,
@@ -321,6 +340,17 @@ fun SettingsScreen(
                                 switchTestTag = "setting_sfx_switch",
                                 onCheckedChange = { onUpdateAudio(audioSettings.copy(carSfxEnabled = it)) }
                             )
+                            if (audioSettings.carSfxEnabled) {
+                                AudioVolumeSliderRow(
+                                    label = "Motor SFX Volume",
+                                    value = audioSettings.sfxVolume,
+                                    accent = MaterialTheme.colorScheme.secondary,
+                                    sliderTestTag = "setting_sfx_volume_slider",
+                                    onValueChange = { vol ->
+                                        onUpdateAudio(audioSettings.copy(sfxVolume = vol))
+                                    }
+                                )
+                            }
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
                             GroupedSwitchRow(
                                 icon = Icons.Default.Vibration,
@@ -391,6 +421,12 @@ fun SettingsScreen(
                                 text = rules.carSpeedEnum.subtitle,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "Applies to Solo Play & Custom Lobbies. Daily Challenge & Daily Drift use standardized spec speed for fair leaderboards.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                                modifier = Modifier.testTag("settings_speed_helper_note")
                             )
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -775,6 +811,12 @@ fun SettingsScreen(
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
+                            Text(
+                                text = "Applies to Solo Play & Custom Lobbies. Daily Challenge & Daily Drift use standardized spec speed for fair leaderboards.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.testTag("settings_session_speed_helper_note")
+                            )
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -838,7 +880,10 @@ fun SettingsScreen(
                     SteeringControlsSection(
                         profile = profile,
                         tiltController = tiltController,
-                        onSaveControlSettings = onSaveControlSettings
+                        onSaveControlSettings = onSaveControlSettings,
+                        onUpdateSwapControls = onUpdateSwapControls,
+                        onUpdateShowLiveLapDelta = onUpdateShowLiveLapDelta,
+                        onUpdateShowTrackMiniMap = onUpdateShowTrackMiniMap
                     )
 
                     Text(
@@ -864,6 +909,17 @@ fun SettingsScreen(
                                 switchTestTag = "setting_music_switch",
                                 onCheckedChange = { onUpdateAudio(audioSettings.copy(musicEnabled = it)) }
                             )
+                            if (audioSettings.musicEnabled) {
+                                AudioVolumeSliderRow(
+                                    label = "Music Volume",
+                                    value = audioSettings.musicVolume,
+                                    accent = MaterialTheme.colorScheme.primary,
+                                    sliderTestTag = "setting_music_volume_slider",
+                                    onValueChange = { vol ->
+                                        onUpdateAudio(audioSettings.copy(musicVolume = vol))
+                                    }
+                                )
+                            }
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
                             GroupedSwitchRow(
                                 icon = Icons.Default.DirectionsCar,
@@ -875,6 +931,17 @@ fun SettingsScreen(
                                 switchTestTag = "setting_sfx_switch",
                                 onCheckedChange = { onUpdateAudio(audioSettings.copy(carSfxEnabled = it)) }
                             )
+                            if (audioSettings.carSfxEnabled) {
+                                AudioVolumeSliderRow(
+                                    label = "Motor SFX Volume",
+                                    value = audioSettings.sfxVolume,
+                                    accent = MaterialTheme.colorScheme.secondary,
+                                    sliderTestTag = "setting_sfx_volume_slider",
+                                    onValueChange = { vol ->
+                                        onUpdateAudio(audioSettings.copy(sfxVolume = vol))
+                                    }
+                                )
+                            }
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
                             GroupedSwitchRow(
                                 icon = Icons.Default.Vibration,
@@ -900,7 +967,10 @@ fun SettingsScreen(
 private fun SteeringControlsSection(
     profile: PlayerProfile,
     tiltController: TiltSteeringController?,
-    onSaveControlSettings: (ControlMode, Float, Boolean, Float) -> Unit
+    onSaveControlSettings: (ControlMode, Float, Boolean, Float) -> Unit,
+    onUpdateSwapControls: (Boolean) -> Unit,
+    onUpdateShowLiveLapDelta: (Boolean) -> Unit,
+    onUpdateShowTrackMiniMap: (Boolean) -> Unit
 ) {
     var selectedControlMode by remember(profile.controlMode) { mutableStateOf(profile.controlMode) }
     var tiltSensitivity by remember(profile.tiltSensitivity) { mutableFloatStateOf(profile.tiltSensitivity) }
@@ -1126,7 +1196,84 @@ private fun SteeringControlsSection(
                     )
                 }
             }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+            GroupedSwitchRow(
+                icon = Icons.Default.SwapHoriz,
+                accent = MaterialTheme.colorScheme.primary,
+                title = "Left-Handed / Swap Controls",
+                subtitle = "Swap steering & throttle/brake sides",
+                checked = profile.swapControls,
+                enabled = true,
+                switchTestTag = "setting_swap_controls_switch",
+                onCheckedChange = onUpdateSwapControls
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+            GroupedSwitchRow(
+                icon = Icons.Default.Timer,
+                accent = MaterialTheme.colorScheme.secondary,
+                title = "Show Live Lap Delta (+/- vs PB)",
+                subtitle = "Real-time split pace against personal best",
+                checked = profile.showLiveLapDelta,
+                enabled = true,
+                switchTestTag = "setting_live_lap_delta_switch",
+                onCheckedChange = onUpdateShowLiveLapDelta
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+            GroupedSwitchRow(
+                icon = Icons.Default.Map,
+                accent = MaterialTheme.colorScheme.tertiary,
+                title = "Show Track Mini-Map",
+                subtitle = "Corner radar overlay during races",
+                checked = profile.showTrackMiniMap,
+                enabled = true,
+                switchTestTag = "setting_show_minimap_switch",
+                onCheckedChange = onUpdateShowTrackMiniMap
+            )
         }
+    }
+}
+
+@Composable
+private fun AudioVolumeSliderRow(
+    label: String,
+    value: Float,
+    accent: Color,
+    sliderTestTag: String,
+    onValueChange: (Float) -> Unit
+) {
+    val clamped = value.coerceIn(0f, 1f)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 34.dp, end = 4.dp, bottom = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "${(clamped * 100f).toInt()}%",
+                style = MaterialTheme.typography.labelMedium,
+                color = accent
+            )
+        }
+        Slider(
+            value = clamped,
+            onValueChange = { onValueChange(it.coerceIn(0f, 1f)) },
+            valueRange = 0f..1f,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(32.dp)
+                .testTag(sliderTestTag)
+        )
     }
 }
 

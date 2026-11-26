@@ -216,6 +216,11 @@ fun DrawScope.drawRcCar(
             }
         }
 
+        // Underglow Neon Kit (soft colored ground-reflection halo matching accentColor)
+        if (visualUpgrades.hasUnderglowNeon) {
+            drawUnderglowNeon(accentColor, nightIntensity, animTimeSec)
+        }
+
         // Overdrive neon underglow
         if (hasOverdrive) {
             drawOval(
@@ -400,6 +405,9 @@ fun DrawScope.drawGhostRcCar(
         scale(scaleX = airScale, scaleY = airScale, pivot = Offset.Zero)
         rotate(degrees = deg, pivot = Offset.Zero)
     }) {
+        if (visualUpgrades.hasUnderglowNeon) {
+            drawUnderglowNeon(ghostAccent, nightIntensity = 0.4f, animTimeSec = animTimeSec)
+        }
         if (visualUpgrades.hasRacingBumpers) {
             drawRacingBumpers(carType, ghostPrimary, ghostAccent)
         }
@@ -722,6 +730,37 @@ private fun DrawScope.drawWhipAntenna(
     drawCircle(accent.copy(alpha = 0.45f), radius = 4.5f, center = tip)
     drawCircle(accent, radius = 2.6f, center = tip)
     drawCircle(Color.White, radius = 1.1f, center = tip)
+}
+
+private fun DrawScope.drawUnderglowNeon(
+    accent: Color,
+    nightIntensity: Float,
+    animTimeSec: Float
+) {
+    val clampedNight = nightIntensity.coerceIn(0f, 1f)
+    val pulse = 0.88f + 0.12f * sin(animTimeSec * 4.5f)
+    val outerAlpha = (0.18f + 0.28f * clampedNight) * pulse
+    val innerAlpha = (0.32f + 0.38f * clampedNight) * pulse
+    val rimAlpha = (0.50f + 0.36f * clampedNight) * pulse
+    // Wide diffuse floor reflection
+    drawOval(
+        color = accent.copy(alpha = outerAlpha.coerceIn(0f, 0.72f)),
+        topLeft = Offset(-32f, -23f),
+        size = Size(64f, 46f)
+    )
+    // Concentrated chassis perimeter neon glow
+    drawOval(
+        color = accent.copy(alpha = innerAlpha.coerceIn(0f, 0.82f)),
+        topLeft = Offset(-25.5f, -17.5f),
+        size = Size(51f, 35f)
+    )
+    // Bright neon tube rim
+    drawOval(
+        color = accent.copy(alpha = rimAlpha.coerceIn(0f, 0.95f)),
+        topLeft = Offset(-25f, -17f),
+        size = Size(50f, 34f),
+        style = Stroke(width = 1.8f + 1.1f * clampedNight)
+    )
 }
 
 private fun DrawScope.drawCarLights(

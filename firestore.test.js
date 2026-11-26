@@ -793,14 +793,14 @@ test("Garage cosmetic visual upgrades: valid equippedUpgradesMask & carVisualsJs
   await assertSucceeds(
     hostDb.collection("driverProfiles").doc(HOST_UID).set(
       makeDriverProfilePayload(HOST_UID, "Alex", "RCALEX01", {
-        equippedUpgradesMask: 127,
-        carVisualsJson: "v1|3|apex_formula:127:127",
+        equippedUpgradesMask: 255,
+        carVisualsJson: "v1|3|apex_formula:255:255",
       })
     )
   );
   await assertFails(
     hostDb.collection("driverProfiles").doc(HOST_UID).update({
-      equippedUpgradesMask: 999,
+      equippedUpgradesMask: 256,
       updatedAt: new Date(Date.now() - 500),
     })
   );

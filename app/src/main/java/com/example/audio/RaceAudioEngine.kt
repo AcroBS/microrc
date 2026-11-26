@@ -230,6 +230,8 @@ class RaceAudioEngine(
             return
         }
 
+        val targetMusicGain = computeMusicGain(cfg.musicEnabled, cfg.musicVolume)
+        val mpVol = targetMusicGain * 0.76f
         val targetTheme = currentRunTheme
         val targetRunId = runChangeCounter
         val needsNewPlayer = raceMediaPlayer == null ||
@@ -254,13 +256,13 @@ class RaceAudioEngine(
                             runCatching { afd.close() }
                         }
                         isLooping = true
-                        setVolume(0.76f, 0.76f)
+                        setVolume(mpVol, mpVol)
                         prepare()
                     }
                 } else {
                     MediaPlayer.create(ctx, targetTheme.rawResId)?.apply {
                         isLooping = true
-                        setVolume(0.76f, 0.76f)
+                        setVolume(mpVol, mpVol)
                     }
                 }
             }.getOrNull()
@@ -292,6 +294,7 @@ class RaceAudioEngine(
             val mp = raceMediaPlayer
             if (mp != null) {
                 runCatching {
+                    mp.setVolume(mpVol, mpVol)
                     if (!mp.isPlaying) {
                         mp.start()
                     }
@@ -527,11 +530,13 @@ class RaceAudioEngine(
                                 hatEnv *= 0.9925
                             }
 
-                            mix += padLp2 * 0.34 + subSample + melodicDry + echoedMelodic + drumMix
+                            val musicGain = computeMusicGain(cfg.musicEnabled, cfg.musicVolume).toDouble()
+                            mix += (padLp2 * 0.34 + subSample + melodicDry + echoedMelodic + drumMix) * musicGain
                         }
 
                         // Per-car smooth slewed RC electric motor sounds during active races
-                        if (cfg.carSfxEnabled && inActiveRace) {
+                        val sfxGain = computeSfxGain(cfg.carSfxEnabled, cfg.sfxVolume).toDouble()
+                        if (sfxGain > 0.0001 && inActiveRace) {
                             val racersCount = snap?.racers?.size?.coerceAtMost(4) ?: 0
                             for (c in 0 until racersCount) {
                                 val v = carVoices[c]
@@ -542,7 +547,7 @@ class RaceAudioEngine(
                                 v.phaseWhine = (v.phaseWhine + (v.currentFreq * 2.01) / sampleRate) % 1.0
                                 val tri = 1.0 - 4.0 * abs(v.phaseMain - 0.5)
                                 val whine = sin(2.0 * PI * v.phaseWhine)
-                                mix += (tri * 0.65 + whine * 0.35) * v.currentGain
+                                mix += (tri * 0.65 + whine * 0.35) * v.currentGain * sfxGain
                             }
                         }
 
@@ -621,6 +626,12 @@ class RaceAudioEngine(
     }
 
     companion object {
+        fun computeMusicGain(musicEnabled: Boolean, musicVolume: Float): Float =
+            if (musicEnabled) musicVolume.coerceIn(0f, 1f) else 0f
+
+        fun computeSfxGain(carSfxEnabled: Boolean, sfxVolume: Float): Float =
+            if (carSfxEnabled) sfxVolume.coerceIn(0f, 1f) else 0f
+
         private fun midiToHz(midi: Int): Double = 440.0 * 2.0.pow((midi - 69) / 12.0)
 
         val THEMES: List<RaceTrackTheme> = listOf(

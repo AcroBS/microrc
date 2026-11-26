@@ -1037,6 +1037,7 @@ fun MicroRCApp(
                     profile = profile,
                     playStreak = playStreak,
                     onSaveCarAndColors = viewModel::updateCarAndColors,
+                    onApplyCarLook = viewModel::applyCarLook,
                     onUnlockUpgrade = viewModel::unlockCarUpgrade,
                     onToggleUpgrade = viewModel::toggleCarUpgrade,
                     onBack = { navController.popBackStack() }
@@ -1062,6 +1063,9 @@ fun MicroRCApp(
                         viewModel.updateRaceRules(updatedRules)
                     },
                     onSaveControlSettings = viewModel::updateControlSettings,
+                    onUpdateSwapControls = viewModel::updateSwapControls,
+                    onUpdateShowLiveLapDelta = viewModel::updateShowLiveLapDelta,
+                    onUpdateShowTrackMiniMap = viewModel::updateShowTrackMiniMap,
                     onUpdateAudio = viewModel::updateAudioSettings,
                     onUpdateThemeSettings = viewModel::updateThemeSettings,
                     onToggleDailyNotifications = viewModel::setDailyNotificationsEnabled,
@@ -1273,6 +1277,33 @@ fun MicroRCApp(
                     profile
                 }
 
+                val pbLapMs = remember(
+                    localLeaderboard,
+                    raceSnapshot?.gameMode,
+                    raceSnapshot?.trackId,
+                    raceSnapshot?.totalLaps,
+                    lobbyState?.activeCustomTrack?.id,
+                    lobbyState?.trackId,
+                    lobbyState?.totalLaps,
+                    activeTrack?.id?.name,
+                    effectiveRules.gameMode,
+                    effectiveRules.totalLaps
+                ) {
+                    val modeName = raceSnapshot?.gameMode ?: effectiveRules.gameMode
+                    val modeEnum = runCatching { GameMode.valueOf(modeName) }.getOrDefault(GameMode.RACE)
+                    val trackKey = lobbyState?.activeCustomTrack?.id
+                        ?: raceSnapshot?.trackId
+                        ?: activeTrack?.id?.name
+                        ?: lobbyState?.trackId
+                        ?: com.example.model.TrackId.LIVING_ROOM_GP.name
+                    val laps = raceSnapshot?.totalLaps ?: lobbyState?.totalLaps ?: effectiveRules.totalLaps
+                    val exactKey = com.example.model.LeaderboardBoardKey.build(modeEnum, trackKey, laps)
+                    localLeaderboard.find { it.boardKey == exactKey }?.bestLapTimeMs?.takeIf { it > 0L }
+                        ?: localLeaderboard
+                            .filter { it.gameMode == modeEnum.name && it.trackKey == trackKey && it.bestLapTimeMs > 0L }
+                            .minOfOrNull { it.bestLapTimeMs }
+                }
+
                 RaceScreen(
                     profile = raceProfile,
                     snapshot = raceSnapshot,
@@ -1289,6 +1320,7 @@ fun MicroRCApp(
                     isOnlineSession = isOnlineSession,
                     onlinePingMs = if (isOnlineSession) onlinePingMs else null,
                     isOnlineFallback = isOnlineSession && isOnlineFallback,
+                    personalBestLapMs = pbLapMs,
                     onToggleOverviewCamera = viewModel::toggleOverviewCamera,
                     onUpdateControlInput = { throttle, steer ->
                         if (isOnlineSession) {

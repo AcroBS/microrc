@@ -161,7 +161,9 @@ enum class CarSpeedPreset(
 data class AudioSettings(
     val musicEnabled: Boolean = true,
     val carSfxEnabled: Boolean = true,
-    val hapticsEnabled: Boolean = true
+    val hapticsEnabled: Boolean = true,
+    val musicVolume: Float = 0.8f,
+    val sfxVolume: Float = 0.8f
 )
 
 enum class AppThemeMode(val label: String) {

@@ -92,6 +92,11 @@ class PreferencesRepository(context: Context) {
         val AUDIO_MUSIC_ENABLED = booleanPreferencesKey("audio_music_enabled")
         val AUDIO_SFX_ENABLED = booleanPreferencesKey("audio_sfx_enabled")
         val AUDIO_HAPTICS_ENABLED = booleanPreferencesKey("audio_haptics_enabled")
+        val AUDIO_MUSIC_VOLUME = floatPreferencesKey("audio_music_volume")
+        val AUDIO_SFX_VOLUME = floatPreferencesKey("audio_sfx_volume")
+        val SWAP_CONTROLS = booleanPreferencesKey("swap_controls")
+        val SHOW_LIVE_LAP_DELTA = booleanPreferencesKey("show_live_lap_delta")
+        val SHOW_TRACK_MINI_MAP = booleanPreferencesKey("show_track_mini_map")
         val THEME_MODE = stringPreferencesKey("theme_mode")
         val DYNAMIC_COLOR_ENABLED = booleanPreferencesKey("dynamic_color_enabled")
         val CUSTOM_TRACKS_JSON = stringPreferencesKey("custom_tracks_json")
@@ -140,6 +145,9 @@ class PreferencesRepository(context: Context) {
             tiltSensitivity = sensitivity,
             autoGasInTilt = true,
             sliderSensitivity = sliderSensitivity,
+            swapControls = prefs[Keys.SWAP_CONTROLS] ?: false,
+            showLiveLapDelta = prefs[Keys.SHOW_LIVE_LAP_DELTA] ?: true,
+            showTrackMiniMap = prefs[Keys.SHOW_TRACK_MINI_MAP] ?: true,
             carUpgradesByCarId = normalizedUpgrades,
             earnedUpgradeTokens = resolvedEarnedTokens
         )
@@ -179,7 +187,9 @@ class PreferencesRepository(context: Context) {
         AudioSettings(
             musicEnabled = prefs[Keys.AUDIO_MUSIC_ENABLED] ?: true,
             carSfxEnabled = prefs[Keys.AUDIO_SFX_ENABLED] ?: true,
-            hapticsEnabled = prefs[Keys.AUDIO_HAPTICS_ENABLED] ?: true
+            hapticsEnabled = prefs[Keys.AUDIO_HAPTICS_ENABLED] ?: true,
+            musicVolume = (prefs[Keys.AUDIO_MUSIC_VOLUME] ?: 0.8f).coerceIn(0f, 1f),
+            sfxVolume = (prefs[Keys.AUDIO_SFX_VOLUME] ?: 0.8f).coerceIn(0f, 1f)
         )
     }
 
@@ -409,6 +419,40 @@ class PreferencesRepository(context: Context) {
         }
     }
 
+    suspend fun applyCarLook(
+        carType: RcCarType,
+        primaryArgb: Long,
+        accentArgb: Long,
+        equippedMask: Int
+    ) {
+        dataStore.edit { prefs ->
+            prefs[Keys.CAR_TYPE] = carType.name
+            prefs[Keys.PRIMARY_COLOR] = primaryArgb
+            prefs[Keys.ACCENT_COLOR] = accentArgb
+
+            val streakCurrent = prefs[Keys.STREAK_CURRENT_DAYS] ?: 0
+            val streakBest = prefs[Keys.STREAK_BEST_DAYS] ?: 0
+            val decodedVisuals = CarVisualCodec.decode(prefs[Keys.CAR_UPGRADES_JSON])
+            val map = CarVisualCodec.normalizeMap(decodedVisuals.upgradesByCarId).toMutableMap()
+            val existing = map[carType.storageId] ?: CarVisualUpgrades()
+            val cleanUnlocked = existing.sanitizedUnlockedMask
+            val cleanEquipped = CarVisualUpgrades.sanitizeMask(equippedMask) and cleanUnlocked
+            map[carType.storageId] = CarVisualUpgrades(
+                unlockedMask = cleanUnlocked,
+                equippedMask = cleanEquipped
+            )
+            val minUnlockedTokens = map.values.sumOf { it.unlockedCount }
+            val earnedTokens = maxOf(
+                prefs[Keys.GARAGE_EARNED_TOKENS]
+                    ?: PlayStreakCalculator.backfillInitialEarnedTokens(streakCurrent, streakBest),
+                decodedVisuals.earnedTokens,
+                minUnlockedTokens
+            )
+            prefs[Keys.GARAGE_EARNED_TOKENS] = earnedTokens
+            prefs[Keys.CAR_UPGRADES_JSON] = CarVisualCodec.encode(earnedTokens, map)
+        }
+    }
+
     suspend fun updateControlSettings(
         controlMode: ControlMode,
         tiltSensitivity: Float,
@@ -421,6 +465,18 @@ class PreferencesRepository(context: Context) {
             it[Keys.AUTO_GAS_TILT] = true
             it[Keys.SLIDER_SENSITIVITY] = sliderSensitivity.coerceIn(0.7f, 2.6f)
         }
+    }
+
+    suspend fun updateSwapControls(enabled: Boolean) {
+        dataStore.edit { it[Keys.SWAP_CONTROLS] = enabled }
+    }
+
+    suspend fun updateShowLiveLapDelta(enabled: Boolean) {
+        dataStore.edit { it[Keys.SHOW_LIVE_LAP_DELTA] = enabled }
+    }
+
+    suspend fun updateShowTrackMiniMap(enabled: Boolean) {
+        dataStore.edit { it[Keys.SHOW_TRACK_MINI_MAP] = enabled }
     }
 
     suspend fun updateRaceRules(rules: RaceRulesSettings) {
@@ -449,6 +505,8 @@ class PreferencesRepository(context: Context) {
             it[Keys.AUDIO_MUSIC_ENABLED] = audio.musicEnabled
             it[Keys.AUDIO_SFX_ENABLED] = audio.carSfxEnabled
             it[Keys.AUDIO_HAPTICS_ENABLED] = audio.hapticsEnabled
+            it[Keys.AUDIO_MUSIC_VOLUME] = audio.musicVolume.coerceIn(0f, 1f)
+            it[Keys.AUDIO_SFX_VOLUME] = audio.sfxVolume.coerceIn(0f, 1f)
         }
     }
 

@@ -161,6 +161,11 @@ enum class CosmeticUpgradeSlot(
         storageKey = "custom_trail",
         title = "Boost & Tire Trail",
         description = "Plasma nitro jet & colored drift trails"
+    ),
+    UNDERGLOW_NEON(
+        storageKey = "underglow_neon",
+        title = "Underglow Neon Kit",
+        description = "Soft neon ground halo matching accent"
     );
 
     val bitFlag: Int
@@ -199,6 +204,7 @@ data class CarVisualUpgrades(
     val hasRoofLedLightbar: Boolean get() = isEquipped(CosmeticUpgradeSlot.ROOF_LED_LIGHTBAR)
     val hasRacingLogo: Boolean get() = isEquipped(CosmeticUpgradeSlot.RACING_LOGO)
     val hasCustomTrail: Boolean get() = isEquipped(CosmeticUpgradeSlot.CUSTOM_TRAIL)
+    val hasUnderglowNeon: Boolean get() = isEquipped(CosmeticUpgradeSlot.UNDERGLOW_NEON)
 
     fun withUnlockedAndEquipped(slot: CosmeticUpgradeSlot): CarVisualUpgrades {
         val nextUnlocked = (sanitizedUnlockedMask or slot.bitFlag) and ALL_SLOTS_MASK
@@ -217,7 +223,7 @@ data class CarVisualUpgrades(
     }
 
     companion object {
-        const val ALL_SLOTS_MASK: Int = (1 shl 7) - 1 // 127
+        const val ALL_SLOTS_MASK: Int = (1 shl 8) - 1 // 255
 
         fun sanitizeMask(rawMask: Int): Int = rawMask and ALL_SLOTS_MASK
 
@@ -356,6 +362,9 @@ data class PlayerProfile(
     val tiltSensitivity: Float = 1.25f,
     val autoGasInTilt: Boolean = false,
     val sliderSensitivity: Float = 1.45f,
+    val swapControls: Boolean = false,
+    val showLiveLapDelta: Boolean = true,
+    val showTrackMiniMap: Boolean = true,
     val carUpgradesByCarId: Map<String, CarVisualUpgrades> = emptyMap(),
     val earnedUpgradeTokens: Int = 0
 ) {
