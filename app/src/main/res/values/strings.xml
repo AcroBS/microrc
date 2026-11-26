@@ -24,4 +24,7 @@
     <string name="daily_challenge_channel_desc">Notifies when a new deterministic Daily GP map is available</string>
     <string name="leaderboard_alert_channel_name">Friend Leaderboard Records</string>
     <string name="leaderboard_alert_channel_desc">Alerts when a friend posts a new time or score to any track leaderboard</string>
+    <string name="garage_subtitle">Chassis, Paint &amp; Cosmetic Upgrades</string>
+    <string name="garage_saved_badge">Saved to Garage</string>
+    <string name="garage_cosmetic_notice">Visual only • Zero impact on speed, handling, grip, or physics</string>
 </resources>

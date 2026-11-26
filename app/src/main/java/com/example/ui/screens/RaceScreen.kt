@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Refresh
@@ -79,6 +81,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -419,6 +422,13 @@ fun RaceScreen(
     val activeEvent = runCatching {
         ExternalEventType.valueOf(snapshot?.activeEvent ?: ExternalEventType.NONE.name)
     }.getOrDefault(ExternalEventType.NONE)
+    val isNightActive = track.isNightTrack ||
+        (activeEvent == ExternalEventType.DAY_NIGHT && snapshot?.phase == RacePhase.RACING.name)
+    val nightIntensity by animateFloatAsState(
+        targetValue = if (isNightActive) 1f else 0f,
+        animationSpec = tween(durationMillis = 1200),
+        label = "night_intensity"
+    )
     val winCond = runCatching {
         WinCondition.valueOf(snapshot?.winCondition ?: rules.winCondition)
     }.getOrDefault(WinCondition.FIRST_TO_FINISH)
@@ -433,11 +443,12 @@ fun RaceScreen(
     val tertiaryAccent = colorScheme.tertiary
     val errorAccent = colorScheme.error
     val goldAccent = adaptiveGoldColor()
+    val worldEdgeBgColor = lerp(Color(track.id.baseBgColorHex), Color(0xFF02040A), nightIntensity)
 
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(track.id.baseBgColorHex))
+            .background(worldEdgeBgColor)
     ) {
         val isWideHud = maxWidth >= 560.dp
         // World + Screen Weather Canvas
@@ -484,7 +495,8 @@ fun RaceScreen(
                         stuntState = stuntState,
                         rockets = snapshot?.rockets.orEmpty(),
                         ghostCar = ghostCar,
-                        isDriftMode = isDriftMode
+                        isDriftMode = isDriftMode,
+                        nightIntensity = nightIntensity
                     )
                 }
             } else {
@@ -513,7 +525,8 @@ fun RaceScreen(
                         stuntState = stuntState,
                         rockets = snapshot?.rockets.orEmpty(),
                         ghostCar = ghostCar,
-                        isDriftMode = isDriftMode
+                        isDriftMode = isDriftMode,
+                        nightIntensity = nightIntensity
                     )
                 }
             }
@@ -793,6 +806,7 @@ fun RaceScreen(
                         ExternalEventType.EARTHQUAKE -> Icons.Default.Vibration to primaryAccent
                         ExternalEventType.WIND -> Icons.Default.Air to tertiaryAccent
                         ExternalEventType.SNOW -> Icons.Default.AcUnit to hudOnSurface
+                        ExternalEventType.DAY_NIGHT -> Icons.Default.DarkMode to Color(0xFF90CAF9)
                         ExternalEventType.NONE -> Icons.Default.WaterDrop to secondaryAccent
                     }
                     val remSec = ((snapshot.eventRemainingMs + 999L) / 1000L).coerceAtLeast(1L)

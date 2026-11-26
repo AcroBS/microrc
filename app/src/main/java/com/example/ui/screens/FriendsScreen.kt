@@ -79,6 +79,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.example.model.CarVisualUpgrades
 import com.example.model.CustomTrackData
 import com.example.model.DriverProfileDoc
 import com.example.model.FriendUiModel
@@ -732,7 +733,8 @@ private fun FriendStatusCard(
                             carType = friend.carType,
                             primaryColor = Color(friend.primaryColorArgb),
                             accentColor = Color(friend.accentColorArgb),
-                            scale = 0.85f
+                            scale = 0.85f,
+                            visualUpgrades = CarVisualUpgrades.fromEquippedMask(friend.equippedUpgradesMask)
                         )
                     }
                     Box(

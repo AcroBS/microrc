@@ -54,6 +54,7 @@ data class OnlineRoomPlayerDoc(
     val carType: String = RcCarType.VOLT_BUGGY.name,
     val primaryColorArgb: Long = 0xFFFF5722,
     val accentColorArgb: Long = 0xFFFFD54F,
+    val equippedUpgradesMask: Int = 0,
     val ready: Boolean = false,
     val host: Boolean = false,
     val rematchVote: String = "",
@@ -98,6 +99,7 @@ data class LeaderboardEntryDoc(
     val carType: String = RcCarType.VOLT_BUGGY.name,
     val primaryColorArgb: Long = 0xFFFF5722,
     val accentColorArgb: Long = 0xFFFFD54F,
+    val equippedUpgradesMask: Int = 0,
     val gameMode: String = GameMode.RACE.name,
     val trackKey: String = TrackId.LIVING_ROOM_GP.name,
     val boardKey: String = "RACE_LIVING_ROOM_GP_3L",
@@ -121,6 +123,7 @@ data class GhostRunDoc(
     val carType: String = RcCarType.VOLT_BUGGY.name,
     val primaryColorArgb: Long = 0xFFFF5722,
     val accentColorArgb: Long = 0xFFFFD54F,
+    val equippedUpgradesMask: Int = 0,
     val boardKey: String = "RACE_LIVING_ROOM_GP_3L",
     val trackId: String = TrackId.LIVING_ROOM_GP.name,
     val totalLaps: Long = 3L,
@@ -178,6 +181,7 @@ data class LocalLeaderboardRecord(
     val carType: String,
     val primaryColorArgb: Long,
     val accentColorArgb: Long,
+    val equippedUpgradesMask: Int = 0,
     val bestRaceTimeMs: Long = 0L,
     val bestLapTimeMs: Long = 0L,
     val bestScore: Int = 0,
@@ -200,6 +204,7 @@ data class GhostRunPlayback(
     val carType: String,
     val primaryColorArgb: Long,
     val accentColorArgb: Long,
+    val equippedUpgradesMask: Int = 0,
     val boardKey: String,
     val trackId: String,
     val totalLaps: Int,
@@ -213,6 +218,7 @@ data class ActiveGhostCarState(
     val carType: String,
     val primaryColorArgb: Long,
     val accentColorArgb: Long,
+    val equippedUpgradesMask: Int = 0,
     val finishTimeMs: Long,
     val bestLapMs: Long,
     val x: Float,
@@ -449,7 +455,8 @@ object CustomTrackCodec {
                 if (pr.isSolidObstacle) 1 else 0
             )
         }
-        return "$VERSION_PREFIX|$ptsStr|$boostsStr|$itemsStr|$rampsStr|$propsStr".take(24_500)
+        val nightFlag = if (track.isNightTrack) "1" else "0"
+        return "$VERSION_PREFIX|$ptsStr|$boostsStr|$itemsStr|$rampsStr|$propsStr|$nightFlag".take(24_500)
     }
 
     fun decode(
@@ -544,6 +551,8 @@ object CustomTrackCodec {
                 )
             }
 
+        val isNightTrack = sections.getOrNull(6)?.trim() == "1"
+
         return CustomTrackData(
             id = LeaderboardBoardKey.sanitizeKeyToken(id, 36),
             name = name.trim().take(32).ifEmpty { "Custom Circuit" },
@@ -555,7 +564,8 @@ object CustomTrackCodec {
             ramps = ramps,
             props = props,
             creatorUid = creatorUid.trim(),
-            creatorName = creatorName.trim().take(24)
+            creatorName = creatorName.trim().take(24),
+            isNightTrack = isNightTrack
         )
     }
 

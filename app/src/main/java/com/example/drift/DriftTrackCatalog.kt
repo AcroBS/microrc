@@ -67,9 +67,11 @@ object DriftTrackCatalog {
         preferredTheme: TrackId? = null,
         roadHalfWidth: Float = 122f,
         trackIdOverride: String? = null,
-        trackNameOverride: String? = null
+        trackNameOverride: String? = null,
+        forceNight: Boolean? = null
     ): CustomTrackData {
         val rng = Random(seed)
+        val isNightTrack = forceNight ?: (rng.nextFloat() < 0.35f)
         val driftThemes = listOf(
             TrackId.WAREHOUSE_DRIFT,
             TrackId.NEON_ROOFTOP,
@@ -77,7 +79,9 @@ object DriftTrackCatalog {
             TrackId.LIVING_ROOM_GP
         )
         val theme = preferredTheme ?: driftThemes[rng.nextInt(driftThemes.size)]
-        val adjectives = listOf("Drift", "Slide", "Apex", "Tandem", "Hairpin", "Gymkhana", "Touge")
+        val dayAdjectives = listOf("Drift", "Slide", "Apex", "Tandem", "Hairpin", "Gymkhana", "Touge")
+        val nightAdjectives = listOf("Midnight", "Shadow", "Nocturne", "Moonlit", "Eclipse")
+        val adjectives = if (isNightTrack) nightAdjectives else dayAdjectives
         val nouns = listOf("Loop", "Switchback", "Slalom", "Yard", "Circuit", "Run")
         val suffixNum = ((seed and 0x7FFFFFFFL) % 90L + 10L)
         val trackName = trackNameOverride
@@ -177,7 +181,8 @@ object DriftTrackCatalog {
             boostPads = boosts,
             itemSpawns = emptyList(),
             ramps = emptyList(),
-            props = props
+            props = props,
+            isNightTrack = isNightTrack
         )
     }
 

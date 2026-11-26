@@ -120,7 +120,8 @@ enum class ExternalEventType(val displayName: String) {
     RAIN("Rainfall"),
     EARTHQUAKE("Earthquake"),
     WIND("Crosswind"),
-    SNOW("Snowfall")
+    SNOW("Snowfall"),
+    DAY_NIGHT("Day/Night")
 }
 
 @JsonClass(generateAdapter = true)
@@ -198,6 +199,7 @@ data class LobbyPlayer(
     val carType: String = RcCarType.VOLT_BUGGY.name,
     val primaryColorArgb: Long = 0xFFFF5722,
     val accentColorArgb: Long = 0xFFFFD54F,
+    val equippedUpgradesMask: Int = 0,
     val sessionPoints: Int = 0,
     val wins: Int = 0
 )
@@ -299,7 +301,9 @@ data class RacerState(
     val portalWarpSeq: Int = 0,
     val electroShockAuraMs: Long = 0L,
     val electroParalyzedMs: Long = 0L,
-    val laserBeamMs: Long = 0L
+    val laserBeamMs: Long = 0L,
+    val isBraking: Boolean = false,
+    val equippedUpgradesMask: Int = 0
 )
 
 @JsonClass(generateAdapter = true)

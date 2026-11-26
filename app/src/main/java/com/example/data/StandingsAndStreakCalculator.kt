@@ -18,10 +18,36 @@ data class PlayStreakState(
 ) {
     val isFiveDayMilestone: Boolean
         get() = currentStreakDays >= 5 && currentStreakDays % 5 == 0
+
+    val daysUntilNextUnlock: Int
+        get() = PlayStreakCalculator.daysUntilNextUnlock(currentStreakDays)
 }
 
 object PlayStreakCalculator {
     private val DATE_REGEX = Regex("""^\d{8}$""")
+
+    fun daysUntilNextUnlock(currentStreakDays: Int): Int {
+        val safe = currentStreakDays.coerceAtLeast(0)
+        val mod = safe % 5
+        return 5 - mod
+    }
+
+    fun backfillInitialEarnedTokens(storedCurrent: Int, storedBest: Int): Int {
+        return maxOf(storedBest, storedCurrent).coerceAtLeast(0) / 5
+    }
+
+    fun tokenAwardDeltaOnActivity(
+        prevLastDateKey: String?,
+        nextState: PlayStreakState,
+        lastTokenAwardedDateKey: String?
+    ): Int {
+        val prevClean = prevLastDateKey?.trim().orEmpty()
+        val lastTokenClean = lastTokenAwardedDateKey?.trim().orEmpty()
+        val isNewDayTransition = prevClean != nextState.lastActiveDateKey
+        val hitMilestone = nextState.isFiveDayMilestone
+        val notAwardedToday = lastTokenClean != nextState.lastActiveDateKey
+        return if (isNewDayTransition && hitMilestone && notAwardedToday) 1 else 0
+    }
 
     fun localDateKey(
         epochMillis: Long = System.currentTimeMillis(),

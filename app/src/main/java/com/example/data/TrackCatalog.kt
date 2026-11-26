@@ -334,7 +334,8 @@ object TrackCatalog {
             props = data.props,
             ramps = ramps,
             customId = data.id,
-            customName = data.name
+            customName = data.name,
+            isNightTrack = data.isNightTrack
         )
     }
 
@@ -351,7 +352,8 @@ object TrackCatalog {
             boostPads = track.boostPads,
             itemSpawns = track.itemSpawns,
             ramps = track.ramps,
-            props = track.props
+            props = track.props,
+            isNightTrack = track.isNightTrack
         )
     }
 
@@ -440,11 +442,15 @@ object TrackCatalog {
         preferredTheme: TrackId? = null,
         roadHalfWidth: Float = 112f,
         trackIdOverride: String? = null,
-        trackNameOverride: String? = null
+        trackNameOverride: String? = null,
+        forceNight: Boolean? = null
     ): CustomTrackData {
         val rng = kotlin.random.Random(seed)
+        val isNightTrack = forceNight ?: (rng.nextFloat() < 0.35f)
         val theme = preferredTheme ?: TrackId.entries[rng.nextInt(TrackId.entries.size)]
-        val adjectives = listOf("Hyper", "Turbo", "Apex", "Drift", "Nitro", "Volt", "Micro", "Ridge")
+        val dayAdjectives = listOf("Hyper", "Turbo", "Apex", "Drift", "Nitro", "Volt", "Micro", "Ridge")
+        val nightAdjectives = listOf("Midnight", "Nocturne", "Shadow", "Eclipse", "Starlight", "Moonlit")
+        val adjectives = if (isNightTrack) nightAdjectives else dayAdjectives
         val nouns = listOf("Circuit", "Loop", "Speedway", "Chicane", "Run", "Grand Prix", "Sprint")
         val suffixNum = ((seed and 0x7FFFFFFFL) % 90L + 10L)
         val trackName = trackNameOverride ?: "${adjectives[rng.nextInt(adjectives.size)]} ${nouns[rng.nextInt(nouns.size)]} #$suffixNum"
@@ -525,7 +531,8 @@ object TrackCatalog {
             boostPads = boosts,
             itemSpawns = items,
             ramps = ramps,
-            props = props
+            props = props,
+            isNightTrack = isNightTrack
         )
     }
 

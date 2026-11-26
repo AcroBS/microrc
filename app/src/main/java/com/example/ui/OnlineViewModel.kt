@@ -10,6 +10,8 @@ import com.example.data.TrackCatalog
 import com.example.data.formatUserFacingOnlineErrorOrNull
 import com.example.data.rethrowIfScopeCancellation
 import com.example.model.ArenaShape
+import com.example.model.CarVisualCodec
+import com.example.model.CarVisualUpgrades
 import com.example.model.ChallengeInviteResponse
 import com.example.model.ChallengeProgressEvaluator
 import com.example.model.ChallengedFriendStatus
@@ -470,6 +472,16 @@ class OnlineViewModel(
                     activeRoom = curRoom
                 )
             }
+        }
+    }
+
+    suspend fun fetchCloudGarageState(): Pair<Int, Map<String, CarVisualUpgrades>>? {
+        val doc = friendsRepository.fetchMyDriverProfile().getOrNull() ?: return null
+        val decoded = CarVisualCodec.decode(doc.carVisualsJson)
+        return if (decoded.earnedTokens > 0 || decoded.upgradesByCarId.isNotEmpty()) {
+            decoded.earnedTokens to decoded.upgradesByCarId
+        } else {
+            null
         }
     }
 

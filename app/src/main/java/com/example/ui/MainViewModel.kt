@@ -12,7 +12,9 @@ import com.example.data.TrackCatalog
 import com.example.model.ActiveGhostCarState
 import com.example.model.ArenaShape
 import com.example.model.AudioSettings
+import com.example.model.CarVisualUpgrades
 import com.example.model.ControlMode
+import com.example.model.CosmeticUpgradeSlot
 import com.example.model.CustomTrackData
 import com.example.model.DiscoveredLobby
 import com.example.model.GameMode
@@ -247,6 +249,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun unlockCarUpgrade(carType: RcCarType, slot: CosmeticUpgradeSlot) {
+        viewModelScope.launch {
+            if (prefsRepo.unlockCarUpgrade(carType, slot)) {
+                val cur = profile.value
+                val nextMap = cur.carUpgradesByCarId.toMutableMap().apply {
+                    put(carType.storageId, cur.upgradesFor(carType).withUnlockedAndEquipped(slot))
+                }
+                raceManager.updateLocalProfile(cur.copy(carUpgradesByCarId = nextMap))
+            }
+        }
+    }
+
+    fun toggleCarUpgrade(carType: RcCarType, slot: CosmeticUpgradeSlot, equipped: Boolean) {
+        viewModelScope.launch {
+            prefsRepo.toggleCarUpgrade(carType, slot, equipped)
+            val cur = profile.value
+            val currentUpgrades = cur.upgradesFor(carType)
+            if (currentUpgrades.isUnlocked(slot)) {
+                val nextMap = cur.carUpgradesByCarId.toMutableMap().apply {
+                    put(carType.storageId, currentUpgrades.withEquipped(slot, equipped))
+                }
+                raceManager.updateLocalProfile(cur.copy(carUpgradesByCarId = nextMap))
+            }
+        }
+    }
+
+    fun mergeCloudGarageState(
+        cloudEarnedTokens: Int,
+        cloudUpgradesByCarId: Map<String, CarVisualUpgrades>
+    ) {
+        viewModelScope.launch {
+            prefsRepo.mergeCloudGarageState(cloudEarnedTokens, cloudUpgradesByCarId)
+        }
+    }
+
     fun updateControlSettings(
         mode: ControlMode,
         sensitivity: Float,
@@ -357,6 +394,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     carType = rec.carType,
                     primaryColorArgb = rec.primaryColorArgb,
                     accentColorArgb = rec.accentColorArgb,
+                    equippedUpgradesMask = rec.equippedUpgradesMask,
                     boardKey = rec.boardKey,
                     trackId = rec.trackKey,
                     totalLaps = rec.totalLaps,
@@ -427,6 +465,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         carType = rec.carType,
                         primaryColorArgb = rec.primaryColorArgb,
                         accentColorArgb = rec.accentColorArgb,
+                        equippedUpgradesMask = rec.equippedUpgradesMask,
                         boardKey = rec.boardKey,
                         trackId = rec.trackKey,
                         totalLaps = rec.totalLaps,
@@ -474,6 +513,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         carType = rec.carType,
                         primaryColorArgb = rec.primaryColorArgb,
                         accentColorArgb = rec.accentColorArgb,
+                        equippedUpgradesMask = rec.equippedUpgradesMask,
                         boardKey = rec.boardKey,
                         trackId = rec.trackKey,
                         totalLaps = rec.totalLaps,
@@ -559,6 +599,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         carType = rec.carType,
                         primaryColorArgb = rec.primaryColorArgb,
                         accentColorArgb = rec.accentColorArgb,
+                        equippedUpgradesMask = rec.equippedUpgradesMask,
                         boardKey = rec.boardKey,
                         trackId = rec.trackKey,
                         totalLaps = rec.totalLaps,
@@ -599,6 +640,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         carType = rec.carType,
                         primaryColorArgb = rec.primaryColorArgb,
                         accentColorArgb = rec.accentColorArgb,
+                        equippedUpgradesMask = rec.equippedUpgradesMask,
                         boardKey = rec.boardKey,
                         trackId = rec.trackKey,
                         totalLaps = rec.totalLaps,
@@ -727,6 +769,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     carType = r.carType,
                     primaryColorArgb = r.primaryColorArgb,
                     accentColorArgb = r.accentColorArgb,
+                    equippedUpgradesMask = r.equippedUpgradesMask,
                     boardKey = r.boardKey,
                     trackId = r.trackKey,
                     totalLaps = r.totalLaps,

@@ -73,6 +73,7 @@ service cloud.firestore {
              data.host is bool &&
              data.rematchVote is string && data.rematchVote.size() <= 64 &&
              data.joinToken is string && data.joinToken.size() <= 64 &&
+             (!('equippedUpgradesMask' in data) || (data.equippedUpgradesMask is int && data.equippedUpgradesMask >= 0 && data.equippedUpgradesMask <= 127)) &&
              isValidTimestampBound(data.createdAt) &&
              isValidTimestampBound(data.updatedAt);
     }
@@ -114,6 +115,7 @@ service cloud.firestore {
              data.hasGhost is bool &&
              data.ghostId is string && data.ghostId.size() <= 128 &&
              data.publicEntry is bool &&
+             (!('equippedUpgradesMask' in data) || (data.equippedUpgradesMask is int && data.equippedUpgradesMask >= 0 && data.equippedUpgradesMask <= 127)) &&
              isValidTimestampBound(data.createdAt) &&
              isValidTimestampBound(data.updatedAt);
     }
@@ -131,6 +133,7 @@ service cloud.firestore {
              data.bestLapMs is int && data.bestLapMs >= 0 && data.bestLapMs <= 3600000 &&
              data.framesData is string && data.framesData.size() >= 3 && data.framesData.size() <= 120000 &&
              data.publicGhost is bool &&
+             (!('equippedUpgradesMask' in data) || (data.equippedUpgradesMask is int && data.equippedUpgradesMask >= 0 && data.equippedUpgradesMask <= 127)) &&
              isValidTimestampBound(data.createdAt) &&
              isValidTimestampBound(data.updatedAt);
     }
@@ -150,6 +153,8 @@ service cloud.firestore {
              data.activeRoomCode is string && data.activeRoomCode.size() <= 12 &&
              data.activeRoomName is string && data.activeRoomName.size() <= 40 &&
              data.publicProfile is bool &&
+             (!('equippedUpgradesMask' in data) || (data.equippedUpgradesMask is int && data.equippedUpgradesMask >= 0 && data.equippedUpgradesMask <= 127)) &&
+             (!('carVisualsJson' in data) || (data.carVisualsJson is string && data.carVisualsJson.size() <= 2048)) &&
              isValidTimestampBound(data.lastSeenAt) &&
              isValidTimestampBound(data.createdAt) &&
              isValidTimestampBound(data.updatedAt);
@@ -284,8 +289,8 @@ service cloud.firestore {
                          ]) &&
                          incoming().keys().hasOnly([
                            'roomId', 'userId', 'name', 'carType', 'primaryColorArgb',
-                           'accentColorArgb', 'ready', 'host', 'rematchVote', 'joinToken',
-                           'createdAt', 'updatedAt'
+                           'accentColorArgb', 'equippedUpgradesMask', 'ready', 'host',
+                           'rematchVote', 'joinToken', 'createdAt', 'updatedAt'
                          ]) &&
                          incoming().roomId == roomId &&
                          incoming().userId == request.auth.uid &&
@@ -320,7 +325,7 @@ service cloud.firestore {
                          incoming().createdAt == existing().createdAt &&
                          incoming().diff(existing()).affectedKeys().hasOnly([
                            'name', 'carType', 'primaryColorArgb', 'accentColorArgb',
-                           'ready', 'rematchVote', 'updatedAt'
+                           'equippedUpgradesMask', 'ready', 'rematchVote', 'updatedAt'
                          ]);
 
         allow delete: if isSignedIn() &&
@@ -431,9 +436,9 @@ service cloud.firestore {
                        ]) &&
                        incoming().keys().hasOnly([
                          'userId', 'driverName', 'carType', 'primaryColorArgb', 'accentColorArgb',
-                         'gameMode', 'trackKey', 'boardKey', 'totalLaps', 'bestRaceTimeMs',
-                         'bestLapTimeMs', 'bestScore', 'hasGhost', 'ghostId', 'publicEntry',
-                         'createdAt', 'updatedAt'
+                         'equippedUpgradesMask', 'gameMode', 'trackKey', 'boardKey', 'totalLaps',
+                         'bestRaceTimeMs', 'bestLapTimeMs', 'bestScore', 'hasGhost', 'ghostId',
+                         'publicEntry', 'createdAt', 'updatedAt'
                        ]) &&
                        incoming().userId == request.auth.uid &&
                        isValidLeaderboardEntry(incoming());
@@ -449,8 +454,8 @@ service cloud.firestore {
                        incoming().createdAt == existing().createdAt &&
                        incoming().diff(existing()).affectedKeys().hasOnly([
                          'driverName', 'carType', 'primaryColorArgb', 'accentColorArgb',
-                         'totalLaps', 'bestRaceTimeMs', 'bestLapTimeMs', 'bestScore',
-                         'hasGhost', 'ghostId', 'publicEntry', 'updatedAt'
+                         'equippedUpgradesMask', 'totalLaps', 'bestRaceTimeMs', 'bestLapTimeMs',
+                         'bestScore', 'hasGhost', 'ghostId', 'publicEntry', 'updatedAt'
                        ]);
 
       allow delete: if isSignedIn() && isValidId(entryId) && existing().userId == request.auth.uid;
@@ -470,8 +475,8 @@ service cloud.firestore {
                        ]) &&
                        incoming().keys().hasOnly([
                          'userId', 'driverName', 'carType', 'primaryColorArgb', 'accentColorArgb',
-                         'boardKey', 'trackId', 'totalLaps', 'finishTimeMs', 'bestLapMs',
-                         'framesData', 'publicGhost', 'createdAt', 'updatedAt'
+                         'equippedUpgradesMask', 'boardKey', 'trackId', 'totalLaps', 'finishTimeMs',
+                         'bestLapMs', 'framesData', 'publicGhost', 'createdAt', 'updatedAt'
                        ]) &&
                        incoming().userId == request.auth.uid &&
                        isValidGhostRun(incoming());
@@ -486,8 +491,8 @@ service cloud.firestore {
                        incoming().createdAt == existing().createdAt &&
                        incoming().diff(existing()).affectedKeys().hasOnly([
                          'driverName', 'carType', 'primaryColorArgb', 'accentColorArgb',
-                         'totalLaps', 'finishTimeMs', 'bestLapMs', 'framesData',
-                         'publicGhost', 'updatedAt'
+                         'equippedUpgradesMask', 'totalLaps', 'finishTimeMs', 'bestLapMs',
+                         'framesData', 'publicGhost', 'updatedAt'
                        ]);
 
       allow delete: if isSignedIn() && isValidId(ghostId) && existing().userId == request.auth.uid;
@@ -509,8 +514,9 @@ service cloud.firestore {
                        ]) &&
                        incoming().keys().hasOnly([
                          'userId', 'driverName', 'searchName', 'friendCode', 'carType',
-                         'primaryColorArgb', 'accentColorArgb', 'online', 'activityStatus',
-                         'activeRoomId', 'activeRoomCode', 'activeRoomName', 'publicProfile',
+                         'primaryColorArgb', 'accentColorArgb', 'equippedUpgradesMask',
+                         'carVisualsJson', 'online', 'activityStatus', 'activeRoomId',
+                         'activeRoomCode', 'activeRoomName', 'publicProfile',
                          'lastSeenAt', 'createdAt', 'updatedAt'
                        ]) &&
                        incoming().userId == request.auth.uid &&
@@ -526,7 +532,8 @@ service cloud.firestore {
                        incoming().createdAt == existing().createdAt &&
                        incoming().diff(existing()).affectedKeys().hasOnly([
                          'driverName', 'searchName', 'carType', 'primaryColorArgb',
-                         'accentColorArgb', 'online', 'activityStatus', 'activeRoomId',
+                         'accentColorArgb', 'equippedUpgradesMask', 'carVisualsJson',
+                         'online', 'activityStatus', 'activeRoomId',
                          'activeRoomCode', 'activeRoomName', 'publicProfile',
                          'lastSeenAt', 'updatedAt'
                        ]);

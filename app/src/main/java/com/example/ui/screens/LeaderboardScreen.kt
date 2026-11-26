@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import com.example.util.SessionNotificationHelper
 import com.example.data.DailyChallengeCatalog
 import com.example.data.TrackCatalog
+import com.example.model.CarVisualUpgrades
 import com.example.model.CustomTrackData
 import com.example.model.GameMode
 import com.example.model.GhostCodec
@@ -262,6 +263,7 @@ fun LeaderboardScreen(
                     carType = localPb.carType,
                     primaryColorArgb = localPb.primaryColorArgb,
                     accentColorArgb = localPb.accentColorArgb,
+                    equippedUpgradesMask = localPb.equippedUpgradesMask,
                     boardKey = localPb.boardKey,
                     trackId = localPb.trackKey,
                     totalLaps = localPb.totalLaps,
@@ -808,10 +810,33 @@ fun LeaderboardScreen(
                                                 .fillMaxWidth()
                                                 .height(60.dp)
                                                 .clip(RoundedCornerShape(10.dp))
-                                                .background(Color(previewDef.id.baseBgColorHex).copy(alpha = 0.85f))
+                                                .background(
+                                                    if (cTrack.isNightTrack) {
+                                                        Color(0xFF02040A)
+                                                    } else {
+                                                        Color(previewDef.id.baseBgColorHex).copy(alpha = 0.85f)
+                                                    }
+                                                )
                                         ) {
                                             Canvas(modifier = Modifier.fillMaxSize()) {
                                                 drawTrackMiniMap(previewDef)
+                                            }
+                                            if (cTrack.isNightTrack) {
+                                                Surface(
+                                                    color = Color(0xFF0D1B2A).copy(alpha = 0.92f),
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    border = BorderStroke(1.dp, Color(0xFF90CAF9).copy(alpha = 0.7f)),
+                                                    modifier = Modifier
+                                                        .align(Alignment.TopStart)
+                                                        .padding(4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "NIGHT",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = Color(0xFF90CAF9),
+                                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                                    )
+                                                }
                                             }
                                         }
                                         Spacer(modifier = Modifier.height(6.dp))
@@ -1279,7 +1304,8 @@ fun LeaderboardScreen(
                                                 carType = car,
                                                 primaryColor = Color(entry.primaryColorArgb),
                                                 accentColor = Color(entry.accentColorArgb),
-                                                scale = 0.72f
+                                                scale = 0.72f,
+                                                visualUpgrades = CarVisualUpgrades.fromEquippedMask(entry.equippedUpgradesMask)
                                             )
                                         }
                                     }

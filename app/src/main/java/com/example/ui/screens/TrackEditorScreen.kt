@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Casino
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.OpenWith
@@ -50,6 +51,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -74,6 +76,8 @@ import androidx.compose.ui.unit.dp
 import com.example.data.TrackCatalog
 import com.example.model.BoostPad
 import com.example.model.CustomTrackData
+import com.example.model.RacerState
+import com.example.model.RcCarType
 import com.example.model.TrackId
 import com.example.model.TrackPoint
 import com.example.model.TrackRamp
@@ -231,7 +235,7 @@ fun TrackEditorScreen(
                 val overlayTextColor = MaterialTheme.colorScheme.primary
 
                 Surface(
-                    color = Color(selectedTheme.baseBgColorHex),
+                    color = if (draft.isNightTrack) Color(0xFF02040A) else Color(selectedTheme.baseBgColorHex),
                     shape = RoundedCornerShape(18.dp),
                     border = BorderStroke(
                         width = if (draggingNodeIdx >= 0) 2.dp else 1.5.dp,
@@ -417,12 +421,30 @@ fun TrackEditorScreen(
                                 translate(tx, ty)
                                 scale(scale, scale, Offset.Zero)
                             }) {
+                                val previewRacers = if (draft.isNightTrack && previewTrack.centerline.size >= 2) {
+                                    val (sx, sy, sa) = TrackCatalog.gridStartTransform(previewTrack, 0)
+                                    listOf(
+                                        RacerState(
+                                            playerId = "preview_car",
+                                            name = "Preview",
+                                            carType = RcCarType.APEX_FORMULA.name,
+                                            primaryColorArgb = 0xFF00E5FFL,
+                                            accentColorArgb = 0xFFFFFFFFL,
+                                            x = sx,
+                                            y = sy,
+                                            angleRad = sa
+                                        )
+                                    )
+                                } else {
+                                    emptyList()
+                                }
                                 drawTrackWorld(
                                     track = previewTrack,
                                     itemBoxes = emptyList(),
                                     hazards = emptyList(),
-                                    racers = emptyList(),
-                                    animTimeSec = 0f
+                                    racers = previewRacers,
+                                    animTimeSec = 0f,
+                                    nightIntensity = if (draft.isNightTrack) 0.90f else 0f
                                 )
 
                                 val ctrl = draft.controlPoints
@@ -552,7 +574,8 @@ fun TrackEditorScreen(
                         onClick = {
                             draft = TrackCatalog.defaultEditorOval(selectedTheme).copy(
                                 id = draft.id,
-                                name = draft.name
+                                name = draft.name,
+                                isNightTrack = draft.isNightTrack
                             )
                             selectedNodeIdx = 0
                         },
@@ -612,6 +635,50 @@ fun TrackEditorScreen(
                     }
                 }
 
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = if (draft.isNightTrack) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DarkMode,
+                            contentDescription = "Night track lighting",
+                            tint = if (draft.isNightTrack) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Night track",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Dark circuit — visibility limited to car headlights",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = draft.isNightTrack,
+                            onCheckedChange = { checked ->
+                                draft = draft.copy(isNightTrack = checked)
+                                savedBannerName = null
+                            },
+                            modifier = Modifier.testTag("editor_night_track_switch")
+                        )
+                    }
+                }
+
                 Text(
                     text = "Saved circuits sync automatically when signed in so friends can challenge your times & race live with you.",
                     style = MaterialTheme.typography.bodySmall,
@@ -620,7 +687,10 @@ fun TrackEditorScreen(
 
                 if (savedTracks.isNotEmpty()) {
                     Text("SAVED CUSTOM TRACKS", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.testTag("editor_saved_tracks_row")
+                    ) {
                         items(savedTracks, key = { it.id }) { saved ->
                             val preview = remember(saved) { TrackCatalog.buildCustomTrack(saved) }
                             val isCurrent = saved.id == draft.id
@@ -645,10 +715,27 @@ fun TrackEditorScreen(
                                             .fillMaxWidth()
                                             .height(54.dp)
                                             .clip(RoundedCornerShape(8.dp))
-                                            .background(Color(preview.id.baseBgColorHex))
+                                            .background(if (saved.isNightTrack) Color(0xFF02040A) else Color(preview.id.baseBgColorHex))
                                     ) {
                                         Canvas(modifier = Modifier.fillMaxSize()) {
                                             drawTrackMiniMap(preview)
+                                        }
+                                        if (saved.isNightTrack) {
+                                            Surface(
+                                                color = Color(0xFF0D1B2A).copy(alpha = 0.9f),
+                                                shape = RoundedCornerShape(6.dp),
+                                                border = BorderStroke(1.dp, Color(0xFF90CAF9).copy(alpha = 0.7f)),
+                                                modifier = Modifier
+                                                    .align(Alignment.TopStart)
+                                                    .padding(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = "NIGHT",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = Color(0xFF90CAF9),
+                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                                )
+                                            }
                                         }
                                         IconButton(
                                             onClick = { onDeleteTrack(saved.id) },

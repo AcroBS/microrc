@@ -223,7 +223,9 @@ object RaceTelemetryCodec {
                 .append(r.portalWarpSeq).append(',')
                 .append(r.electroShockAuraMs).append(',')
                 .append(r.electroParalyzedMs).append(',')
-                .append(r.laserBeamMs)
+                .append(r.laserBeamMs).append(',')
+                .append(if (r.isBraking) 1 else 0).append(',')
+                .append(r.equippedUpgradesMask)
         }
         sb.append('|')
 
@@ -474,6 +476,11 @@ object RaceTelemetryCodec {
                 val electroAuraMs = f.getOrNull(28)?.toLongOrNull() ?: 0L
                 val electroParalyzedMs = f.getOrNull(29)?.toLongOrNull() ?: 0L
                 val laserBeamMs = f.getOrNull(30)?.toLongOrNull() ?: 0L
+                val isBraking = f.getOrNull(31) == "1"
+                val equippedUpgradesMask = f.getOrNull(32)?.toIntOrNull()
+                    ?: meta?.equippedUpgradesMask
+                    ?: prev?.equippedUpgradesMask
+                    ?: 0
 
                 val vx = f[4].toFloatOrNull() ?: 0f
                 val vy = f[5].toFloatOrNull() ?: 0f
@@ -514,7 +521,9 @@ object RaceTelemetryCodec {
                     portalWarpSeq = portalWarpSeq,
                     electroShockAuraMs = electroAuraMs,
                     electroParalyzedMs = electroParalyzedMs,
-                    laserBeamMs = laserBeamMs
+                    laserBeamMs = laserBeamMs,
+                    isBraking = isBraking,
+                    equippedUpgradesMask = equippedUpgradesMask
                 )
             }
         }

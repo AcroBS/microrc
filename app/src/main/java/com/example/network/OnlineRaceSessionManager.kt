@@ -577,7 +577,8 @@ class OnlineRaceSessionManager(
                     isReady = true,
                     carType = profile.carType.name,
                     primaryColorArgb = profile.primaryColorArgb,
-                    accentColorArgb = profile.accentColorArgb
+                    accentColorArgb = profile.accentColorArgb,
+                    equippedUpgradesMask = profile.equippedUpgradesMask
                 )
                 val seedPayload = buildHostLobbyPayload(
                     roomCode = "ONLINE",
@@ -615,6 +616,7 @@ class OnlineRaceSessionManager(
                         carType = profile.carType.name,
                         primaryColorArgb = profile.primaryColorArgb,
                         accentColorArgb = profile.accentColorArgb,
+                        equippedUpgradesMask = profile.equippedUpgradesMask,
                         ready = true,
                         host = true,
                         rematchVote = "",
@@ -700,7 +702,8 @@ class OnlineRaceSessionManager(
             isReady = true,
             carType = profile.carType.name,
             primaryColorArgb = profile.primaryColorArgb,
-            accentColorArgb = profile.accentColorArgb
+            accentColorArgb = profile.accentColorArgb,
+            equippedUpgradesMask = profile.equippedUpgradesMask
         )
         val seedPayload = LobbyStatePayload(
             hostId = currentUserId,
@@ -766,7 +769,8 @@ class OnlineRaceSessionManager(
                 isReady = true,
                 carType = profile.carType.name,
                 primaryColorArgb = profile.primaryColorArgb,
-                accentColorArgb = profile.accentColorArgb
+                accentColorArgb = profile.accentColorArgb,
+                equippedUpgradesMask = profile.equippedUpgradesMask
             )
             latestHumanPlayers[currentUserId] = OnlineRoomPlayerDoc(
                 id = currentUserId,
@@ -776,6 +780,7 @@ class OnlineRaceSessionManager(
                 carType = profile.carType.name,
                 primaryColorArgb = profile.primaryColorArgb,
                 accentColorArgb = profile.accentColorArgb,
+                equippedUpgradesMask = profile.equippedUpgradesMask,
                 ready = true,
                 host = true,
                 rematchVote = "",
@@ -1397,6 +1402,7 @@ class OnlineRaceSessionManager(
                     carType = p.carType,
                     primaryColorArgb = p.primaryColorArgb,
                     accentColorArgb = p.accentColorArgb,
+                    equippedUpgradesMask = p.equippedUpgradesMask,
                     sessionPoints = sessionPointsByPlayer[p.userId] ?: 0,
                     wins = winsByPlayer[p.userId] ?: 0
                 )
@@ -1486,7 +1492,8 @@ class OnlineRaceSessionManager(
                     "name" to profile.name.trim().take(24).ifEmpty { "Driver" },
                     "carType" to profile.carType.name,
                     "primaryColorArgb" to profile.primaryColorArgb,
-                    "accentColorArgb" to profile.accentColorArgb
+                    "accentColorArgb" to profile.accentColorArgb,
+                    "equippedUpgradesMask" to profile.equippedUpgradesMask
                 )
             )
             if (_role.value == SessionRole.OnlineHost) {

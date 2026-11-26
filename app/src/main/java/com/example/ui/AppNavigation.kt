@@ -282,6 +282,9 @@ fun MicroRCApp(
         LaunchedEffect(onlineVm) {
             DailyChallengeScheduler.scheduleLeaderboardSync(appContext)
             DailyChallengeScheduler.triggerImmediateBackgroundSync(appContext)
+            onlineVm.fetchCloudGarageState()?.let { (cloudTokens, cloudUpgrades) ->
+                viewModel.mergeCloudGarageState(cloudTokens, cloudUpgrades)
+            }
         }
 
         LaunchedEffect(onlineVm) {
@@ -295,7 +298,10 @@ fun MicroRCApp(
             profile.name,
             profile.carType,
             profile.primaryColorArgb,
-            profile.accentColorArgb
+            profile.accentColorArgb,
+            profile.equippedUpgradesMask,
+            profile.earnedUpgradeTokens,
+            profile.carUpgradesByCarId
         ) {
             onlineVm.syncProfileToPresence(profile)
             if (onlineVm.role.value.isOnline) {
@@ -1029,7 +1035,10 @@ fun MicroRCApp(
             composable(Routes.GARAGE) {
                 GarageScreen(
                     profile = profile,
+                    playStreak = playStreak,
                     onSaveCarAndColors = viewModel::updateCarAndColors,
+                    onUnlockUpgrade = viewModel::unlockCarUpgrade,
+                    onToggleUpgrade = viewModel::toggleCarUpgrade,
                     onBack = { navController.popBackStack() }
                 )
             }

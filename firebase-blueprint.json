@@ -147,6 +147,10 @@
           "type": "integer",
           "description": "Accent car trim ARGB color."
         },
+        "equippedUpgradesMask": {
+          "type": "integer",
+          "description": "Optional 7-bit mask (0..127) of equipped purely visual cosmetic upgrades."
+        },
         "ready": {
           "type": "boolean",
           "description": "Whether the player is ready to start."
@@ -310,6 +314,10 @@
           "type": "integer",
           "description": "Accent car ARGB color."
         },
+        "equippedUpgradesMask": {
+          "type": "integer",
+          "description": "Optional 7-bit mask (0..127) of equipped purely visual cosmetic upgrades."
+        },
         "gameMode": {
           "type": "string",
           "enum": ["RACE", "STUNTS", "ARENA"],
@@ -407,6 +415,10 @@
           "type": "integer",
           "description": "Accent car ARGB color."
         },
+        "equippedUpgradesMask": {
+          "type": "integer",
+          "description": "Optional 7-bit mask (0..127) of equipped purely visual cosmetic upgrades."
+        },
         "boardKey": {
           "type": "string",
           "description": "Matching leaderboard partition key."
@@ -495,6 +507,14 @@
         "accentColorArgb": {
           "type": "integer",
           "description": "Accent car ARGB color."
+        },
+        "equippedUpgradesMask": {
+          "type": "integer",
+          "description": "Optional 7-bit mask (0..127) of equipped purely visual cosmetic upgrades for the active car."
+        },
+        "carVisualsJson": {
+          "type": "string",
+          "description": "Serialized per-car cosmetic unlock/equip state and earned upgrade tokens (<= 2048 chars)."
         },
         "online": {
           "type": "boolean",

@@ -4,8 +4,12 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Paint as ComposePaint
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.PathOperation
@@ -22,6 +26,7 @@ import com.example.data.TrackCatalog
 import com.example.model.ActiveGhostCarState
 import com.example.model.ActiveRocketState
 import com.example.model.ArenaFlagState
+import com.example.model.CarVisualUpgrades
 import com.example.model.ExternalEventType
 import com.example.model.FieldPickupType
 import com.example.model.HazardType
@@ -49,6 +54,8 @@ private val racerNamePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
     typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
 }
 
+private val nightLayerPaint = ComposePaint()
+
 fun DrawScope.drawTrackWorld(
     track: TrackDefinition,
     itemBoxes: List<ItemBoxState>,
@@ -69,7 +76,8 @@ fun DrawScope.drawTrackWorld(
     stuntState: StuntStateSnapshot? = null,
     rockets: List<ActiveRocketState> = emptyList(),
     ghostCar: ActiveGhostCarState? = null,
-    isDriftMode: Boolean = false
+    isDriftMode: Boolean = false,
+    nightIntensity: Float = if (track.isNightTrack) 1f else 0f
 ) {
     // 1. Background floor
     drawRect(
@@ -794,14 +802,67 @@ fun DrawScope.drawTrackWorld(
             accentColor = Color(ghostCar.accentColorArgb),
             jumpZ = ghostCar.jumpZ,
             scale = 1f,
-            animTimeSec = animTimeSec
+            animTimeSec = animTimeSec,
+            visualUpgrades = CarVisualUpgrades.fromEquippedMask(ghostCar.equippedUpgradesMask)
         )
     }
 
     // 9. Draw all RC cars (grounded first, airborne cars rendered on top)
     val orderedRacers = racers.sortedBy { it.jumpZ }
     for (r in orderedRacers) {
-        if (isDriftMode && com.example.drift.DriftPhysics.isDrifting(r.angleRad, r.vx, r.vy, r.jumpZ)) {
+        val racerUpgrades = CarVisualUpgrades.fromEquippedMask(r.equippedUpgradesMask)
+        val isSlidingOrDrifting = (isDriftMode && com.example.drift.DriftPhysics.isDrifting(r.angleRad, r.vx, r.vy, r.jumpZ)) ||
+            (r.jumpZ <= 0.05f && kotlin.math.abs(r.vx * (-kotlin.math.sin(r.angleRad)) + r.vy * kotlin.math.cos(r.angleRad)) > 95f && r.speed > 125f)
+        if (racerUpgrades.hasCustomTrail && (isSlidingOrDrifting || r.boostMs > 0L)) {
+            val deg = r.angleRad * 180f / PI.toFloat()
+            val trailMain = Color(r.accentColorArgb)
+            val trailGlow = Color(r.primaryColorArgb)
+            val trailLen = if (r.boostMs > 0L) 54f else 44f
+            withTransform({
+                translate(r.x, r.y)
+                rotate(deg, Offset.Zero)
+            }) {
+                drawLine(
+                    color = trailGlow.copy(alpha = 0.42f),
+                    start = Offset(-15f, -11.5f),
+                    end = Offset(-trailLen, -13.5f),
+                    strokeWidth = 8.5f,
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    color = trailGlow.copy(alpha = 0.42f),
+                    start = Offset(-15f, 11.5f),
+                    end = Offset(-trailLen, 13.5f),
+                    strokeWidth = 8.5f,
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    color = trailMain.copy(alpha = 0.88f),
+                    start = Offset(-15f, -11.5f),
+                    end = Offset(-trailLen + 4f, -13.5f),
+                    strokeWidth = 3.8f,
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    color = trailMain.copy(alpha = 0.88f),
+                    start = Offset(-15f, 11.5f),
+                    end = Offset(-trailLen + 4f, 13.5f),
+                    strokeWidth = 3.8f,
+                    cap = StrokeCap.Round
+                )
+                val emberPulse = 4.5f + 2.5f * sin(animTimeSec * 28f + r.x * 0.06f)
+                drawCircle(
+                    color = Color(0xFF00E5FF).copy(alpha = 0.48f),
+                    radius = emberPulse,
+                    center = Offset(-32f, -12f)
+                )
+                drawCircle(
+                    color = Color(0xFFE040FB).copy(alpha = 0.48f),
+                    radius = emberPulse,
+                    center = Offset(-32f, 12f)
+                )
+            }
+        } else if (isDriftMode && com.example.drift.DriftPhysics.isDrifting(r.angleRad, r.vx, r.vy, r.jumpZ)) {
             val deg = r.angleRad * 180f / PI.toFloat()
             withTransform({
                 translate(r.x, r.y)
@@ -855,7 +916,10 @@ fun DrawScope.drawTrackWorld(
             isCarryingFlag = arenaFlag?.carrierId == r.playerId,
             hasElectroAura = r.electroShockAuraMs > 0L,
             isElectroParalyzed = r.electroParalyzedMs > 0L,
-            hasRedLaser = r.laserBeamMs > 0L
+            hasRedLaser = r.laserBeamMs > 0L,
+            isBraking = r.isBraking,
+            nightIntensity = nightIntensity,
+            visualUpgrades = racerUpgrades
         )
     }
 
@@ -957,6 +1021,19 @@ fun DrawScope.drawTrackWorld(
                 cap = StrokeCap.Round
             )
         }
+    }
+
+    // 9c. Night Darkness Veil & Car Headlight Illumination Cones
+    val clampedNight = nightIntensity.coerceIn(0f, 1f)
+    if (clampedNight > 0.01f) {
+        drawNightDarknessAndHeadlights(
+            track = track,
+            orderedRacers = orderedRacers,
+            rockets = rockets,
+            explosions = explosions,
+            ghostCar = ghostCar,
+            nightIntensity = clampedNight
+        )
     }
 
     // 10. Player name tags + Arena Flag Carrier live timer pill
@@ -1581,6 +1658,259 @@ fun DrawScope.drawWeatherScreenOverlay(
         ExternalEventType.EARTHQUAKE -> {
             drawRect(color = Color(0xFF5D4037).copy(alpha = 0.10f))
         }
+        ExternalEventType.DAY_NIGHT,
         ExternalEventType.NONE -> Unit
     }
 }
+
+private fun DrawScope.drawNightDarknessAndHeadlights(
+    track: TrackDefinition,
+    orderedRacers: List<RacerState>,
+    rockets: List<ActiveRocketState>,
+    explosions: List<TrackExplosion>,
+    ghostCar: ActiveGhostCarState?,
+    nightIntensity: Float
+) {
+    val margin = 600f
+    val nightBounds = Rect(
+        left = -margin,
+        top = -margin,
+        right = track.worldWidth + margin,
+        bottom = track.worldHeight + margin
+    )
+
+    drawContext.canvas.saveLayer(nightBounds, nightLayerPaint)
+    try {
+        // 1. Deep night darkness over the entire world
+        drawRect(
+            color = Color(0xFF02040A).copy(alpha = (0.975f * nightIntensity).coerceIn(0f, 0.975f)),
+            topLeft = Offset(-margin, -margin),
+            size = Size(track.worldWidth + margin * 2f, track.worldHeight + margin * 2f)
+        )
+
+        // 2. Car headlights & localized chassis/taillight punch-outs (DstOut)
+        for (r in orderedRacers) {
+            val deg = ((r.angleRad + r.spinVisualOffset) * 180f / PI.toFloat())
+            withTransform({
+                translate(r.x, r.y)
+                rotate(deg, Offset.Zero)
+            }) {
+                // Wide peripheral spill cone
+                val wideRange = 430f
+                drawArc(
+                    brush = Brush.radialGradient(
+                        0.0f to Color.White.copy(alpha = 0.56f),
+                        0.45f to Color.White.copy(alpha = 0.28f),
+                        0.82f to Color.White.copy(alpha = 0.08f),
+                        1.0f to Color.Transparent,
+                        center = Offset(14f, 0f),
+                        radius = wideRange
+                    ),
+                    startAngle = -38f,
+                    sweepAngle = 76f,
+                    useCenter = true,
+                    topLeft = Offset(14f - wideRange, -wideRange),
+                    size = Size(wideRange * 2f, wideRange * 2f),
+                    blendMode = BlendMode.DstOut
+                )
+
+                // Main forward headlight beam cone (fading smoothly with distance)
+                val beamRange = 560f
+                drawArc(
+                    brush = Brush.radialGradient(
+                        0.0f to Color.White,
+                        0.36f to Color.White.copy(alpha = 0.94f),
+                        0.64f to Color.White.copy(alpha = 0.52f),
+                        0.86f to Color.White.copy(alpha = 0.16f),
+                        1.0f to Color.Transparent,
+                        center = Offset(16f, 0f),
+                        radius = beamRange
+                    ),
+                    startAngle = -26f,
+                    sweepAngle = 52f,
+                    useCenter = true,
+                    topLeft = Offset(16f - beamRange, -beamRange),
+                    size = Size(beamRange * 2f, beamRange * 2f),
+                    blendMode = BlendMode.DstOut
+                )
+
+                // Twin crisp lamp core cones
+                val twinRange = 480f
+                for (signY in listOf(-1f, 1f)) {
+                    val cy = 7f * signY
+                    drawArc(
+                        brush = Brush.radialGradient(
+                            0.0f to Color.White,
+                            0.40f to Color.White.copy(alpha = 0.85f),
+                            0.76f to Color.White.copy(alpha = 0.22f),
+                            1.0f to Color.Transparent,
+                            center = Offset(18f, cy),
+                            radius = twinRange
+                        ),
+                        startAngle = -15f,
+                        sweepAngle = 30f,
+                        useCenter = true,
+                        topLeft = Offset(18f - twinRange, cy - twinRange),
+                        size = Size(twinRange * 2f, twinRange * 2f),
+                        blendMode = BlendMode.DstOut
+                    )
+                }
+
+                // Immediate car body aura so chassis stays crisp
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        0.0f to Color.White,
+                        0.50f to Color.White.copy(alpha = 0.90f),
+                        0.84f to Color.White.copy(alpha = 0.28f),
+                        1.0f to Color.Transparent,
+                        center = Offset.Zero,
+                        radius = 74f
+                    ),
+                    radius = 74f,
+                    center = Offset.Zero,
+                    blendMode = BlendMode.DstOut
+                )
+
+                // Rear taillight / brake light reveal behind car
+                val tailAuraRadius = if (r.isBraking) 92f else 68f
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        0.0f to Color.White.copy(alpha = if (r.isBraking) 0.96f else 0.72f),
+                        0.55f to Color.White.copy(alpha = 0.30f),
+                        1.0f to Color.Transparent,
+                        center = Offset(-28f, 0f),
+                        radius = tailAuraRadius
+                    ),
+                    radius = tailAuraRadius,
+                    center = Offset(-28f, 0f),
+                    blendMode = BlendMode.DstOut
+                )
+
+                // Active Electro Shock proximity electric glow
+                if (r.electroShockAuraMs > 0L) {
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            0.0f to Color.White.copy(alpha = 0.88f),
+                            0.65f to Color.White.copy(alpha = 0.40f),
+                            1.0f to Color.Transparent,
+                            center = Offset.Zero,
+                            radius = 165f
+                        ),
+                        radius = 165f,
+                        center = Offset.Zero,
+                        blendMode = BlendMode.DstOut
+                    )
+                }
+            }
+
+            // Red Laser forward beam cuts through the dark along heading
+            if (r.laserBeamMs > 0L) {
+                val headingDeg = r.angleRad * 180f / PI.toFloat()
+                withTransform({
+                    translate(r.x, r.y)
+                    rotate(headingDeg, Offset.Zero)
+                }) {
+                    drawLine(
+                        color = Color.White.copy(alpha = 0.85f),
+                        start = Offset(20f, 0f),
+                        end = Offset(360f, 0f),
+                        strokeWidth = 54f,
+                        cap = StrokeCap.Round,
+                        blendMode = BlendMode.DstOut
+                    )
+                }
+            }
+        }
+
+        // Faint glow around homing rockets, explosions, and ghost car
+        for (rk in rockets) {
+            drawCircle(
+                brush = Brush.radialGradient(
+                    0.0f to Color.White.copy(alpha = 0.88f),
+                    0.55f to Color.White.copy(alpha = 0.36f),
+                    1.0f to Color.Transparent,
+                    center = Offset(rk.x, rk.y),
+                    radius = 74f
+                ),
+                radius = 74f,
+                center = Offset(rk.x, rk.y),
+                blendMode = BlendMode.DstOut
+            )
+        }
+        for (exp in explosions) {
+            val progress = (exp.ageMs.toFloat() / exp.durationMs.coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
+            val fade = (1f - progress).coerceIn(0f, 1f)
+            val blastRadius = 110f + 95f * progress
+            drawCircle(
+                brush = Brush.radialGradient(
+                    0.0f to Color.White.copy(alpha = fade),
+                    0.55f to Color.White.copy(alpha = fade * 0.45f),
+                    1.0f to Color.Transparent,
+                    center = Offset(exp.x, exp.y),
+                    radius = blastRadius
+                ),
+                radius = blastRadius,
+                center = Offset(exp.x, exp.y),
+                blendMode = BlendMode.DstOut
+            )
+        }
+        if (ghostCar != null) {
+            drawCircle(
+                brush = Brush.radialGradient(
+                    0.0f to Color.White.copy(alpha = 0.72f),
+                    0.60f to Color.White.copy(alpha = 0.25f),
+                    1.0f to Color.Transparent,
+                    center = Offset(ghostCar.x, ghostCar.y),
+                    radius = 62f
+                ),
+                radius = 62f,
+                center = Offset(ghostCar.x, ghostCar.y),
+                blendMode = BlendMode.DstOut
+            )
+        }
+    } finally {
+        drawContext.canvas.restore()
+    }
+
+    // 3. Atmospheric warm-white headlight beam wash & crimson taillight spill over darkness
+    for (r in orderedRacers) {
+        val deg = ((r.angleRad + r.spinVisualOffset) * 180f / PI.toFloat())
+        withTransform({
+            translate(r.x, r.y)
+            rotate(deg, Offset.Zero)
+        }) {
+            val sheenRange = 540f
+            drawArc(
+                brush = Brush.radialGradient(
+                    0.0f to Color(0xFFFFF8D6).copy(alpha = 0.16f * nightIntensity),
+                    0.42f to Color(0xFFFFF59D).copy(alpha = 0.08f * nightIntensity),
+                    0.82f to Color(0xFFFFF59D).copy(alpha = 0.02f * nightIntensity),
+                    1.0f to Color.Transparent,
+                    center = Offset(16f, 0f),
+                    radius = sheenRange
+                ),
+                startAngle = -24f,
+                sweepAngle = 48f,
+                useCenter = true,
+                topLeft = Offset(16f - sheenRange, -sheenRange),
+                size = Size(sheenRange * 2f, sheenRange * 2f)
+            )
+
+            // Red taillight / brake spill behind car
+            val tailGlowRadius = if (r.isBraking) 82f else 56f
+            val tailGlowAlpha = (if (r.isBraking) 0.28f else 0.13f) * nightIntensity
+            drawCircle(
+                brush = Brush.radialGradient(
+                    0.0f to Color(0xFFFF1744).copy(alpha = tailGlowAlpha),
+                    0.58f to Color(0xFFD50000).copy(alpha = tailGlowAlpha * 0.4f),
+                    1.0f to Color.Transparent,
+                    center = Offset(-24f, 0f),
+                    radius = tailGlowRadius
+                ),
+                radius = tailGlowRadius,
+                center = Offset(-24f, 0f)
+            )
+        }
+    }
+}
+

@@ -89,6 +89,8 @@ class FriendsRepository(
                             "carType" to profile.carType.name,
                             "primaryColorArgb" to profile.primaryColorArgb,
                             "accentColorArgb" to profile.accentColorArgb,
+                            "equippedUpgradesMask" to profile.equippedUpgradesMask,
+                            "carVisualsJson" to profile.encodedCarVisuals,
                             "online" to online,
                             "activityStatus" to safeStatus,
                             "activeRoomId" to roomId,
@@ -109,6 +111,8 @@ class FriendsRepository(
                             "carType" to profile.carType.name,
                             "primaryColorArgb" to profile.primaryColorArgb,
                             "accentColorArgb" to profile.accentColorArgb,
+                            "equippedUpgradesMask" to profile.equippedUpgradesMask,
+                            "carVisualsJson" to profile.encodedCarVisuals,
                             "online" to online,
                             "activityStatus" to safeStatus,
                             "activeRoomId" to roomId,
@@ -161,6 +165,29 @@ class FriendsRepository(
                 handleFirestoreError(e, OperationType.UPDATE, path)
                 Result.failure(e)
             }
+        }
+    }
+
+    suspend fun fetchMyDriverProfile(): Result<DriverProfileDoc?> {
+        val uid = auth.currentUser?.uid ?: return Result.success(null)
+        val path = "driverProfiles/$uid"
+        return try {
+            val doc = withFirestoreTimeout(6_000L, "driver profile hydration") {
+                val snap = db.collection("driverProfiles").document(uid).get(Source.SERVER).await()
+                if (snap.exists()) {
+                    snap.toObject(
+                        DriverProfileDoc::class.java,
+                        DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
+                    )
+                } else {
+                    null
+                }
+            }
+            Result.success(doc)
+        } catch (e: Exception) {
+            rethrowIfRealCancellation(e)
+            handleFirestoreError(e, OperationType.GET, path)
+            Result.failure(e)
         }
     }
 

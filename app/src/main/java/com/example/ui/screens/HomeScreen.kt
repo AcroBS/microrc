@@ -378,7 +378,8 @@ fun HomeScreen(
                                         carType = profile.carType,
                                         primaryColor = Color(profile.primaryColorArgb),
                                         accentColor = Color(profile.accentColorArgb),
-                                        scale = carScale
+                                        scale = carScale,
+                                        visualUpgrades = profile.equippedVisualUpgrades
                                     )
                                 }
                             }

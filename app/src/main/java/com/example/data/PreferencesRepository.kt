@@ -13,7 +13,10 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import com.example.model.AppThemeMode
 import com.example.model.AudioSettings
 import com.example.model.CarSpeedPreset
+import com.example.model.CarVisualCodec
+import com.example.model.CarVisualUpgrades
 import com.example.model.ControlMode
+import com.example.model.CosmeticUpgradeSlot
 import com.example.model.CustomTrackData
 import com.example.model.GameMode
 import com.example.model.LocalLeaderboardRecord
@@ -100,6 +103,9 @@ class PreferencesRepository(context: Context) {
         val STREAK_CURRENT_DAYS = intPreferencesKey("streak_current_days")
         val STREAK_BEST_DAYS = intPreferencesKey("streak_best_days")
         val STREAK_LAST_DATE_KEY = stringPreferencesKey("streak_last_date_key")
+        val CAR_UPGRADES_JSON = stringPreferencesKey("car_upgrades_json")
+        val GARAGE_EARNED_TOKENS = intPreferencesKey("garage_earned_tokens")
+        val GARAGE_LAST_TOKEN_DATE_KEY = stringPreferencesKey("garage_last_token_date_key")
     }
 
     val profileFlow: Flow<PlayerProfile> = dataStore.data.map { prefs ->
@@ -115,6 +121,14 @@ class PreferencesRepository(context: Context) {
         }.getOrDefault(ControlMode.TOUCH_OVERLAY)
         val sensitivity = prefs[Keys.TILT_SENSITIVITY] ?: 1.25f
         val sliderSensitivity = (prefs[Keys.SLIDER_SENSITIVITY] ?: 1.45f).coerceIn(0.7f, 2.6f)
+        val decodedVisuals = CarVisualCodec.decode(prefs[Keys.CAR_UPGRADES_JSON])
+        val streakCurrent = prefs[Keys.STREAK_CURRENT_DAYS] ?: 0
+        val streakBest = prefs[Keys.STREAK_BEST_DAYS] ?: 0
+        val storedEarnedTokens = prefs[Keys.GARAGE_EARNED_TOKENS]
+            ?: PlayStreakCalculator.backfillInitialEarnedTokens(streakCurrent, streakBest)
+        val normalizedUpgrades = CarVisualCodec.normalizeMap(decodedVisuals.upgradesByCarId)
+        val minUnlockedTokens = normalizedUpgrades.values.sumOf { it.unlockedCount }
+        val resolvedEarnedTokens = maxOf(storedEarnedTokens, decodedVisuals.earnedTokens, minUnlockedTokens)
 
         PlayerProfile(
             playerId = id,
@@ -125,7 +139,9 @@ class PreferencesRepository(context: Context) {
             controlMode = controlMode,
             tiltSensitivity = sensitivity,
             autoGasInTilt = true,
-            sliderSensitivity = sliderSensitivity
+            sliderSensitivity = sliderSensitivity,
+            carUpgradesByCarId = normalizedUpgrades,
+            earnedUpgradeTokens = resolvedEarnedTokens
         )
     }
 
@@ -250,17 +266,120 @@ class PreferencesRepository(context: Context) {
         var nextState = PlayStreakState()
         val todayKey = PlayStreakCalculator.localDateKey(epochMillis)
         dataStore.edit { prefs ->
+            val storedCurrent = prefs[Keys.STREAK_CURRENT_DAYS] ?: 0
+            val storedBest = prefs[Keys.STREAK_BEST_DAYS] ?: 0
+            val prevLastDateKey = prefs[Keys.STREAK_LAST_DATE_KEY]
+            val decodedVisuals = CarVisualCodec.decode(prefs[Keys.CAR_UPGRADES_JSON])
+            val baseEarned = maxOf(
+                prefs[Keys.GARAGE_EARNED_TOKENS]
+                    ?: PlayStreakCalculator.backfillInitialEarnedTokens(storedCurrent, storedBest),
+                decodedVisuals.earnedTokens
+            )
             nextState = PlayStreakCalculator.recordActivity(
-                storedCurrent = prefs[Keys.STREAK_CURRENT_DAYS] ?: 0,
-                storedBest = prefs[Keys.STREAK_BEST_DAYS] ?: 0,
-                lastDateKey = prefs[Keys.STREAK_LAST_DATE_KEY],
+                storedCurrent = storedCurrent,
+                storedBest = storedBest,
+                lastDateKey = prevLastDateKey,
                 todayKey = todayKey
             )
+            val tokenDelta = PlayStreakCalculator.tokenAwardDeltaOnActivity(
+                prevLastDateKey = prevLastDateKey,
+                nextState = nextState,
+                lastTokenAwardedDateKey = prefs[Keys.GARAGE_LAST_TOKEN_DATE_KEY]
+            )
+            val updatedTokens = (baseEarned + tokenDelta).coerceAtLeast(baseEarned)
             prefs[Keys.STREAK_CURRENT_DAYS] = nextState.currentStreakDays
             prefs[Keys.STREAK_BEST_DAYS] = nextState.bestStreakDays
             prefs[Keys.STREAK_LAST_DATE_KEY] = nextState.lastActiveDateKey
+            prefs[Keys.GARAGE_EARNED_TOKENS] = updatedTokens
+            if (tokenDelta > 0) {
+                prefs[Keys.GARAGE_LAST_TOKEN_DATE_KEY] = nextState.lastActiveDateKey
+            }
         }
         return nextState
+    }
+
+    suspend fun unlockCarUpgrade(carType: RcCarType, slot: CosmeticUpgradeSlot): Boolean {
+        var didUnlock = false
+        dataStore.edit { prefs ->
+            val streakCurrent = prefs[Keys.STREAK_CURRENT_DAYS] ?: 0
+            val streakBest = prefs[Keys.STREAK_BEST_DAYS] ?: 0
+            val decodedVisuals = CarVisualCodec.decode(prefs[Keys.CAR_UPGRADES_JSON])
+            val map = CarVisualCodec.normalizeMap(decodedVisuals.upgradesByCarId).toMutableMap()
+            val minUnlockedTokens = map.values.sumOf { it.unlockedCount }
+            val earnedTokens = maxOf(
+                prefs[Keys.GARAGE_EARNED_TOKENS]
+                    ?: PlayStreakCalculator.backfillInitialEarnedTokens(streakCurrent, streakBest),
+                decodedVisuals.earnedTokens,
+                minUnlockedTokens
+            )
+            val existing = map[carType.storageId] ?: CarVisualUpgrades()
+            if (existing.isUnlocked(slot)) {
+                didUnlock = false
+                return@edit
+            }
+            val available = (earnedTokens - minUnlockedTokens).coerceAtLeast(0)
+            if (available <= 0) {
+                didUnlock = false
+                return@edit
+            }
+            map[carType.storageId] = existing.withUnlockedAndEquipped(slot)
+            prefs[Keys.GARAGE_EARNED_TOKENS] = earnedTokens
+            prefs[Keys.CAR_UPGRADES_JSON] = CarVisualCodec.encode(earnedTokens, map)
+            didUnlock = true
+        }
+        return didUnlock
+    }
+
+    suspend fun toggleCarUpgrade(carType: RcCarType, slot: CosmeticUpgradeSlot, equipped: Boolean) {
+        dataStore.edit { prefs ->
+            val streakCurrent = prefs[Keys.STREAK_CURRENT_DAYS] ?: 0
+            val streakBest = prefs[Keys.STREAK_BEST_DAYS] ?: 0
+            val decodedVisuals = CarVisualCodec.decode(prefs[Keys.CAR_UPGRADES_JSON])
+            val map = CarVisualCodec.normalizeMap(decodedVisuals.upgradesByCarId).toMutableMap()
+            val existing = map[carType.storageId] ?: CarVisualUpgrades()
+            if (!existing.isUnlocked(slot)) return@edit
+            val updated = existing.withEquipped(slot, equipped)
+            if (updated == existing) return@edit
+            map[carType.storageId] = updated
+            val minUnlockedTokens = map.values.sumOf { it.unlockedCount }
+            val earnedTokens = maxOf(
+                prefs[Keys.GARAGE_EARNED_TOKENS]
+                    ?: PlayStreakCalculator.backfillInitialEarnedTokens(streakCurrent, streakBest),
+                decodedVisuals.earnedTokens,
+                minUnlockedTokens
+            )
+            prefs[Keys.GARAGE_EARNED_TOKENS] = earnedTokens
+            prefs[Keys.CAR_UPGRADES_JSON] = CarVisualCodec.encode(earnedTokens, map)
+        }
+    }
+
+    suspend fun mergeCloudGarageState(
+        cloudEarnedTokens: Int,
+        cloudUpgradesByCarId: Map<String, CarVisualUpgrades>
+    ) {
+        if (cloudEarnedTokens <= 0 && cloudUpgradesByCarId.isEmpty()) return
+        dataStore.edit { prefs ->
+            val streakCurrent = prefs[Keys.STREAK_CURRENT_DAYS] ?: 0
+            val streakBest = prefs[Keys.STREAK_BEST_DAYS] ?: 0
+            val decodedVisuals = CarVisualCodec.decode(prefs[Keys.CAR_UPGRADES_JSON])
+            val localMap = CarVisualCodec.normalizeMap(decodedVisuals.upgradesByCarId)
+            val localEarned = maxOf(
+                prefs[Keys.GARAGE_EARNED_TOKENS]
+                    ?: PlayStreakCalculator.backfillInitialEarnedTokens(streakCurrent, streakBest),
+                decodedVisuals.earnedTokens,
+                localMap.values.sumOf { it.unlockedCount }
+            )
+            val merged = CarVisualCodec.mergeGarageStates(
+                localEarnedTokens = localEarned,
+                localUpgrades = localMap,
+                cloudEarnedTokens = cloudEarnedTokens,
+                cloudUpgrades = cloudUpgradesByCarId
+            )
+            if (merged.earnedTokens > localEarned || merged.upgradesByCarId != localMap) {
+                prefs[Keys.GARAGE_EARNED_TOKENS] = merged.earnedTokens
+                prefs[Keys.CAR_UPGRADES_JSON] = CarVisualCodec.encode(merged.earnedTokens, merged.upgradesByCarId)
+            }
+        }
     }
 
     suspend fun ensurePlayerId(): String {
@@ -427,6 +546,7 @@ class PreferencesRepository(context: Context) {
                     carType = profile.carType.name,
                     primaryColorArgb = profile.primaryColorArgb,
                     accentColorArgb = profile.accentColorArgb,
+                    equippedUpgradesMask = profile.equippedUpgradesMask,
                     bestRaceTimeMs = mergedRaceMs,
                     bestLapTimeMs = mergedLapMs,
                     bestScore = mergedScore,

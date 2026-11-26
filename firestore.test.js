@@ -786,3 +786,54 @@ test("CustomTracks: creator sync, friend discovery, ghost/leaderboard challenge 
   await assertSucceeds(hostDb.collection("customTracks").doc(trackId).delete());
 });
 
+test("Garage cosmetic visual upgrades: valid equippedUpgradesMask & carVisualsJson pass, out-of-bounds rejected", async () => {
+  const hostDb = testEnv.authenticatedContext(HOST_UID).firestore();
+  const ts = new Date(Date.now() - 2000);
+
+  await assertSucceeds(
+    hostDb.collection("driverProfiles").doc(HOST_UID).set(
+      makeDriverProfilePayload(HOST_UID, "Alex", "RCALEX01", {
+        equippedUpgradesMask: 127,
+        carVisualsJson: "v1|3|apex_formula:127:127",
+      })
+    )
+  );
+  await assertFails(
+    hostDb.collection("driverProfiles").doc(HOST_UID).update({
+      equippedUpgradesMask: 999,
+      updatedAt: new Date(Date.now() - 500),
+    })
+  );
+  await assertSucceeds(
+    hostDb.collection("onlineRooms").doc("room_cosmetic").set(makeRoomPayload())
+  );
+  await assertSucceeds(
+    hostDb.collection("onlineRooms").doc("room_cosmetic").collection("players").doc(HOST_UID).set(
+      makePlayerPayload("room_cosmetic", HOST_UID, { host: true, ready: true, equippedUpgradesMask: 65 })
+    )
+  );
+  await assertSucceeds(
+    hostDb.collection("leaderboardEntries").doc(`${HOST_UID}_RACE_LIVING_ROOM_GP_3L`).set({
+      userId: HOST_UID,
+      driverName: "Alex",
+      carType: "APEX_FORMULA",
+      primaryColorArgb: -43230,
+      accentColorArgb: -10929,
+      equippedUpgradesMask: 31,
+      gameMode: "RACE",
+      trackKey: "LIVING_ROOM_GP",
+      boardKey: "RACE_LIVING_ROOM_GP_3L",
+      totalLaps: 3,
+      bestRaceTimeMs: 41000,
+      bestLapTimeMs: 13000,
+      bestScore: 0,
+      hasGhost: false,
+      ghostId: "",
+      publicEntry: true,
+      createdAt: ts,
+      updatedAt: ts,
+    })
+  );
+});
+
+

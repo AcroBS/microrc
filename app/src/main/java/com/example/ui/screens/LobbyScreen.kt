@@ -85,6 +85,7 @@ import com.example.data.TrackCatalog
 import com.example.model.ArenaFlagState
 import com.example.model.ArenaShape
 import com.example.model.CarSpeedPreset
+import com.example.model.CarVisualUpgrades
 import com.example.model.CustomTrackData
 import com.example.model.FriendUiModel
 import com.example.model.GameMode
@@ -1122,10 +1123,33 @@ fun LobbyScreen(
                                             .fillMaxWidth()
                                             .height(66.dp)
                                             .clip(RoundedCornerShape(10.dp))
-                                            .background(Color(previewDef.id.baseBgColorHex).copy(alpha = 0.85f))
+                                            .background(
+                                                if (cTrack.isNightTrack) {
+                                                    Color(0xFF02040A)
+                                                } else {
+                                                    Color(previewDef.id.baseBgColorHex).copy(alpha = 0.85f)
+                                                }
+                                            )
                                     ) {
                                         Canvas(modifier = Modifier.fillMaxSize()) {
                                             drawTrackMiniMap(previewDef)
+                                        }
+                                        if (cTrack.isNightTrack) {
+                                            Surface(
+                                                color = Color(0xFF0D1B2A).copy(alpha = 0.92f),
+                                                shape = RoundedCornerShape(6.dp),
+                                                border = BorderStroke(1.dp, Color(0xFF90CAF9).copy(alpha = 0.7f)),
+                                                modifier = Modifier
+                                                    .align(Alignment.TopStart)
+                                                    .padding(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = "NIGHT",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = Color(0xFF90CAF9),
+                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                                )
+                                            }
                                         }
                                     }
                                     Spacer(modifier = Modifier.height(6.dp))
@@ -1294,7 +1318,8 @@ fun LobbyScreen(
                                             carType = car,
                                             primaryColor = Color(player.primaryColorArgb),
                                             accentColor = Color(player.accentColorArgb),
-                                            scale = 0.78f
+                                            scale = 0.78f,
+                                            visualUpgrades = CarVisualUpgrades.fromEquippedMask(player.equippedUpgradesMask)
                                         )
                                     }
                                 }

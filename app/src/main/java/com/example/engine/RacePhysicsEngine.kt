@@ -4,6 +4,7 @@ import com.example.data.TrackCatalog
 import com.example.model.ActiveRocketState
 import com.example.model.ArenaFlagState
 import com.example.model.CarSpeedPreset
+import com.example.model.CarVisualUpgrades
 import com.example.model.ControlInput
 import com.example.model.ExternalEventType
 import com.example.model.FieldPickupType
@@ -57,6 +58,7 @@ class RacePhysicsEngine(
         val carType: RcCarType,
         val primaryColorArgb: Long,
         val accentColorArgb: Long,
+        val equippedUpgradesMask: Int = 0,
         var x: Float,
         var y: Float,
         var prevX: Float = x,
@@ -104,7 +106,8 @@ class RacePhysicsEngine(
         var electroParalyzedMs: Long = 0L,
         var electroImmunityMs: Long = 0L,
         var laserBeamMs: Long = 0L,
-        var stalledMs: Long = 0L
+        var stalledMs: Long = 0L,
+        var isBraking: Boolean = false
     )
 
     private data class MutableRocket(
@@ -154,6 +157,7 @@ class RacePhysicsEngine(
             carType = car,
             primaryColorArgb = p.primaryColorArgb,
             accentColorArgb = p.accentColorArgb,
+            equippedUpgradesMask = CarVisualUpgrades.sanitizeMask(p.equippedUpgradesMask),
             x = sx,
             y = sy,
             angleRad = angle,
@@ -564,12 +568,16 @@ class RacePhysicsEngine(
             ExternalEventType.SNOW -> {
                 setBanner("SNOWFALL! Icy surface — expect skidding!", 2600L)
             }
+            ExternalEventType.DAY_NIGHT -> {
+                setBanner("NIGHTFALL! Headlights on!", 2600L)
+            }
             ExternalEventType.NONE -> Unit
         }
     }
 
     private fun clearExternalEvent() {
-        val wasActive = activeEvent != ExternalEventType.NONE
+        val prevEvent = activeEvent
+        val wasActive = prevEvent != ExternalEventType.NONE
         activeEvent = ExternalEventType.NONE
         eventRemainingMs = 0L
         windStrength = 0f
@@ -580,7 +588,12 @@ class RacePhysicsEngine(
             Long.MAX_VALUE
         }
         if (wasActive && phase == RacePhase.RACING) {
-            setBanner("Weather clearing — full grip restored!", 1600L)
+            val msg = if (prevEvent == ExternalEventType.DAY_NIGHT) {
+                "DAYBREAK! Sunlight returns!"
+            } else {
+                "Weather clearing — full grip restored!"
+            }
+            setBanner(msg, 1600L)
         }
     }
 
@@ -672,14 +685,20 @@ class RacePhysicsEngine(
         } else {
             nextEventCooldownMs -= dtMs
             if (nextEventCooldownMs <= 0L) {
-                val choices = listOf(
+                val choices = listOfNotNull(
                     ExternalEventType.RAIN,
                     ExternalEventType.EARTHQUAKE,
                     ExternalEventType.WIND,
-                    ExternalEventType.SNOW
+                    ExternalEventType.SNOW,
+                    if (!track.isNightTrack) ExternalEventType.DAY_NIGHT else null
                 ).filter { it != lastEventType }
                 val nextType = choices[random.nextInt(choices.size)]
-                triggerExternalEvent(nextType, durationMs = random.nextLong(8500L, 12500L))
+                val duration = if (nextType == ExternalEventType.DAY_NIGHT) {
+                    random.nextLong(9500L, 13500L)
+                } else {
+                    random.nextLong(8500L, 12500L)
+                }
+                triggerExternalEvent(nextType, durationMs = duration)
             }
         }
     }
@@ -1603,6 +1622,7 @@ class RacePhysicsEngine(
         var lateralVel = racer.vx * rightX + racer.vy * rightY
 
         val throttle = if (isStunned) 0.15f else input.throttle.coerceIn(-1f, 1f)
+        racer.isBraking = phase == RacePhase.RACING && !isStunned && throttle < -0.05f
         val inputSteer = if (isStunned) 0f else input.steer.coerceIn(-1f, 1f)
         val effectiveSteer = if (!isStunned && racer.invertedSteerMs > 0L) {
             if (racer.isBot) {
@@ -3198,7 +3218,9 @@ class RacePhysicsEngine(
                     portalWarpSeq = r.portalWarpSeq,
                     electroShockAuraMs = r.electroShockAuraMs,
                     electroParalyzedMs = r.electroParalyzedMs,
-                    laserBeamMs = r.laserBeamMs
+                    laserBeamMs = r.laserBeamMs,
+                    isBraking = r.isBraking,
+                    equippedUpgradesMask = r.equippedUpgradesMask
                 )
             },
             itemBoxes = itemBoxes.toList(),

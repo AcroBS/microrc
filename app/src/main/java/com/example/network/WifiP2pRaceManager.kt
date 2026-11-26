@@ -1247,7 +1247,8 @@ class WifiP2pRaceManager(
                             name = updated.name,
                             carType = updated.carType,
                             primaryColorArgb = updated.primaryColorArgb,
-                            accentColorArgb = updated.accentColorArgb
+                            accentColorArgb = updated.accentColorArgb,
+                            equippedUpgradesMask = updated.equippedUpgradesMask
                         )
                     }
                 }
@@ -1293,7 +1294,8 @@ class WifiP2pRaceManager(
                             name = profile.name,
                             carType = profile.carType.name,
                             primaryColorArgb = profile.primaryColorArgb,
-                            accentColorArgb = profile.accentColorArgb
+                            accentColorArgb = profile.accentColorArgb,
+                            equippedUpgradesMask = profile.equippedUpgradesMask
                         )
                     }
                 }
@@ -1627,6 +1629,7 @@ class WifiP2pRaceManager(
                     carType = activeGhostForRun.carType,
                     primaryColorArgb = activeGhostForRun.primaryColorArgb,
                     accentColorArgb = activeGhostForRun.accentColorArgb,
+                    equippedUpgradesMask = activeGhostForRun.equippedUpgradesMask,
                     finishTimeMs = activeGhostForRun.finishTimeMs,
                     bestLapMs = activeGhostForRun.bestLapMs,
                     x = it.x,
@@ -1706,6 +1709,7 @@ class WifiP2pRaceManager(
                                 carType = activeGhostForRun.carType,
                                 primaryColorArgb = activeGhostForRun.primaryColorArgb,
                                 accentColorArgb = activeGhostForRun.accentColorArgb,
+                                equippedUpgradesMask = activeGhostForRun.equippedUpgradesMask,
                                 finishTimeMs = activeGhostForRun.finishTimeMs,
                                 bestLapMs = activeGhostForRun.bestLapMs,
                                 x = pose.x,
@@ -2328,6 +2332,7 @@ class WifiP2pRaceManager(
         isReady = isReady,
         carType = carType.name,
         primaryColorArgb = primaryColorArgb,
-        accentColorArgb = accentColorArgb
+        accentColorArgb = accentColorArgb,
+        equippedUpgradesMask = equippedUpgradesMask
     )
 }
