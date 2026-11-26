@@ -1,11 +1,14 @@
 package com.example
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.dp
 import com.example.data.TrackCatalog
 import com.example.engine.RacePhysicsEngine
@@ -33,6 +36,7 @@ import com.example.model.WinCondition
 import com.example.network.SessionRole
 import com.example.network.WifiP2pRaceManager
 import com.example.sensors.TiltSteeringController
+import com.example.ui.screens.OnlineHubScreen
 import com.example.ui.screens.RaceScreen
 import com.example.ui.screens.ResultsScreen
 import com.example.ui.screens.TrackEditorScreen
@@ -252,7 +256,7 @@ class JumpGravelAndPolishTest {
     }
 
     @Test
-    fun bypassingRampLeftOrRight_hitsGravelAndSlowsToRoughlySixtyPercentWithOffRoadVariation() {
+    fun bypassingRampLeftOrRight_hitsGravelAndSlowsToRoughlyThirtyFiveToFortyFivePercentWithOffRoadVariation() {
         val ramp = TrackRamp(x = 800f, y = 300f, angleRad = 0f, impulse = 1.0f)
         val track = straightTestTrack(ramps = listOf(ramp))
 
@@ -280,7 +284,7 @@ class JumpGravelAndPolishTest {
 
             var minSpeedInGravel = Float.MAX_VALUE
             var everAirborne = false
-            repeat(40) {
+            repeat(55) {
                 engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
                 val snap = engine.step(0.016f)
                 val r = snap.racers.first()
@@ -296,12 +300,165 @@ class JumpGravelAndPolishTest {
         val apexRatio = measureBypassGravelSpeedRatio(RcCarType.APEX_FORMULA)
         val tundraRatio = measureBypassGravelSpeedRatio(RcCarType.TUNDRA_MONSTER)
 
-        assertTrue("Apex Formula in gravel should slow toward ~60% (ratio=$apexRatio)", apexRatio in 0.54f..0.72f)
-        assertTrue("Tundra Monster in gravel should slow toward ~65% (ratio=$tundraRatio)", tundraRatio in 0.58f..0.76f)
+        assertTrue("Apex Formula in gravel should cap near ~35-41% (ratio=$apexRatio)", apexRatio in 0.34f..0.42f)
+        assertTrue("Tundra Monster in gravel should cap near ~40-46% (ratio=$tundraRatio)", tundraRatio in 0.39f..0.46f)
         assertTrue(
             "Higher Off-Road Grip vehicle (Tundra=$tundraRatio) should retain slightly more speed in gravel than Apex ($apexRatio)",
             tundraRatio > apexRatio
         )
+    }
+
+    @Test
+    fun splineAlignedGravelPatch_curvesWithTurnAndNeverOverlapsTrackCurb() {
+        val baseTrack = TrackCatalog.getTrack(TrackId.WAREHOUSE_DRIFT)
+        // Pick a sharp corner point along Warehouse Drift centerline and place a ramp entering the turn
+        val turnIdx = (baseTrack.centerline.size * 0.22f).toInt()
+        val ramp = TrackCatalog.rampAt(baseTrack.centerline, turnIdx, lateralOffset = -0.45f)
+        val curvedTrack = baseTrack.copy(ramps = listOf(ramp))
+
+        val patch = TrackCatalog.gravelPatchForRamp(curvedTrack, ramp)
+        assertNotNull("Curved turn ramp must produce a spline-aligned gravel patch", patch)
+        patch!!
+        assertTrue("Circuit gravel patch should be a spline ribbon", patch.isSplineRibbon)
+        assertTrue("Ribbon should sample multiple sub-steps along the turn", patch.leftEdge.size >= 10)
+        assertEquals(patch.leftEdge.size, patch.rightEdge.size)
+
+        // Every vertex of the gravel ribbon must remain strictly inside halfWidth - GRAVEL_EDGE_INSET (zero curb overlap)
+        (patch.leftEdge + patch.rightEdge).forEach { (vx, vy) ->
+            val proj = TrackCatalog.projectOntoCenterline(curvedTrack.centerline, vx, vy)
+            val maxAllowed = proj.halfWidth - TrackCatalog.GRAVEL_EDGE_INSET + 2.0f
+            assertTrue(
+                "Gravel vertex ($vx,$vy) lateral=${abs(proj.lateralOffsetPx)} must stay within curb inset $maxAllowed",
+                abs(proj.lateralOffsetPx) <= maxAllowed
+            )
+        }
+
+        // Midpoint along the curved gravel ribbon must be detected as inside gravel, while just outside the curb must not
+        val midSample = TrackCatalog.sampleSplineAtArc(curvedTrack.centerline, patch.startArcS + patch.length * 0.5f)
+        assertTrue(
+            "Center of curved gravel ribbon must trigger gravel hit detection",
+            TrackCatalog.isPointOnGravelPatch(curvedTrack, midSample.x, midSample.y)
+        )
+        val insideRight = midSample.halfWidth * 0.72f
+        assertTrue(
+            "Opposite lane on curved gravel ribbon must trigger gravel hit detection even for Left-lane ramp",
+            TrackCatalog.isPointOnGravelPatch(
+                curvedTrack,
+                midSample.x + midSample.normalX * insideRight,
+                midSample.y + midSample.normalY * insideRight
+            )
+        )
+        val outsideCurb = midSample.halfWidth + 8f
+        assertFalse(
+            "Point outside outer track curb next to curved gravel must NOT trigger gravel hit detection",
+            TrackCatalog.isPointOnGravelPatch(
+                curvedTrack,
+                midSample.x + midSample.normalX * outsideCurb,
+                midSample.y + midSample.normalY * outsideCurb
+            )
+        )
+        assertFalse(
+            "Point outside inner track curb next to curved gravel must NOT trigger gravel hit detection",
+            TrackCatalog.isPointOnGravelPatch(
+                curvedTrack,
+                midSample.x - midSample.normalX * outsideCurb,
+                midSample.y - midSample.normalY * outsideCurb
+            )
+        )
+    }
+
+    @Test
+    fun offCenterLateralPlacement_variesLanesInGenerators_andWorksInTrackStudio() {
+        val generatedRamps = (1L..12L).flatMap { TrackCatalog.generateRandomTrack(seed = it).ramps }
+        val generatedBoosts = (1L..12L).flatMap { TrackCatalog.generateRandomTrack(seed = it).boostPads }
+        assertTrue("Procedural ramps should include Left lane (-0.45)", generatedRamps.any { it.lateralOffset < -0.25f })
+        assertTrue("Procedural ramps should include Center lane (0.0)", generatedRamps.any { abs(it.lateralOffset) < 0.1f })
+        assertTrue("Procedural ramps should include Right lane (+0.45)", generatedRamps.any { it.lateralOffset > 0.25f })
+        assertTrue("Procedural boost pads should vary lanes across Left/Center/Right", generatedBoosts.any { abs(it.lateralOffset) > 0.25f })
+
+        val builtWithJumps = TrackCatalog.withRandomJumps(
+            track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP),
+            enabled = true,
+            seed = 42L
+        )
+        assertTrue("withRandomJumps should place off-center ramps", builtWithJumps.ramps.any { abs(it.lateralOffset) > 0.25f })
+
+        // Verify Track Studio quick Lane selector (Left / Center / Right) updates selected ramp's lateralOffset and saves it
+        val oval = TrackCatalog.defaultEditorOval(TrackId.NEON_ROOFTOP)
+        val ovalBuilt = TrackCatalog.buildCustomTrack(oval)
+        val initialRamp = TrackCatalog.rampAt(ovalBuilt.centerline, 10, lateralOffset = 0f)
+        val draftWithRamp = oval.copy(name = "Lane Studio", ramps = listOf(initialRamp))
+        var savedTrack: CustomTrackData? = null
+
+        composeRule.setContent {
+            MicroRCTheme {
+                TrackEditorScreen(
+                    initialTrack = draftWithRamp,
+                    savedTracks = emptyList(),
+                    canApplyToLobby = false,
+                    onSaveTrack = { track, _ -> savedTrack = track },
+                    onDeleteTrack = {},
+                    onBack = {}
+                )
+            }
+        }
+
+        // Selecting Toggle Jump auto-selects the existing ramp and reveals the Left / Center / Right lane bar
+        composeRule.onNodeWithTag("editor_tool_TOGGLE_RAMP").performClick()
+        composeRule.onNodeWithTag("editor_lane_selector").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("editor_lane_left").performScrollTo().assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("editor_save_button").performClick()
+
+        assertNotNull(savedTrack)
+        assertEquals(1, savedTrack!!.ramps.size)
+        assertTrue(
+            "Saved ramp should be shifted to Left lane (lateralOffset=${savedTrack!!.ramps.first().lateralOffset})",
+            savedTrack!!.ramps.first().lateralOffset < -0.35f
+        )
+
+        // Switching to Right lane moves it to +0.45f
+        composeRule.onNodeWithTag("editor_lane_right").performScrollTo().performClick()
+        composeRule.onNodeWithTag("editor_save_button").performClick()
+        assertTrue(
+            "Saved ramp should be shifted to Right lane (lateralOffset=${savedTrack!!.ramps.first().lateralOffset})",
+            savedTrack!!.ramps.first().lateralOffset > 0.35f
+        )
+    }
+
+    @Test
+    fun onlineHubScreen_environmentalEffectsToggleDefaultsOffAndPassesHostOptIn() {
+        var createdRules: RaceRulesSettings? = null
+        composeRule.setContent {
+            MicroRCTheme {
+                OnlineHubScreen(
+                    profile = PlayerProfile(playerId = "p1", name = "Acro"),
+                    accountLabel = "Acro",
+                    initialRules = RaceRulesSettings(),
+                    openRooms = emptyList(),
+                    isBusy = false,
+                    errorBanner = null,
+                    onDismissError = {},
+                    onCreateRoom = { _, _, _, _, rules -> createdRules = rules },
+                    onJoinRoom = { _, _ -> },
+                    onJoinRoomByCode = { _, _, _ -> },
+                    onOpenLeaderboards = {},
+                    onSignOut = {},
+                    onBack = {}
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("online_environmental_effects_switch")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertIsOff()
+            .performClick()
+        composeRule.onNodeWithTag("online_environmental_effects_switch").assertIsOn()
+
+        composeRule.onNodeWithTag("create_online_room_button").performScrollTo().performClick()
+        assertNotNull("Create room should emit host rules", createdRules)
+        assertEquals(true, createdRules?.hostRandomConditionsOverride)
+        assertEquals(true, createdRules?.randomConditionsEnabled)
     }
 
     @Test

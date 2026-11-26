@@ -57,7 +57,8 @@ class RaceEngineUnitTest {
         assertTrue(defaults.autoAccelerate)
         assertTrue(defaults.hardTrackBoundary)
         assertTrue(defaults.randomJumpsEnabled)
-        assertTrue(defaults.randomConditionsEnabled)
+        assertFalse(defaults.randomConditionsEnabled)
+        assertTrue(defaults.hostRandomConditionsOverride == null)
         assertTrue(defaults.showPlayerNames)
         assertEquals(WinCondition.FIRST_TO_FINISH, defaults.winConditionEnum)
 

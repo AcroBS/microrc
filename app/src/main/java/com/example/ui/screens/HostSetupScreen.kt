@@ -708,68 +708,21 @@ fun HostSetupScreen(
                     }
                 }
 
-                // Multiplayer Host Ride Conditions Override
+                // Multiplayer Host Random Environmental Effects toggle (host-selectable only)
                 if (selectedMode != GameMode.STUNTS) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainer,
-                        shape = RoundedCornerShape(16.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("setup_random_conditions_card")
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Thunderstorm,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.secondary
-                                )
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Random Ride Conditions",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Text(
-                                        text = "Follow each track's design or manually force weather & quakes on/off for this lobby.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                listOf(
-                                    Triple(null, "Track Default", "setup_conditions_track"),
-                                    Triple(true, "Force On", "setup_conditions_on"),
-                                    Triple(false, "Force Off", "setup_conditions_off")
-                                ).forEach { (overrideVal, label, tag) ->
-                                    FilterChip(
-                                        selected = draft.hostRandomConditionsOverride == overrideVal,
-                                        onClick = {
-                                            draft = draft.copy(
-                                                hostRandomConditionsOverride = overrideVal,
-                                                randomConditionsEnabled = overrideVal ?: true
-                                            )
-                                        },
-                                        label = { Text(label, style = MaterialTheme.typography.labelSmall) },
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .testTag(tag)
-                                    )
-                                }
-                            }
+                    SetupSwitchCard(
+                        icon = Icons.Default.Thunderstorm,
+                        title = "Random Environmental Effects",
+                        description = "Enable dynamic rain puddles, tremors, wind & snow for this multiplayer lobby.",
+                        checked = draft.hostRandomConditionsOverride == true,
+                        testTag = "setup_environmental_effects_switch",
+                        onCheckedChange = { enabled ->
+                            draft = draft.copy(
+                                hostRandomConditionsOverride = enabled,
+                                randomConditionsEnabled = enabled
+                            )
                         }
-                    }
+                    )
                 }
 
                 SetupSwitchCard(

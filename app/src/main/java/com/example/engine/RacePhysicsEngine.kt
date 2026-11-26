@@ -699,19 +699,14 @@ class RacePhysicsEngine(
         } else {
             nextEventCooldownMs -= dtMs
             if (nextEventCooldownMs <= 0L) {
-                val choices = listOfNotNull(
+                val choices = listOf(
                     ExternalEventType.RAIN,
                     ExternalEventType.EARTHQUAKE,
                     ExternalEventType.WIND,
-                    ExternalEventType.SNOW,
-                    if (!track.isNightTrack) ExternalEventType.DAY_NIGHT else null
+                    ExternalEventType.SNOW
                 ).filter { it != lastEventType }
                 val nextType = choices[random.nextInt(choices.size)]
-                val duration = if (nextType == ExternalEventType.DAY_NIGHT) {
-                    random.nextLong(9500L, 13500L)
-                } else {
-                    random.nextLong(8500L, 12500L)
-                }
+                val duration = random.nextLong(8500L, 12500L)
                 triggerExternalEvent(nextType, durationMs = duration)
             }
         }
@@ -1736,23 +1731,25 @@ class RacePhysicsEngine(
 
         if (!isAirborne) {
             val gravelTargetSpeed = if (inGravelTrap && !hasOverdrive) {
-                val gravelCapFactor = (0.52f + 0.14f * racer.carType.offRoadRetention).coerceIn(0.56f, 0.68f)
+                val offRoadNorm = ((racer.carType.offRoadRetention - 0.50f) / 0.50f).coerceIn(0f, 1f)
+                val gravelCapFactor = (0.35f + 0.09f * offRoadNorm).coerceIn(0.35f, 0.45f)
                 racer.carType.maxSpeedPx *
                     speedPreset.speedMultiplier *
                     gravelCapFactor *
                     weatherSpeedMult *
-                    (if (hasBoost) 1.18f else 1.0f)
+                    (if (hasBoost) 1.15f else 1.0f)
             } else {
                 null
             }
 
             if (throttle > 0.05f) {
                 if (gravelTargetSpeed != null && forwardVel >= gravelTargetSpeed) {
-                    // Already above gravel speed cap: smoothly bleed excess tarmac speed into gravel
-                    val dampAlpha = kotlin.math.min(1f, 11.5f * dt)
+                    // Strong immediate rolling drag when entering gravel above the gravel speed cap
+                    val dampAlpha = kotlin.math.min(1f, 20.0f * dt)
                     forwardVel += (gravelTargetSpeed - forwardVel) * dampAlpha
                 } else {
-                    forwardVel += throttle * accel * dt
+                    val surfaceAccelMult = if (inGravelTrap && !hasOverdrive) 0.72f else 1.0f
+                    forwardVel += throttle * accel * surfaceAccelMult * dt
                     if (gravelTargetSpeed != null && forwardVel > gravelTargetSpeed) {
                         forwardVel = gravelTargetSpeed
                     }
@@ -1763,19 +1760,19 @@ class RacePhysicsEngine(
             } else {
                 val drag = when {
                     isHydroplaning -> 0.85f
-                    inGravelTrap -> 3.8f
+                    inGravelTrap -> 7.2f
                     activeEvent == ExternalEventType.SNOW -> 1.15f
                     else -> 2.25f
                 }
                 forwardVel *= max(0f, 1f - drag * dt)
                 if (gravelTargetSpeed != null && forwardVel > gravelTargetSpeed) {
-                    val dampAlpha = kotlin.math.min(1f, 11.5f * dt)
+                    val dampAlpha = kotlin.math.min(1f, 20.0f * dt)
                     forwardVel += (gravelTargetSpeed - forwardVel) * dampAlpha
                 }
             }
 
             if (gravelTargetSpeed != null && forwardVel < -gravelTargetSpeed * 0.58f) {
-                val dampAlpha = kotlin.math.min(1f, 11.5f * dt)
+                val dampAlpha = kotlin.math.min(1f, 20.0f * dt)
                 forwardVel += (-gravelTargetSpeed * 0.58f - forwardVel) * dampAlpha
             }
 

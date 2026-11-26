@@ -90,7 +90,8 @@ data class BoostPad(
     val x: Float,
     val y: Float,
     val angleRad: Float,
-    val radius: Float = 44f
+    val radius: Float = 44f,
+    val lateralOffset: Float = 0f
 )
 
 data class TrackRamp(
@@ -98,7 +99,8 @@ data class TrackRamp(
     val y: Float,
     val angleRad: Float,
     val radius: Float = 48f,
-    val impulse: Float = 1.0f
+    val impulse: Float = 1.0f,
+    val lateralOffset: Float = 0f
 )
 
 data class GravelPatch(
@@ -106,7 +108,13 @@ data class GravelPatch(
     val y: Float,
     val angleRad: Float,
     val length: Float,
-    val halfWidth: Float
+    val halfWidth: Float,
+    val leftEdge: List<Pair<Float, Float>> = emptyList(),
+    val rightEdge: List<Pair<Float, Float>> = emptyList(),
+    val startArcS: Float = 0f,
+    val endArcS: Float = 0f,
+    val totalSplineLength: Float = 0f,
+    val isSplineRibbon: Boolean = false
 )
 
 data class ItemBoxSpawn(
@@ -240,7 +248,7 @@ data class TrackDefinition(
     val isStunt: Boolean = false,
     val stuntVariant: StuntVariant? = null,
     val isNightTrack: Boolean = false,
-    val randomConditionsEnabled: Boolean = true
+    val randomConditionsEnabled: Boolean = false
 ) {
     val displayTitle: String
         get() = customName ?: stuntVariant?.displayName ?: arenaShape?.displayName ?: id.displayName

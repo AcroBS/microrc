@@ -63,14 +63,13 @@ object DriftDailyChallenge {
         val daySeed = seedForDate(normalized)
         val featureRng = kotlin.random.Random(daySeed xor 0x3D2E9B71L)
         val includeJumps = featureRng.nextFloat() < 0.45f
-        val includeConditions = featureRng.nextFloat() < 0.50f
         return DriftTrackCatalog.generateRandomDriftTrack(
             seed = daySeed,
             preferredTheme = null,
             roadHalfWidth = 122f,
             trackIdOverride = trackIdForDate(normalized),
             trackNameOverride = "Daily Drift ($label)",
-            forceRandomConditions = includeConditions,
+            forceRandomConditions = false,
             includeJumps = includeJumps
         )
     }
@@ -83,7 +82,7 @@ object DriftDailyChallenge {
             carSpeed = CarSpeedPreset.FAST.name,
             hardTrackBoundary = true,
             randomJumpsEnabled = true,
-            randomConditionsEnabled = true,
+            randomConditionsEnabled = false,
             hostRandomConditionsOverride = null
         )
     }

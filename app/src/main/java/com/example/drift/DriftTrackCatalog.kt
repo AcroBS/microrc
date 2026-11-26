@@ -74,7 +74,6 @@ object DriftTrackCatalog {
     ): CustomTrackData {
         val rng = Random(seed)
         val isNightTrack = forceNight ?: (rng.nextFloat() < 0.35f)
-        val randomConditionsEnabled = forceRandomConditions ?: (rng.nextFloat() < 0.45f)
         val driftThemes = listOf(
             TrackId.WAREHOUSE_DRIFT,
             TrackId.NEON_ROOFTOP,
@@ -115,10 +114,11 @@ object DriftTrackCatalog {
         val spline = TrackCatalog.subdivideClosedSpline(ctrl, samplesPerSegment = 14)
         val n = spline.size
 
-        // Boost pads placed on corner exits so holding a drift onto the straight maximizes speed
+        // Boost pads placed on corner exits with varied Left/Center/Right lanes
+        val boostLanes = TrackCatalog.LANE_LATERAL_OFFSETS.shuffled(rng)
         val boosts = listOf(
-            TrackCatalog.boostAt(spline, (n * 0.16f).toInt()),
-            TrackCatalog.boostAt(spline, (n * 0.62f).toInt())
+            TrackCatalog.boostAt(spline, (n * 0.16f).toInt(), lateralOffset = boostLanes[0]),
+            TrackCatalog.boostAt(spline, (n * 0.62f).toInt(), lateralOffset = boostLanes[1])
         )
 
         // Solid corner/chicane obstacles placed away from start grid (avoid first 10% and last 12%)
@@ -177,13 +177,26 @@ object DriftTrackCatalog {
 
         val ramps = if (includeJumps) {
             val candidateFracs = listOf(0.25f, 0.52f, 0.78f)
-            candidateFracs.mapNotNull { frac ->
-                val cand = TrackCatalog.rampAt(spline, (n * frac).toInt(), impulse = 1.04f)
+            val rampLanes = TrackCatalog.LANE_LATERAL_OFFSETS.shuffled(rng)
+            candidateFracs.mapIndexedNotNull { idx, frac ->
+                val cand = TrackCatalog.rampAt(
+                    spline = spline,
+                    index = (n * frac).toInt(),
+                    impulse = 1.04f,
+                    lateralOffset = rampLanes[idx % rampLanes.size]
+                )
                 val nearBoost = boosts.any { TrackCatalog.distance(cand.x, cand.y, it.x, it.y) < 120f }
                 val nearProp = props.any { TrackCatalog.distance(cand.x, cand.y, it.x, it.y) < 95f }
                 if (!nearBoost && !nearProp) cand else null
             }.take(2).ifEmpty {
-                listOf(TrackCatalog.rampAt(spline, (n * 0.50f).toInt(), impulse = 1.04f))
+                listOf(
+                    TrackCatalog.rampAt(
+                        spline = spline,
+                        index = (n * 0.50f).toInt(),
+                        impulse = 1.04f,
+                        lateralOffset = rampLanes[0]
+                    )
+                )
             }
         } else {
             emptyList()
@@ -200,7 +213,7 @@ object DriftTrackCatalog {
             ramps = ramps,
             props = props,
             isNightTrack = isNightTrack,
-            randomConditionsEnabled = randomConditionsEnabled
+            randomConditionsEnabled = false
         )
     }
 

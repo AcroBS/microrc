@@ -412,7 +412,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val soloRules = rules.value.copy(
             gameMode = GameMode.RACE.name,
             randomJumpsEnabled = true,
-            randomConditionsEnabled = true,
+            randomConditionsEnabled = false,
             hostRandomConditionsOverride = null
         )
         raceManager.startSoloSession(
@@ -431,7 +431,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             winCondition = WinCondition.FIRST_TO_FINISH.name,
             totalLaps = laps,
             randomJumpsEnabled = true,
-            randomConditionsEnabled = true,
+            randomConditionsEnabled = false,
             hostRandomConditionsOverride = null
         )
         val boardKey = LeaderboardBoardKey.build(GameMode.RACE, TrackId.LIVING_ROOM_GP.name, laps)
@@ -478,7 +478,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             winCondition = WinCondition.FIRST_TO_FINISH.name,
             totalLaps = cleanLaps,
             randomJumpsEnabled = true,
-            randomConditionsEnabled = true,
+            randomConditionsEnabled = false,
             hostRandomConditionsOverride = null
         )
         raceManager.startSoloSession(
@@ -506,7 +506,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             winCondition = WinCondition.FIRST_TO_FINISH.name,
             totalLaps = cleanLaps,
             randomJumpsEnabled = true,
-            randomConditionsEnabled = true,
+            randomConditionsEnabled = false,
             hostRandomConditionsOverride = null
         )
         val boardKey = LeaderboardBoardKey.build(GameMode.DRIFT, driftTrack.id, cleanLaps)
@@ -556,7 +556,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             winCondition = WinCondition.FIRST_TO_FINISH.name,
             totalLaps = cleanLaps,
             randomJumpsEnabled = true,
-            randomConditionsEnabled = true,
+            randomConditionsEnabled = false,
             hostRandomConditionsOverride = null
         )
         val boardKey = LeaderboardBoardKey.build(GameMode.RACE, customTrack.id, cleanLaps)
@@ -602,7 +602,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             winCondition = WinCondition.FIRST_TO_FINISH.name,
             totalLaps = cleanLaps,
             randomJumpsEnabled = true,
-            randomConditionsEnabled = true,
+            randomConditionsEnabled = false,
             hostRandomConditionsOverride = null
         )
         raceManager.startSoloSession(

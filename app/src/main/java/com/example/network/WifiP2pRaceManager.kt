@@ -538,7 +538,11 @@ class WifiP2pRaceManager(
     ) {
         leaveSession()
         localPlayerId = profile.playerId
-        configureInitialSessionMode(initialRules, initialCustomTrack)
+        val sanitizedSoloRules = initialRules.copy(
+            randomConditionsEnabled = false,
+            hostRandomConditionsOverride = null
+        )
+        configureInitialSessionMode(sanitizedSoloRules, initialCustomTrack)
         _role.value = SessionRole.Solo
         _activeChallengeGhost.value = challengeGhost
         _activeGhostCar.value = null
@@ -1403,11 +1407,11 @@ class WifiP2pRaceManager(
                 }
             }
             add("Speed: ${rules.carSpeedEnum.displayName}")
-            if (rules.gameModeEnum != GameMode.STUNTS) {
-                when (rules.hostRandomConditionsOverride) {
-                    true -> add("Ride Conditions: Force On")
-                    false -> add("Ride Conditions: Off")
-                    null -> add("Ride Conditions: Track Default")
+            if (rules.gameModeEnum != GameMode.STUNTS && _role.value != SessionRole.Solo) {
+                if (rules.hostRandomConditionsOverride == true) {
+                    add("Environmental Effects: On")
+                } else {
+                    add("Environmental Effects: Off")
                 }
             }
             if (rules.showPlayerNames) add("Name Tags")

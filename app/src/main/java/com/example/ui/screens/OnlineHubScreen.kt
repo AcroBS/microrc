@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Thunderstorm
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.AlertDialog
@@ -112,8 +113,8 @@ fun OnlineHubScreen(
     var roomName by remember(profile.name) { mutableStateOf("${profile.name.take(12)}'s Group") }
     var maxPlayers by remember { mutableIntStateOf(4) }
     var selectedMode by remember(initialRules.gameMode) { mutableStateOf(initialRules.gameModeEnum) }
-    var hostConditionsOverride by remember(initialRules.hostRandomConditionsOverride) {
-        mutableStateOf<Boolean?>(initialRules.hostRandomConditionsOverride)
+    var environmentalEffectsEnabled by remember(initialRules.hostRandomConditionsOverride) {
+        mutableStateOf(initialRules.hostRandomConditionsOverride == true)
     }
     var passwordProtected by remember { mutableStateOf(false) }
     var roomPassword by remember { mutableStateOf("") }
@@ -500,30 +501,47 @@ fun OnlineHubScreen(
                         }
 
                         if (selectedMode != GameMode.STUNTS) {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    text = "RANDOM RIDE CONDITIONS (HOST OVERRIDE)",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    listOf(
-                                        Triple(null, "Track Default", "online_conditions_track"),
-                                        Triple(true, "Force On", "online_conditions_on"),
-                                        Triple(false, "Force Off", "online_conditions_off")
-                                    ).forEach { (overrideVal, label, tag) ->
-                                        FilterChip(
-                                            selected = hostConditionsOverride == overrideVal,
-                                            onClick = { hostConditionsOverride = overrideVal },
-                                            label = { Text(label, style = MaterialTheme.typography.labelSmall) },
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .testTag(tag)
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Thunderstorm,
+                                            contentDescription = null,
+                                            tint = if (environmentalEffectsEnabled) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(18.dp)
                                         )
+                                        Column {
+                                            Text(
+                                                text = "Random Environmental Effects",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            )
+                                            Text(
+                                                text = "Rain puddles, tremors, wind & snow (multiplayer host option)",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                     }
+                                    Switch(
+                                        checked = environmentalEffectsEnabled,
+                                        onCheckedChange = { environmentalEffectsEnabled = it },
+                                        modifier = Modifier.testTag("online_environmental_effects_switch")
+                                    )
                                 }
                             }
                         }
@@ -633,8 +651,8 @@ fun OnlineHubScreen(
                                         effectivePw,
                                         initialRules.copy(
                                             gameMode = selectedMode.name,
-                                            hostRandomConditionsOverride = hostConditionsOverride,
-                                            randomConditionsEnabled = hostConditionsOverride ?: true
+                                            hostRandomConditionsOverride = environmentalEffectsEnabled,
+                                            randomConditionsEnabled = environmentalEffectsEnabled
                                         )
                                     )
                                 }

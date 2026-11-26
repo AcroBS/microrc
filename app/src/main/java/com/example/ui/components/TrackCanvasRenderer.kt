@@ -319,68 +319,90 @@ fun DrawScope.drawTrackWorld(
         }
     }
 
-    // 4b. Full-width Gravel Traps paired immediately behind every non-Stunt Jump Ramp
+    // 4b. Spline-following full-width Gravel Traps paired immediately behind every non-Stunt Jump Ramp
     if (!track.isStunt && track.ramps.isNotEmpty()) {
-        for ((rampIdx, ramp) in track.ramps.withIndex()) {
-            val patch = TrackCatalog.gravelPatchForRamp(track, ramp) ?: continue
-            val deg = patch.angleRad * 180f / PI.toFloat()
-            val halfLen = patch.length * 0.5f
-            val halfW = patch.halfWidth
-            withTransform({
-                translate(patch.x, patch.y)
-                rotate(deg, Offset.Zero)
-            }) {
-                // Soft outer berm shadow
-                drawRoundRect(
-                    color = Color(0xFF4E3B28).copy(alpha = 0.45f),
-                    topLeft = Offset(-halfLen - 4f, -halfW - 3f),
-                    size = Size(patch.length + 8f, halfW * 2f + 6f),
-                    cornerRadius = CornerRadius(14f, 14f)
-                )
-                // Loose sandy-tan gravel base spanning the full road width
-                drawRoundRect(
-                    color = Color(0xFFB5966A).copy(alpha = 0.90f),
-                    topLeft = Offset(-halfLen, -halfW),
-                    size = Size(patch.length, halfW * 2f),
-                    cornerRadius = CornerRadius(10f, 10f)
-                )
-                // Inner darker compacted gravel bed
-                drawRoundRect(
-                    color = Color(0xFF9A7B52).copy(alpha = 0.55f),
-                    topLeft = Offset(-halfLen + 8f, -halfW + 8f),
-                    size = Size(patch.length - 16f, (halfW * 2f - 16f).coerceAtLeast(12f)),
-                    cornerRadius = CornerRadius(8f, 8f)
-                )
-                // Deterministic loose-stone / pebble grain dots
-                for (pIdx in 0 until 32) {
-                    val hashA = kotlin.math.sin((rampIdx * 37 + pIdx * 19 + 3).toFloat())
-                    val hashB = kotlin.math.cos((rampIdx * 23 + pIdx * 31 + 7).toFloat())
-                    val px = hashA * (halfLen - 14f)
-                    val py = hashB * (halfW - 14f)
-                    val pebbleR = 2.4f + (pIdx % 3) * 1.1f
-                    val pebbleColor = when (pIdx % 3) {
-                        0 -> Color(0xFFDCC8A6).copy(alpha = 0.85f)
-                        1 -> Color(0xFF6B5237).copy(alpha = 0.72f)
-                        else -> Color(0xFF8C6E4A).copy(alpha = 0.80f)
-                    }
-                    drawCircle(
-                        color = pebbleColor,
-                        radius = pebbleR,
-                        center = Offset(px, py)
-                    )
+        val patches = TrackCatalog.gravelPatchesForTrack(track)
+        for ((patchIdx, patch) in patches.withIndex()) {
+            val left = patch.leftEdge
+            val right = patch.rightEdge
+            if (left.size < 2 || left.size != right.size) continue
+
+            val outerRibbon = Path().apply {
+                moveTo(left[0].first, left[0].second)
+                for (i in 1 until left.size) {
+                    lineTo(left[i].first, left[i].second)
                 }
-                // Crisp gravel-trap border & entry/exit warning dashed edges
-                drawRoundRect(
-                    color = Color(0xFF5D4037).copy(alpha = 0.65f),
-                    topLeft = Offset(-halfLen, -halfW),
-                    size = Size(patch.length, halfW * 2f),
-                    cornerRadius = CornerRadius(10f, 10f),
-                    style = Stroke(
-                        width = 3.5f,
-                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f), 0f)
-                    )
+                for (i in right.lastIndex downTo 0) {
+                    lineTo(right[i].first, right[i].second)
+                }
+                close()
+            }
+
+            val innerRibbon = Path().apply {
+                val insetFrac = 0.08f
+                val startIdx = if (left.size > 3) 1 else 0
+                val endIdx = if (left.size > 3) left.lastIndex - 1 else left.lastIndex
+                for (i in startIdx..endIdx) {
+                    val ix = left[i].first + (right[i].first - left[i].first) * insetFrac
+                    val iy = left[i].second + (right[i].second - left[i].second) * insetFrac
+                    if (i == startIdx) moveTo(ix, iy) else lineTo(ix, iy)
+                }
+                for (i in endIdx downTo startIdx) {
+                    val ix = right[i].first + (left[i].first - right[i].first) * insetFrac
+                    val iy = right[i].second + (left[i].second - right[i].second) * insetFrac
+                    lineTo(ix, iy)
+                }
+                close()
+            }
+
+            // Loose sandy-tan gravel base bounded strictly inside track edges (zero curb overlap)
+            drawPath(
+                path = outerRibbon,
+                color = Color(0xFFB5966A).copy(alpha = 0.90f)
+            )
+            // Inner compacted darker gravel bed following the curve
+            drawPath(
+                path = innerRibbon,
+                color = Color(0xFF9A7B52).copy(alpha = 0.54f)
+            )
+
+            // Deterministic loose-stone / pebble grain dots distributed inside the curved ribbon
+            val segCount = (left.size - 1).coerceAtLeast(1)
+            for (pIdx in 0 until 36) {
+                val hashA = 0.06f + 0.88f * (0.5f + 0.5f * kotlin.math.sin((patchIdx * 37 + pIdx * 19 + 3).toFloat()))
+                val hashB = 0.08f + 0.84f * (0.5f + 0.5f * kotlin.math.cos((patchIdx * 23 + pIdx * 31 + 7).toFloat()))
+                val fIdx = hashA * segCount
+                val seg = fIdx.toInt().coerceIn(0, segCount - 1)
+                val segFrac = (fIdx - seg).coerceIn(0f, 1f)
+                val lx = left[seg].first + (left[seg + 1].first - left[seg].first) * segFrac
+                val ly = left[seg].second + (left[seg + 1].second - left[seg].second) * segFrac
+                val rx = right[seg].first + (right[seg + 1].first - right[seg].first) * segFrac
+                val ry = right[seg].second + (right[seg + 1].second - right[seg].second) * segFrac
+                val px = lx + (rx - lx) * hashB
+                val py = ly + (ry - ly) * hashB
+                val pebbleR = 2.4f + (pIdx % 3) * 1.1f
+                val pebbleColor = when (pIdx % 3) {
+                    0 -> Color(0xFFDCC8A6).copy(alpha = 0.85f)
+                    1 -> Color(0xFF6B5237).copy(alpha = 0.72f)
+                    else -> Color(0xFF8C6E4A).copy(alpha = 0.80f)
+                }
+                drawCircle(
+                    color = pebbleColor,
+                    radius = pebbleR,
+                    center = Offset(px, py)
                 )
             }
+
+            // Crisp dashed border strictly inside road curbs
+            drawPath(
+                path = outerRibbon,
+                color = Color(0xFF5D4037).copy(alpha = 0.65f),
+                style = Stroke(
+                    width = 3.2f,
+                    join = StrokeJoin.Round,
+                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f), 0f)
+                )
+            )
         }
     }
 
@@ -990,9 +1012,9 @@ fun DrawScope.drawTrackWorld(
             }
         }
         // Subtle sandy dust plume kicked up behind rear tires when driving through a gravel patch
-        if (r.jumpZ <= 0.05f && r.speed > 45f && !track.isStunt && TrackCatalog.isPointOnGravelPatch(track, r.x, r.y)) {
+        if (r.jumpZ <= 0.05f && r.speed > 30f && !track.isStunt && TrackCatalog.isPointOnGravelPatch(track, r.x, r.y)) {
             val deg = r.angleRad * 180f / PI.toFloat()
-            val dustIntensity = ((r.speed - 45f) / 220f).coerceIn(0.25f, 1f)
+            val dustIntensity = ((r.speed - 30f) / 160f).coerceIn(0.38f, 1f)
             withTransform({
                 translate(r.x, r.y)
                 rotate(deg, Offset.Zero)

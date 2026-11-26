@@ -43,7 +43,6 @@ import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RemoveCircleOutline
-import androidx.compose.material.icons.filled.Thunderstorm
 import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
@@ -87,6 +86,7 @@ import com.example.model.TrackPuddle
 import com.example.model.TrackRamp
 import com.example.ui.components.drawTrackMiniMap
 import com.example.ui.components.drawTrackWorld
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.hypot
 import kotlin.math.roundToInt
@@ -116,8 +116,12 @@ fun TrackEditorScreen(
         mutableStateOf(initialTrack ?: TrackCatalog.defaultEditorOval())
     }
     var selectedNodeIdx by remember { mutableIntStateOf(0) }
+    var selectedRampIdx by remember { mutableIntStateOf(-1) }
+    var selectedBoostIdx by remember { mutableIntStateOf(-1) }
     var activeTool by remember { mutableStateOf(EditorTool.MOVE_NODE) }
     var draggingNodeIdx by remember { mutableIntStateOf(-1) }
+    var draggingFeatureKind by remember { mutableStateOf<String?>(null) }
+    var draggingFeatureIdx by remember { mutableIntStateOf(-1) }
     var savedBannerName by remember { mutableStateOf<String?>(null) }
 
     val previewTrack = remember(draft) { TrackCatalog.buildCustomTrack(draft) }
@@ -128,6 +132,8 @@ fun TrackEditorScreen(
     val latestDraft by rememberUpdatedState(draft)
     val latestTool by rememberUpdatedState(activeTool)
     val latestPreviewTrack by rememberUpdatedState(previewTrack)
+    val latestSelectedRampIdx by rememberUpdatedState(selectedRampIdx)
+    val latestSelectedBoostIdx by rememberUpdatedState(selectedBoostIdx)
     val scrollState = rememberScrollState()
 
     fun findBestInsertIndex(points: List<TrackPoint>, wx: Float, wy: Float): Int {
@@ -193,6 +199,8 @@ fun TrackEditorScreen(
                     onClick = {
                         draft = TrackCatalog.defaultEditorOval(selectedTheme)
                         selectedNodeIdx = 0
+                        selectedRampIdx = -1
+                        selectedBoostIdx = -1
                         savedBannerName = null
                     },
                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
@@ -213,6 +221,8 @@ fun TrackEditorScreen(
                             roadHalfWidth = draft.roadHalfWidth
                         )
                         selectedNodeIdx = 0
+                        selectedRampIdx = -1
+                        selectedBoostIdx = -1
                         savedBannerName = null
                     },
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
@@ -230,7 +240,7 @@ fun TrackEditorScreen(
                 modifier = Modifier
                     .widthIn(max = 720.dp)
                     .weight(1f)
-                    .verticalScroll(scrollState, enabled = draggingNodeIdx < 0)
+                    .verticalScroll(scrollState, enabled = draggingNodeIdx < 0 && draggingFeatureIdx < 0)
                     .padding(horizontal = 14.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
@@ -239,13 +249,14 @@ fun TrackEditorScreen(
                 val surfaceDotInner = MaterialTheme.colorScheme.surface
                 val overlaySurface = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.90f)
                 val overlayTextColor = MaterialTheme.colorScheme.primary
+                val isAnyCanvasDragging = draggingNodeIdx >= 0 || draggingFeatureIdx >= 0
 
                 Surface(
                     color = if (draft.isNightTrack) Color(0xFF02040A) else Color(selectedTheme.baseBgColorHex),
                     shape = RoundedCornerShape(18.dp),
                     border = BorderStroke(
-                        width = if (draggingNodeIdx >= 0) 2.dp else 1.5.dp,
-                        color = if (draggingNodeIdx >= 0) primaryColor else primaryColor.copy(alpha = 0.55f)
+                        width = if (isAnyCanvasDragging) 2.dp else 1.5.dp,
+                        color = if (isAnyCanvasDragging) primaryColor else primaryColor.copy(alpha = 0.55f)
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -289,8 +300,37 @@ fun TrackEditorScreen(
                                             return best
                                         }
 
+                                        fun findNearestRamp(wx: Float, wy: Float): Int {
+                                            val worldHitRadius = maxOf(165f, 34.dp.toPx() / scale)
+                                            var best = -1
+                                            var bestD = worldHitRadius
+                                            latestDraft.ramps.forEachIndexed { idx, r ->
+                                                val d = hypot(r.x - wx, r.y - wy)
+                                                if (d < bestD) {
+                                                    bestD = d
+                                                    best = idx
+                                                }
+                                            }
+                                            return best
+                                        }
+
+                                        fun findNearestBoost(wx: Float, wy: Float): Int {
+                                            val worldHitRadius = maxOf(165f, 34.dp.toPx() / scale)
+                                            var best = -1
+                                            var bestD = worldHitRadius
+                                            latestDraft.boostPads.forEachIndexed { idx, b ->
+                                                val d = hypot(b.x - wx, b.y - wy)
+                                                if (d < bestD) {
+                                                    bestD = d
+                                                    best = idx
+                                                }
+                                            }
+                                            return best
+                                        }
+
                                         val (startWx, startWy) = toWorld(down.position)
                                         val currentTool = latestTool
+                                        val touchSlop = viewConfiguration.touchSlop
 
                                         if (currentTool == EditorTool.MOVE_NODE) {
                                             val hitIdx = findNearestNode(startWx, startWy)
@@ -299,6 +339,8 @@ fun TrackEditorScreen(
                                                 down.consume()
                                                 draggingNodeIdx = hitIdx
                                                 selectedNodeIdx = hitIdx
+                                                selectedRampIdx = -1
+                                                selectedBoostIdx = -1
                                                 savedBannerName = null
                                                 val anchorPt = latestDraft.controlPoints[hitIdx]
                                                 val grabOffsetX = anchorPt.x - startWx
@@ -341,8 +383,106 @@ fun TrackEditorScreen(
                                             }
                                         }
 
-                                        // Non-drag tap tools (ADD_NODE, TOGGLE_RAMP, TOGGLE_BOOST) or empty-space tap
-                                        val touchSlop = viewConfiguration.touchSlop
+                                        // Check if user grabbed an existing Jump Ramp or Boost Pad to slide laterally or select/toggle
+                                        val hitRampForSlide = if (currentTool == EditorTool.TOGGLE_RAMP || currentTool == EditorTool.MOVE_NODE) {
+                                            findNearestRamp(startWx, startWy)
+                                        } else -1
+                                        val hitBoostForSlide = if (hitRampForSlide < 0 && (currentTool == EditorTool.TOGGLE_BOOST || currentTool == EditorTool.MOVE_NODE)) {
+                                            findNearestBoost(startWx, startWy)
+                                        } else -1
+
+                                        if (hitRampForSlide >= 0 || hitBoostForSlide >= 0) {
+                                            val isRamp = hitRampForSlide >= 0
+                                            val featureIdx = if (isRamp) hitRampForSlide else hitBoostForSlide
+                                            var startedLateralDrag = false
+                                            var lastPos = down.position
+                                            try {
+                                                while (true) {
+                                                    val event = awaitPointerEvent()
+                                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                                        ?: event.changes.firstOrNull()
+                                                        ?: break
+                                                    lastPos = change.position
+                                                    if (!change.pressed) {
+                                                        if (startedLateralDrag) change.consume()
+                                                        break
+                                                    }
+                                                    if (!startedLateralDrag &&
+                                                        hypot(lastPos.x - down.position.x, lastPos.y - down.position.y) > touchSlop
+                                                    ) {
+                                                        startedLateralDrag = true
+                                                        draggingFeatureKind = if (isRamp) "RAMP" else "BOOST"
+                                                        draggingFeatureIdx = featureIdx
+                                                        if (isRamp) {
+                                                            selectedRampIdx = featureIdx
+                                                            selectedBoostIdx = -1
+                                                        } else {
+                                                            selectedBoostIdx = featureIdx
+                                                            selectedRampIdx = -1
+                                                        }
+                                                        savedBannerName = null
+                                                    }
+                                                    if (startedLateralDrag) {
+                                                        change.consume()
+                                                        val (curWx, curWy) = toWorld(change.position)
+                                                        val curPreview = latestPreviewTrack
+                                                        val curDraft = latestDraft
+                                                        val proj = TrackCatalog.projectOntoCenterline(curPreview.centerline, curWx, curWy)
+                                                        val newLat = (proj.lateralOffsetPx / proj.halfWidth.coerceAtLeast(1f))
+                                                            .coerceIn(-TrackCatalog.MAX_LATERAL_OFFSET, TrackCatalog.MAX_LATERAL_OFFSET)
+                                                        if (isRamp && featureIdx in curDraft.ramps.indices) {
+                                                            val updated = curDraft.ramps.toMutableList()
+                                                            updated[featureIdx] = TrackCatalog.repositionRampLaterally(
+                                                                curPreview,
+                                                                updated[featureIdx],
+                                                                newLat
+                                                            )
+                                                            draft = curDraft.copy(ramps = updated)
+                                                        } else if (!isRamp && featureIdx in curDraft.boostPads.indices) {
+                                                            val updated = curDraft.boostPads.toMutableList()
+                                                            updated[featureIdx] = TrackCatalog.repositionBoostLaterally(
+                                                                curPreview,
+                                                                updated[featureIdx],
+                                                                newLat
+                                                            )
+                                                            draft = curDraft.copy(boostPads = updated)
+                                                        }
+                                                    }
+                                                }
+                                            } finally {
+                                                draggingFeatureKind = null
+                                                draggingFeatureIdx = -1
+                                            }
+                                            if (!startedLateralDrag) {
+                                                val curDraft = latestDraft
+                                                if (isRamp) {
+                                                    if (currentTool == EditorTool.TOGGLE_RAMP && latestSelectedRampIdx == featureIdx) {
+                                                        draft = curDraft.copy(
+                                                            ramps = curDraft.ramps.filterIndexed { i, _ -> i != featureIdx }
+                                                        )
+                                                        selectedRampIdx = -1
+                                                        savedBannerName = null
+                                                    } else {
+                                                        selectedRampIdx = featureIdx
+                                                        selectedBoostIdx = -1
+                                                    }
+                                                } else {
+                                                    if (currentTool == EditorTool.TOGGLE_BOOST && latestSelectedBoostIdx == featureIdx) {
+                                                        draft = curDraft.copy(
+                                                            boostPads = curDraft.boostPads.filterIndexed { i, _ -> i != featureIdx }
+                                                        )
+                                                        selectedBoostIdx = -1
+                                                        savedBannerName = null
+                                                    } else {
+                                                        selectedBoostIdx = featureIdx
+                                                        selectedRampIdx = -1
+                                                    }
+                                                }
+                                            }
+                                            return@awaitEachGesture
+                                        }
+
+                                        // Non-drag tap tools (ADD_NODE, TOGGLE_RAMP, TOGGLE_BOOST, TOGGLE_PUDDLE) or empty-space tap
                                         var movedTooFar = false
                                         var lastPos = down.position
                                         while (true) {
@@ -362,7 +502,11 @@ fun TrackEditorScreen(
                                             when (currentTool) {
                                                 EditorTool.MOVE_NODE -> {
                                                     val hit = findNearestNode(wx, wy)
-                                                    if (hit >= 0) selectedNodeIdx = hit
+                                                    if (hit >= 0) {
+                                                        selectedNodeIdx = hit
+                                                        selectedRampIdx = -1
+                                                        selectedBoostIdx = -1
+                                                    }
                                                 }
                                                 EditorTool.ADD_NODE -> {
                                                     if (curDraft.controlPoints.size < 16) {
@@ -371,47 +515,43 @@ fun TrackEditorScreen(
                                                         updated.add(insertAt, TrackPoint(wx, wy, curDraft.roadHalfWidth))
                                                         draft = curDraft.copy(controlPoints = updated)
                                                         selectedNodeIdx = insertAt
+                                                        selectedRampIdx = -1
+                                                        selectedBoostIdx = -1
                                                         savedBannerName = null
                                                     }
                                                 }
                                                 EditorTool.TOGGLE_RAMP -> {
-                                                    val existingIdx = curDraft.ramps.indexOfFirst {
-                                                        hypot(it.x - wx, it.y - wy) < 150f
-                                                    }
-                                                    if (existingIdx >= 0) {
-                                                        draft = curDraft.copy(
-                                                            ramps = curDraft.ramps.filterIndexed { i, _ -> i != existingIdx }
-                                                        )
-                                                    } else {
-                                                        val (closestIdx, _) = TrackCatalog.nearestTrackPoint(curPreview, wx, wy)
-                                                        val pts = curPreview.centerline
-                                                        val p = pts[closestIdx]
-                                                        val next = pts[(closestIdx + 1) % pts.size]
-                                                        val ang = atan2(next.y - p.y, next.x - p.x)
-                                                        draft = curDraft.copy(
-                                                            ramps = curDraft.ramps + TrackRamp(p.x, p.y, ang)
-                                                        )
-                                                    }
+                                                    val proj = TrackCatalog.projectOntoCenterline(curPreview.centerline, wx, wy)
+                                                    val rawLat = (proj.lateralOffsetPx / proj.halfWidth.coerceAtLeast(1f))
+                                                        .coerceIn(-TrackCatalog.MAX_LATERAL_OFFSET, TrackCatalog.MAX_LATERAL_OFFSET)
+                                                    val lat = if (abs(rawLat) < 0.14f) 0f else rawLat
+                                                    val shift = lat * proj.halfWidth
+                                                    val nextRamps = curDraft.ramps + TrackRamp(
+                                                        x = proj.closestX + proj.normalX * shift,
+                                                        y = proj.closestY + proj.normalY * shift,
+                                                        angleRad = proj.tangentAngleRad,
+                                                        lateralOffset = lat
+                                                    )
+                                                    draft = curDraft.copy(ramps = nextRamps)
+                                                    selectedRampIdx = nextRamps.lastIndex
+                                                    selectedBoostIdx = -1
                                                     savedBannerName = null
                                                 }
                                                 EditorTool.TOGGLE_BOOST -> {
-                                                    val existingIdx = curDraft.boostPads.indexOfFirst {
-                                                        hypot(it.x - wx, it.y - wy) < 150f
-                                                    }
-                                                    if (existingIdx >= 0) {
-                                                        draft = curDraft.copy(
-                                                            boostPads = curDraft.boostPads.filterIndexed { i, _ -> i != existingIdx }
-                                                        )
-                                                    } else {
-                                                        val (closestIdx, _) = TrackCatalog.nearestTrackPoint(curPreview, wx, wy)
-                                                        val pts = curPreview.centerline
-                                                        val p = pts[closestIdx]
-                                                        val next = pts[(closestIdx + 1) % pts.size]
-                                                        val ang = atan2(next.y - p.y, next.x - p.x)
-                                                        draft = curDraft.copy(
-                                                            boostPads = curDraft.boostPads + BoostPad(p.x, p.y, ang)
-                                                        )
-                                                    }
+                                                    val proj = TrackCatalog.projectOntoCenterline(curPreview.centerline, wx, wy)
+                                                    val rawLat = (proj.lateralOffsetPx / proj.halfWidth.coerceAtLeast(1f))
+                                                        .coerceIn(-TrackCatalog.MAX_LATERAL_OFFSET, TrackCatalog.MAX_LATERAL_OFFSET)
+                                                    val lat = if (abs(rawLat) < 0.14f) 0f else rawLat
+                                                    val shift = lat * proj.halfWidth
+                                                    val nextBoosts = curDraft.boostPads + BoostPad(
+                                                        x = proj.closestX + proj.normalX * shift,
+                                                        y = proj.closestY + proj.normalY * shift,
+                                                        angleRad = proj.tangentAngleRad,
+                                                        lateralOffset = lat
+                                                    )
+                                                    draft = curDraft.copy(boostPads = nextBoosts)
+                                                    selectedBoostIdx = nextBoosts.lastIndex
+                                                    selectedRampIdx = -1
                                                     savedBannerName = null
                                                 }
                                                 EditorTool.TOGGLE_PUDDLE -> {
@@ -516,6 +656,40 @@ fun TrackEditorScreen(
                                         center = Offset(pt.x, pt.y)
                                     )
                                 }
+                                if (selectedRampIdx in draft.ramps.indices) {
+                                    val selRamp = draft.ramps[selectedRampIdx]
+                                    drawCircle(
+                                        color = primaryColor.copy(alpha = 0.25f),
+                                        radius = 74f,
+                                        center = Offset(selRamp.x, selRamp.y)
+                                    )
+                                    drawCircle(
+                                        color = primaryColor,
+                                        radius = 74f,
+                                        center = Offset(selRamp.x, selRamp.y),
+                                        style = Stroke(
+                                            width = 7f,
+                                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 0f)
+                                        )
+                                    )
+                                }
+                                if (selectedBoostIdx in draft.boostPads.indices) {
+                                    val selBoost = draft.boostPads[selectedBoostIdx]
+                                    drawCircle(
+                                        color = secondaryColor.copy(alpha = 0.25f),
+                                        radius = 68f,
+                                        center = Offset(selBoost.x, selBoost.y)
+                                    )
+                                    drawCircle(
+                                        color = secondaryColor,
+                                        radius = 68f,
+                                        center = Offset(selBoost.x, selBoost.y),
+                                        style = Stroke(
+                                            width = 7f,
+                                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 0f)
+                                        )
+                                    )
+                                }
                             }
                         }
 
@@ -529,11 +703,13 @@ fun TrackEditorScreen(
                             Text(
                                 text = when {
                                     draggingNodeIdx >= 0 -> "Moving Corner #${draggingNodeIdx + 1}..."
-                                    activeTool == EditorTool.MOVE_NODE -> "Touch & drag any corner dot smoothly"
+                                    draggingFeatureKind == "RAMP" -> "Sliding Jump #${draggingFeatureIdx + 1} across track lanes..."
+                                    draggingFeatureKind == "BOOST" -> "Sliding Boost #${draggingFeatureIdx + 1} across track lanes..."
+                                    activeTool == EditorTool.MOVE_NODE -> "Drag corner dots or slide jumps/boosts laterally"
                                     activeTool == EditorTool.ADD_NODE -> "Tap anywhere to insert a new corner"
-                                    activeTool == EditorTool.TOGGLE_RAMP -> "Tap on track to add or remove a Jump Ramp + Gravel Trap"
+                                    activeTool == EditorTool.TOGGLE_RAMP -> "Tap track to place Jump, drag sideways or pick Lane below"
                                     activeTool == EditorTool.TOGGLE_PUDDLE -> "Tap on track to add or remove a Rain Puddle"
-                                    else -> "Tap on track to add or remove a Boost Pad"
+                                    else -> "Tap track to place Boost, drag sideways or pick Lane below"
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = overlayTextColor,
@@ -573,11 +749,147 @@ fun TrackEditorScreen(
                         }
                         FilterChip(
                             selected = active,
-                            onClick = { activeTool = tool },
+                            onClick = {
+                                activeTool = tool
+                                when (tool) {
+                                    EditorTool.TOGGLE_RAMP -> {
+                                        selectedBoostIdx = -1
+                                        if (selectedRampIdx !in draft.ramps.indices && draft.ramps.isNotEmpty()) {
+                                            selectedRampIdx = draft.ramps.lastIndex
+                                        }
+                                    }
+                                    EditorTool.TOGGLE_BOOST -> {
+                                        selectedRampIdx = -1
+                                        if (selectedBoostIdx !in draft.boostPads.indices && draft.boostPads.isNotEmpty()) {
+                                            selectedBoostIdx = draft.boostPads.lastIndex
+                                        }
+                                    }
+                                    else -> Unit
+                                }
+                            },
                             leadingIcon = { Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp)) },
                             label = { Text(tool.label, style = MaterialTheme.typography.labelSmall) },
                             modifier = Modifier.testTag("editor_tool_${tool.name}")
                         )
+                    }
+                }
+
+                val hasSelectedRamp = selectedRampIdx in draft.ramps.indices
+                val hasSelectedBoost = !hasSelectedRamp && selectedBoostIdx in draft.boostPads.indices
+                if (hasSelectedRamp || hasSelectedBoost) {
+                    val activeLat = if (hasSelectedRamp) {
+                        draft.ramps[selectedRampIdx].lateralOffset
+                    } else {
+                        draft.boostPads[selectedBoostIdx].lateralOffset
+                    }
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("editor_lane_selector")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (hasSelectedRamp) Icons.Default.FlightTakeoff else Icons.Default.Bolt,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = if (hasSelectedRamp) {
+                                            "Jump #${selectedRampIdx + 1} Lane (Gravel spans full track)"
+                                        } else {
+                                            "Boost #${selectedBoostIdx + 1} Lane"
+                                        },
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        if (hasSelectedRamp) {
+                                            draft = draft.copy(
+                                                ramps = draft.ramps.filterIndexed { i, _ -> i != selectedRampIdx }
+                                            )
+                                            selectedRampIdx = -1
+                                        } else {
+                                            draft = draft.copy(
+                                                boostPads = draft.boostPads.filterIndexed { i, _ -> i != selectedBoostIdx }
+                                            )
+                                            selectedBoostIdx = -1
+                                        }
+                                        savedBannerName = null
+                                    },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .testTag("editor_remove_selected_feature")
+                                ) {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = "Remove Selected Feature",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(
+                                    Triple("Left", -0.45f, "editor_lane_left"),
+                                    Triple("Center", 0f, "editor_lane_center"),
+                                    Triple("Right", 0.45f, "editor_lane_right")
+                                ).forEach { (label, targetLat, tag) ->
+                                    val isLaneSelected = when (targetLat) {
+                                        -0.45f -> activeLat < -0.18f
+                                        0.45f -> activeLat > 0.18f
+                                        else -> activeLat in -0.18f..0.18f
+                                    }
+                                    FilterChip(
+                                        selected = isLaneSelected,
+                                        onClick = {
+                                            if (hasSelectedRamp) {
+                                                val updated = draft.ramps.toMutableList()
+                                                updated[selectedRampIdx] = TrackCatalog.repositionRampLaterally(
+                                                    previewTrack,
+                                                    updated[selectedRampIdx],
+                                                    targetLat
+                                                )
+                                                draft = draft.copy(ramps = updated)
+                                            } else {
+                                                val updated = draft.boostPads.toMutableList()
+                                                updated[selectedBoostIdx] = TrackCatalog.repositionBoostLaterally(
+                                                    previewTrack,
+                                                    updated[selectedBoostIdx],
+                                                    targetLat
+                                                )
+                                                draft = draft.copy(boostPads = updated)
+                                            }
+                                            savedBannerName = null
+                                        },
+                                        label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag(tag)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -610,9 +922,11 @@ fun TrackEditorScreen(
                                 id = draft.id,
                                 name = draft.name,
                                 isNightTrack = draft.isNightTrack,
-                                randomConditionsEnabled = draft.randomConditionsEnabled
+                                randomConditionsEnabled = false
                             )
                             selectedNodeIdx = 0
+                            selectedRampIdx = -1
+                            selectedBoostIdx = -1
                         },
                         modifier = Modifier
                             .weight(1f)
@@ -714,49 +1028,7 @@ fun TrackEditorScreen(
                     }
                 }
 
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(
-                        width = 1.dp,
-                        color = if (draft.randomConditionsEnabled) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outlineVariant
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Thunderstorm,
-                            contentDescription = "Random ride conditions",
-                            tint = if (draft.randomConditionsEnabled) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Random ride conditions",
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Rain puddles, tremors, crosswinds, snow & nightfall",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = draft.randomConditionsEnabled,
-                            onCheckedChange = { checked ->
-                                draft = draft.copy(randomConditionsEnabled = checked)
-                                savedBannerName = null
-                            },
-                            modifier = Modifier.testTag("editor_random_conditions_switch")
-                        )
-                    }
-                }
+                // Deterministic lighting only — random environmental effects are strictly a Multiplayer Host lobby option.
 
                 Text(
                     text = "Saved circuits sync automatically when signed in so friends can challenge your times & race live with you.",
@@ -784,8 +1056,10 @@ fun TrackEditorScreen(
                                     .width(156.dp)
                                     .clip(RoundedCornerShape(14.dp))
                                     .clickable {
-                                        draft = saved
+                                        draft = saved.copy(randomConditionsEnabled = false)
                                         selectedNodeIdx = 0
+                                        selectedRampIdx = -1
+                                        selectedBoostIdx = -1
                                     }
                             ) {
                                 Column(modifier = Modifier.padding(8.dp)) {
@@ -799,41 +1073,21 @@ fun TrackEditorScreen(
                                         Canvas(modifier = Modifier.fillMaxSize()) {
                                             drawTrackMiniMap(preview)
                                         }
-                                        if (saved.isNightTrack || saved.randomConditionsEnabled) {
-                                            Row(
-                                                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                        if (saved.isNightTrack) {
+                                            Surface(
+                                                color = Color(0xFF0D1B2A).copy(alpha = 0.9f),
+                                                shape = RoundedCornerShape(6.dp),
+                                                border = BorderStroke(1.dp, Color(0xFF90CAF9).copy(alpha = 0.7f)),
                                                 modifier = Modifier
                                                     .align(Alignment.TopStart)
                                                     .padding(4.dp)
                                             ) {
-                                                if (saved.isNightTrack) {
-                                                    Surface(
-                                                        color = Color(0xFF0D1B2A).copy(alpha = 0.9f),
-                                                        shape = RoundedCornerShape(6.dp),
-                                                        border = BorderStroke(1.dp, Color(0xFF90CAF9).copy(alpha = 0.7f))
-                                                    ) {
-                                                        Text(
-                                                            text = "NIGHT",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            color = Color(0xFF90CAF9),
-                                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                                                        )
-                                                    }
-                                                }
-                                                if (saved.randomConditionsEnabled) {
-                                                    Surface(
-                                                        color = Color(0xFF0B2538).copy(alpha = 0.9f),
-                                                        shape = RoundedCornerShape(6.dp),
-                                                        border = BorderStroke(1.dp, Color(0xFF4FC3F7).copy(alpha = 0.7f))
-                                                    ) {
-                                                        Text(
-                                                            text = "WEATHER",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            color = Color(0xFF81D4FA),
-                                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                                                        )
-                                                    }
-                                                }
+                                                Text(
+                                                    text = "NIGHT",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = Color(0xFF90CAF9),
+                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                                )
                                             }
                                         }
                                         IconButton(
@@ -881,7 +1135,8 @@ fun TrackEditorScreen(
                         val fallbackId = TrackCatalog.defaultEditorOval(selectedTheme).id
                         draft.copy(
                             id = draft.id.ifBlank { fallbackId }.take(36),
-                            name = cleanName
+                            name = cleanName,
+                            randomConditionsEnabled = false
                         )
                     }
                     Row(

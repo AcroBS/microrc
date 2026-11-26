@@ -435,13 +435,30 @@ object CustomTrackCodec {
             String.format(Locale.US, "%.1f,%.1f,%.1f", p.x, p.y, p.halfWidth.coerceIn(80f, 150f))
         }
         val boostsStr = track.boostPads.take(MAX_BOOSTS).joinToString(";") { b ->
-            String.format(Locale.US, "%.1f,%.1f,%.3f,%.1f", b.x, b.y, b.angleRad, b.radius)
+            String.format(
+                Locale.US,
+                "%.1f,%.1f,%.3f,%.1f,%.2f",
+                b.x,
+                b.y,
+                b.angleRad,
+                b.radius,
+                b.lateralOffset.coerceIn(-0.55f, 0.55f)
+            )
         }
         val itemsStr = track.itemSpawns.take(MAX_ITEMS).joinToString(";") { item ->
             String.format(Locale.US, "%d,%.1f,%.1f", item.id, item.x, item.y)
         }
         val rampsStr = track.ramps.take(MAX_RAMPS).joinToString(";") { r ->
-            String.format(Locale.US, "%.1f,%.1f,%.3f,%.1f,%.2f", r.x, r.y, r.angleRad, r.radius, r.impulse)
+            String.format(
+                Locale.US,
+                "%.1f,%.1f,%.3f,%.1f,%.2f,%.2f",
+                r.x,
+                r.y,
+                r.angleRad,
+                r.radius,
+                r.impulse,
+                r.lateralOffset.coerceIn(-0.55f, 0.55f)
+            )
         }
         val propsStr = track.props.take(MAX_PROPS).joinToString(";") { pr ->
             String.format(
@@ -457,7 +474,7 @@ object CustomTrackCodec {
             )
         }
         val nightFlag = if (track.isNightTrack) "1" else "0"
-        val conditionsFlag = if (track.randomConditionsEnabled) "1" else "0"
+        val conditionsFlag = "0"
         val puddlesStr = track.puddles.take(MAX_PUDDLES).joinToString(";") { pd ->
             String.format(Locale.US, "%.1f,%.1f,%.1f", pd.x, pd.y, pd.radius.coerceIn(18f, 76f))
         }
@@ -503,7 +520,8 @@ object CustomTrackCodec {
                 val y = p[1].toFloatOrNull() ?: return@mapNotNull null
                 val ang = p[2].toFloatOrNull() ?: 0f
                 val rad = p.getOrNull(3)?.toFloatOrNull()?.coerceIn(20f, 90f) ?: 44f
-                BoostPad(x = x, y = y, angleRad = ang, radius = rad)
+                val lat = p.getOrNull(4)?.toFloatOrNull()?.coerceIn(-0.55f, 0.55f) ?: 0f
+                BoostPad(x = x, y = y, angleRad = ang, radius = rad, lateralOffset = lat)
             }
 
         val items = sections.getOrNull(3).orEmpty()
@@ -529,7 +547,8 @@ object CustomTrackCodec {
                 val ang = p[2].toFloatOrNull() ?: 0f
                 val rad = p.getOrNull(3)?.toFloatOrNull()?.coerceIn(24f, 96f) ?: 48f
                 val imp = p.getOrNull(4)?.toFloatOrNull()?.coerceIn(0.5f, 1.8f) ?: 1.0f
-                TrackRamp(x = x, y = y, angleRad = ang, radius = rad, impulse = imp)
+                val lat = p.getOrNull(5)?.toFloatOrNull()?.coerceIn(-0.55f, 0.55f) ?: 0f
+                TrackRamp(x = x, y = y, angleRad = ang, radius = rad, impulse = imp, lateralOffset = lat)
             }
 
         val props = sections.getOrNull(5).orEmpty()
@@ -557,7 +576,6 @@ object CustomTrackCodec {
             }
 
         val isNightTrack = sections.getOrNull(6)?.trim() == "1"
-        val randomConditionsEnabled = sections.getOrNull(7)?.trim() == "1"
         val puddles = sections.getOrNull(8).orEmpty()
             .split(';')
             .filter { it.isNotBlank() }
@@ -584,7 +602,7 @@ object CustomTrackCodec {
             creatorUid = creatorUid.trim(),
             creatorName = creatorName.trim().take(24),
             isNightTrack = isNightTrack,
-            randomConditionsEnabled = randomConditionsEnabled
+            randomConditionsEnabled = false
         )
     }
 

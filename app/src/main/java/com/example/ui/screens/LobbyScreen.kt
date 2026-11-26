@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.SportsScore
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Thunderstorm
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -66,6 +67,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -419,14 +421,8 @@ fun LobbyScreen(
                                 onOpenSettings
                             )
                         }
-                        if (!isStuntsMode) {
-                            when (activeRules.hostRandomConditionsOverride) {
-                                true -> item { LobbyRuleBadge("WEATHER: ON", MaterialTheme.colorScheme.secondary, onOpenSettings) }
-                                false -> item { LobbyRuleBadge("WEATHER: OFF", MaterialTheme.colorScheme.outline, onOpenSettings) }
-                                null -> if (role != SessionRole.Solo) {
-                                    item { LobbyRuleBadge("TRACK WEATHER", MaterialTheme.colorScheme.secondary, onOpenSettings) }
-                                }
-                            }
+                        if (!isStuntsMode && role != SessionRole.Solo && activeRules.hostRandomConditionsOverride == true) {
+                            item { LobbyRuleBadge("ENV EFFECTS: ON", MaterialTheme.colorScheme.secondary, onOpenSettings) }
                         }
                         if (activeRules.showPlayerNames) {
                             item { LobbyRuleBadge("NAME TAGS", MaterialTheme.colorScheme.tertiary, onOpenSettings) }
@@ -1137,41 +1133,21 @@ fun LobbyScreen(
                                         Canvas(modifier = Modifier.fillMaxSize()) {
                                             drawTrackMiniMap(previewDef)
                                         }
-                                        if (cTrack.isNightTrack || cTrack.randomConditionsEnabled) {
-                                            Row(
-                                                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                        if (cTrack.isNightTrack) {
+                                            Surface(
+                                                color = Color(0xFF0D1B2A).copy(alpha = 0.92f),
+                                                shape = RoundedCornerShape(6.dp),
+                                                border = BorderStroke(1.dp, Color(0xFF90CAF9).copy(alpha = 0.7f)),
                                                 modifier = Modifier
                                                     .align(Alignment.TopStart)
                                                     .padding(4.dp)
                                             ) {
-                                                if (cTrack.isNightTrack) {
-                                                    Surface(
-                                                        color = Color(0xFF0D1B2A).copy(alpha = 0.92f),
-                                                        shape = RoundedCornerShape(6.dp),
-                                                        border = BorderStroke(1.dp, Color(0xFF90CAF9).copy(alpha = 0.7f))
-                                                    ) {
-                                                        Text(
-                                                            text = "NIGHT",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            color = Color(0xFF90CAF9),
-                                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                                                        )
-                                                    }
-                                                }
-                                                if (cTrack.randomConditionsEnabled) {
-                                                    Surface(
-                                                        color = Color(0xFF0B2538).copy(alpha = 0.92f),
-                                                        shape = RoundedCornerShape(6.dp),
-                                                        border = BorderStroke(1.dp, Color(0xFF4FC3F7).copy(alpha = 0.7f))
-                                                    ) {
-                                                        Text(
-                                                            text = "WEATHER",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            color = Color(0xFF81D4FA),
-                                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                                                        )
-                                                    }
-                                                }
+                                                Text(
+                                                    text = "NIGHT",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = Color(0xFF90CAF9),
+                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                                )
                                             }
                                         }
                                     }
@@ -1250,38 +1226,61 @@ fun LobbyScreen(
                     }
                 }
 
-                // Multiplayer Host manual override for Random Ride Conditions (Track / On / Off)
+                // Multiplayer Host toggle for Random Environmental Effects (host-selectable only)
                 if ((role == SessionRole.Host || role == SessionRole.OnlineHost) && activeRules != null && !isStuntsMode) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    val envEnabled = activeRules.hostRandomConditionsOverride == true
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        shape = RoundedCornerShape(14.dp),
+                        border = BorderStroke(
+                            1.dp,
+                            if (envEnabled) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outlineVariant
+                        ),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(
-                            text = "RIDE CONDITIONS",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            listOf(
-                                Triple(null, "Track", "lobby_conditions_track"),
-                                Triple(true, "On", "lobby_conditions_on"),
-                                Triple(false, "Off", "lobby_conditions_off")
-                            ).forEach { (overrideVal, label, tag) ->
-                                FilterChip(
-                                    selected = activeRules.hostRandomConditionsOverride == overrideVal,
-                                    onClick = {
-                                        onUpdateRules(
-                                            activeRules.copy(
-                                                hostRandomConditionsOverride = overrideVal,
-                                                randomConditionsEnabled = overrideVal ?: true
-                                            )
-                                        )
-                                    },
-                                    label = { Text(label, style = MaterialTheme.typography.labelSmall) },
-                                    modifier = Modifier.testTag(tag)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Thunderstorm,
+                                    contentDescription = null,
+                                    tint = if (envEnabled) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
                                 )
+                                Column {
+                                    Text(
+                                        text = "Random Environmental Effects",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "Rain puddles, tremors, wind & snow",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
+                            Switch(
+                                checked = envEnabled,
+                                onCheckedChange = { checked ->
+                                    onUpdateRules(
+                                        activeRules.copy(
+                                            hostRandomConditionsOverride = checked,
+                                            randomConditionsEnabled = checked
+                                        )
+                                    )
+                                },
+                                modifier = Modifier.testTag("lobby_environmental_effects_switch")
+                            )
                         }
                     }
                 }

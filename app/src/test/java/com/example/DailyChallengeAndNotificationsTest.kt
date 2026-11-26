@@ -92,16 +92,17 @@ class DailyChallengeAndNotificationsTest {
         assertEquals(CarSpeedPreset.FAST.name, locked.carSpeed)
         assertTrue(locked.hardTrackBoundary)
         assertTrue(locked.randomJumpsEnabled)
-        assertTrue(locked.randomConditionsEnabled)
+        assertFalse(locked.randomConditionsEnabled)
         assertNull(locked.hostRandomConditionsOverride)
 
-        // Across UTC dates, Daily Challenge tracks deterministically include jumps and/or random ride conditions
+        // Across UTC dates, Daily Challenge tracks deterministically include jumps and Day/Night lighting with no random environmental effects
         val sampleDays = (1..30).map { day ->
             DailyChallengeCatalog.dailyCustomTrack("202611%02d".format(day))
         }
         assertTrue("Daily Challenges should include days with track jumps", sampleDays.any { it.ramps.isNotEmpty() })
-        assertTrue("Daily Challenges should include days with random ride conditions", sampleDays.any { it.randomConditionsEnabled })
-        assertTrue("Daily Challenges should include clear days", sampleDays.any { !it.randomConditionsEnabled })
+        assertTrue("Daily Challenges should include deterministic Night tracks", sampleDays.any { it.isNightTrack })
+        assertTrue("Daily Challenges should include deterministic Day tracks", sampleDays.any { !it.isNightTrack })
+        assertTrue("Daily Challenges must disable random environmental effects for fair ghost comparisons", sampleDays.all { !it.randomConditionsEnabled })
     }
 
     @Test

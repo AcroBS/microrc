@@ -22,13 +22,48 @@ import kotlin.math.hypot
 import kotlin.math.sin
 import kotlin.random.Random
 
+import java.util.Collections
+import java.util.WeakHashMap
+
 object TrackCatalog {
 
     const val RAMP_HALF_LENGTH = 36f
     const val RAMP_HALF_WIDTH = 34f
     const val GRAVEL_START_OFFSET = 32f
     const val GRAVEL_LENGTH = 176f
+    const val GRAVEL_EDGE_INSET = 4f
     const val ARENA_GRAVEL_HALF_WIDTH = 94f
+    const val MAX_LATERAL_OFFSET = 0.55f
+    val LANE_LATERAL_OFFSETS = listOf(-0.45f, 0f, 0.45f)
+
+    data class SplineProjection(
+        val arcS: Float,
+        val lateralOffsetPx: Float,
+        val halfWidth: Float,
+        val closestX: Float,
+        val closestY: Float,
+        val tangentAngleRad: Float,
+        val normalX: Float,
+        val normalY: Float,
+        val totalLength: Float
+    )
+
+    data class SplineSample(
+        val x: Float,
+        val y: Float,
+        val normalX: Float,
+        val normalY: Float,
+        val tangentAngleRad: Float,
+        val halfWidth: Float
+    )
+
+    private class SplineArcTable(
+        val cumLen: FloatArray,
+        val totalLength: Float
+    )
+
+    private val splineTableCache = Collections.synchronizedMap(WeakHashMap<List<TrackPoint>, SplineArcTable>())
+    private val trackGravelCache = Collections.synchronizedMap(WeakHashMap<TrackDefinition, List<GravelPatch>>())
 
     private val tracks: Map<TrackId, TrackDefinition> = TrackId.entries.associateWith { id ->
         buildTrack(id)
@@ -345,7 +380,7 @@ object TrackCatalog {
             customId = data.id,
             customName = data.name,
             isNightTrack = data.isNightTrack,
-            randomConditionsEnabled = data.randomConditionsEnabled
+            randomConditionsEnabled = false
         )
     }
 
@@ -365,7 +400,7 @@ object TrackCatalog {
             props = track.props,
             puddles = track.puddles,
             isNightTrack = track.isNightTrack,
-            randomConditionsEnabled = track.randomConditionsEnabled
+            randomConditionsEnabled = false
         )
     }
 
@@ -405,13 +440,20 @@ object TrackCatalog {
         if (n < 40) return track
         val targetCount = rng.nextInt(2, 5) // 2..4 random jumps per race
         val chosen = mutableListOf<TrackRamp>()
+        val laneDeck = LANE_LATERAL_OFFSETS.shuffled(rng)
         val minSpacing = 240f
         var attempts = 0
         while (chosen.size < targetCount && attempts < 60) {
             attempts++
             // Avoid start/finish line neighborhood (first 10% and last 12%)
             val idx = rng.nextInt((n * 0.12f).toInt(), (n * 0.88f).toInt())
-            val cand = rampAt(track.centerline, idx, impulse = rng.nextFloat() * 0.25f + 0.95f)
+            val laneOffset = laneDeck[chosen.size % laneDeck.size]
+            val cand = rampAt(
+                spline = track.centerline,
+                index = idx,
+                impulse = rng.nextFloat() * 0.25f + 0.95f,
+                lateralOffset = laneOffset
+            )
             val nearBoost = track.boostPads.any { distance(it.x, it.y, cand.x, cand.y) < 150f }
             val nearItem = track.itemSpawns.any { distance(it.x, it.y, cand.x, cand.y) < 120f }
             val nearRamp = chosen.any { distance(it.x, it.y, cand.x, cand.y) < minSpacing }
@@ -461,7 +503,6 @@ object TrackCatalog {
     ): CustomTrackData {
         val rng = kotlin.random.Random(seed)
         val isNightTrack = forceNight ?: (rng.nextFloat() < 0.35f)
-        val randomConditionsEnabled = forceRandomConditions ?: (rng.nextFloat() < 0.50f)
         val includeJumps = forceIncludeJumps ?: true
         val theme = preferredTheme ?: TrackId.entries[rng.nextInt(TrackId.entries.size)]
         val dayAdjectives = listOf("Hyper", "Turbo", "Apex", "Drift", "Nitro", "Volt", "Micro", "Ridge")
@@ -495,17 +536,24 @@ object TrackCatalog {
 
         val spline = subdivideClosedSpline(ctrl, samplesPerSegment = 14)
         val n = spline.size
+        val boostLanes = LANE_LATERAL_OFFSETS.shuffled(rng)
         val boosts = listOf(
-            boostAt(spline, (n * 0.14f).toInt()),
-            boostAt(spline, (n * 0.58f).toInt())
+            boostAt(spline, (n * 0.14f).toInt(), lateralOffset = boostLanes[0]),
+            boostAt(spline, (n * 0.58f).toInt(), lateralOffset = boostLanes[1])
         )
         val items = listOf(0.24f, 0.46f, 0.72f, 0.90f).mapIndexed { id, frac ->
             itemAt(spline, (n * frac).toInt(), id, lateralFrac = rng.nextFloat() * 1.44f - 0.72f)
         }
         val rampFracs = listOf(0.34f, 0.66f, 0.80f).take(rng.nextInt(2, 4))
+        val rampLanes = LANE_LATERAL_OFFSETS.shuffled(rng)
         val ramps = if (includeJumps) {
-            rampFracs.map { frac ->
-                rampAt(spline, (n * frac).toInt(), impulse = 1.0f + rng.nextFloat() * 0.15f)
+            rampFracs.mapIndexed { idx, frac ->
+                rampAt(
+                    spline = spline,
+                    index = (n * frac).toInt(),
+                    impulse = 1.0f + rng.nextFloat() * 0.15f,
+                    lateralOffset = rampLanes[idx % rampLanes.size]
+                )
             }
         } else {
             emptyList()
@@ -553,26 +601,55 @@ object TrackCatalog {
             ramps = ramps,
             props = props,
             isNightTrack = isNightTrack,
-            randomConditionsEnabled = randomConditionsEnabled
+            randomConditionsEnabled = false
         )
     }
 
-    fun rampAt(spline: List<TrackPoint>, index: Int, impulse: Float = 1.0f): TrackRamp {
+    fun rampAt(
+        spline: List<TrackPoint>,
+        index: Int,
+        impulse: Float = 1.0f,
+        lateralOffset: Float = 0f
+    ): TrackRamp {
         val i = index.mod(spline.size)
         val next = (index + 1).mod(spline.size)
         val p = spline[i]
         val n = spline[next]
         val angle = atan2(n.y - p.y, n.x - p.x)
-        return TrackRamp(p.x, p.y, angle, radius = 48f, impulse = impulse)
+        val clampedLat = lateralOffset.coerceIn(-MAX_LATERAL_OFFSET, MAX_LATERAL_OFFSET)
+        val perpX = -sin(angle)
+        val perpY = cos(angle)
+        val shift = clampedLat * p.halfWidth
+        return TrackRamp(
+            x = p.x + perpX * shift,
+            y = p.y + perpY * shift,
+            angleRad = angle,
+            radius = 48f,
+            impulse = impulse,
+            lateralOffset = clampedLat
+        )
     }
 
-    fun boostAt(spline: List<TrackPoint>, index: Int): BoostPad {
+    fun boostAt(
+        spline: List<TrackPoint>,
+        index: Int,
+        lateralOffset: Float = 0f
+    ): BoostPad {
         val i = index.mod(spline.size)
         val next = (index + 1).mod(spline.size)
         val p = spline[i]
         val n = spline[next]
         val angle = atan2(n.y - p.y, n.x - p.x)
-        return BoostPad(p.x, p.y, angle)
+        val clampedLat = lateralOffset.coerceIn(-MAX_LATERAL_OFFSET, MAX_LATERAL_OFFSET)
+        val perpX = -sin(angle)
+        val perpY = cos(angle)
+        val shift = clampedLat * p.halfWidth
+        return BoostPad(
+            x = p.x + perpX * shift,
+            y = p.y + perpY * shift,
+            angleRad = angle,
+            lateralOffset = clampedLat
+        )
     }
 
     fun itemAt(
@@ -1300,35 +1377,274 @@ object TrackCatalog {
         return placed.sortedBy { it.number }
     }
 
-    /**
-     * Computes the full-width gravel trap paired immediately behind a non-Stunt jump ramp.
-     * Shared single source of truth for physics slowdown, dust particles, rendering, and Track Studio preview.
-     */
-    fun gravelPatchForRamp(track: TrackDefinition, ramp: TrackRamp): GravelPatch? {
-        if (track.isStunt) return null
-        val roadHalfWidth = if (!track.isArena && track.centerline.isNotEmpty()) {
-            val (idx, _) = nearestTrackPoint(track, ramp.x, ramp.y)
-            track.centerline[idx].halfWidth.coerceAtLeast(RAMP_HALF_WIDTH + 44f)
-        } else {
-            ARENA_GRAVEL_HALF_WIDTH
+    private fun getSplineArcTable(pts: List<TrackPoint>): SplineArcTable {
+        splineTableCache[pts]?.let { return it }
+        val n = pts.size
+        val cum = FloatArray(n + 1)
+        var acc = 0f
+        for (i in 0 until n) {
+            cum[i] = acc
+            val a = pts[i]
+            val b = pts[(i + 1) % n]
+            acc += hypot(b.x - a.x, b.y - a.y)
         }
-        val centerOffset = GRAVEL_START_OFFSET + GRAVEL_LENGTH * 0.5f
-        val cx = ramp.x + cos(ramp.angleRad) * centerOffset
-        val cy = ramp.y + sin(ramp.angleRad) * centerOffset
-        return GravelPatch(
-            x = cx,
-            y = cy,
-            angleRad = ramp.angleRad,
-            length = GRAVEL_LENGTH,
-            halfWidth = roadHalfWidth
+        cum[n] = acc
+        val built = SplineArcTable(cum, acc)
+        splineTableCache[pts] = built
+        return built
+    }
+
+    /**
+     * Projects world point (x, y) continuously onto the closed centerline spline,
+     * returning cumulative arc-length `arcS`, signed lateral offset in world px
+     * (negative = Left of travel direction, positive = Right), and local halfWidth.
+     */
+    fun projectOntoCenterline(pts: List<TrackPoint>, x: Float, y: Float): SplineProjection {
+        val n = pts.size
+        if (n < 2) {
+            return SplineProjection(0f, 0f, 112f, x, y, 0f, 0f, 1f, 0f)
+        }
+        val table = getSplineArcTable(pts)
+        var bestDistSq = Float.MAX_VALUE
+        var bestArcS = 0f
+        var bestLat = 0f
+        var bestHw = pts[0].halfWidth
+        var bestPx = pts[0].x
+        var bestPy = pts[0].y
+        var bestTangAng = 0f
+        var bestNx = 0f
+        var bestNy = 1f
+
+        for (i in 0 until n) {
+            val a = pts[i]
+            val b = pts[(i + 1) % n]
+            val abx = b.x - a.x
+            val aby = b.y - a.y
+            val lenSq = abx * abx + aby * aby
+            val len = kotlin.math.sqrt(lenSq)
+            val u = if (lenSq > 1e-4f) {
+                (((x - a.x) * abx + (y - a.y) * aby) / lenSq).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+            val px = a.x + abx * u
+            val py = a.y + aby * u
+            val dx = x - px
+            val dy = y - py
+            val d2 = dx * dx + dy * dy
+            if (d2 < bestDistSq) {
+                bestDistSq = d2
+                bestArcS = table.cumLen[i] + u * len
+                val tx = if (len > 1e-4f) abx / len else 1f
+                val ty = if (len > 1e-4f) aby / len else 0f
+                val nx = -ty
+                val ny = tx
+                bestLat = dx * nx + dy * ny
+                bestHw = a.halfWidth + (b.halfWidth - a.halfWidth) * u
+                bestPx = px
+                bestPy = py
+                bestTangAng = atan2(ty, tx)
+                bestNx = nx
+                bestNy = ny
+            }
+        }
+        return SplineProjection(
+            arcS = bestArcS,
+            lateralOffsetPx = bestLat,
+            halfWidth = bestHw,
+            closestX = bestPx,
+            closestY = bestPy,
+            tangentAngleRad = bestTangAng,
+            normalX = bestNx,
+            normalY = bestNy,
+            totalLength = table.totalLength
+        )
+    }
+
+    private fun rawPointAtArc(pts: List<TrackPoint>, table: SplineArcTable, rawArcS: Float): Triple<Float, Float, Float> {
+        val total = table.totalLength
+        if (total <= 1e-3f || pts.isEmpty()) return Triple(0f, 0f, 112f)
+        val s = ((rawArcS % total) + total) % total
+        var lo = 0
+        var hi = pts.size - 1
+        while (lo < hi) {
+            val mid = (lo + hi + 1) ushr 1
+            if (table.cumLen[mid] <= s) lo = mid else hi = mid - 1
+        }
+        val i = lo.coerceIn(0, pts.lastIndex)
+        val segStart = table.cumLen[i]
+        val segLen = (table.cumLen[i + 1] - segStart).coerceAtLeast(1e-4f)
+        val u = ((s - segStart) / segLen).coerceIn(0f, 1f)
+        val a = pts[i]
+        val b = pts[(i + 1) % pts.size]
+        return Triple(
+            a.x + (b.x - a.x) * u,
+            a.y + (b.y - a.y) * u,
+            a.halfWidth + (b.halfWidth - a.halfWidth) * u
+        )
+    }
+
+    fun sampleSplineAtArc(pts: List<TrackPoint>, rawArcS: Float): SplineSample {
+        val table = getSplineArcTable(pts)
+        val (x, y, hw) = rawPointAtArc(pts, table, rawArcS)
+        val eps = 10f.coerceAtMost(table.totalLength * 0.05f).coerceAtLeast(1f)
+        val (bx, by, _) = rawPointAtArc(pts, table, rawArcS - eps)
+        val (fx, fy, _) = rawPointAtArc(pts, table, rawArcS + eps)
+        val dx = fx - bx
+        val dy = fy - by
+        val len = hypot(dx, dy).coerceAtLeast(1e-4f)
+        val tx = dx / len
+        val ty = dy / len
+        return SplineSample(
+            x = x,
+            y = y,
+            normalX = -ty,
+            normalY = tx,
+            tangentAngleRad = atan2(ty, tx),
+            halfWidth = hw
         )
     }
 
     /**
-     * Returns true when world point (x, y) lies inside the gravel patch immediately behind any ramp.
+     * Repositions a Jump Ramp laterally across the track centerline (`-0.55f..+0.55f`).
+     */
+    fun repositionRampLaterally(
+        track: TrackDefinition,
+        ramp: TrackRamp,
+        newLateralOffset: Float
+    ): TrackRamp {
+        if (track.isArena || track.centerline.size < 4) return ramp
+        val proj = projectOntoCenterline(track.centerline, ramp.x, ramp.y)
+        val clampedLat = newLateralOffset.coerceIn(-MAX_LATERAL_OFFSET, MAX_LATERAL_OFFSET)
+        val shift = clampedLat * proj.halfWidth
+        return ramp.copy(
+            x = proj.closestX + proj.normalX * shift,
+            y = proj.closestY + proj.normalY * shift,
+            angleRad = proj.tangentAngleRad,
+            lateralOffset = clampedLat
+        )
+    }
+
+    /**
+     * Repositions a Boost Pad laterally across the track centerline (`-0.55f..+0.55f`).
+     */
+    fun repositionBoostLaterally(
+        track: TrackDefinition,
+        pad: BoostPad,
+        newLateralOffset: Float
+    ): BoostPad {
+        if (track.isArena || track.centerline.size < 4) return pad
+        val proj = projectOntoCenterline(track.centerline, pad.x, pad.y)
+        val clampedLat = newLateralOffset.coerceIn(-MAX_LATERAL_OFFSET, MAX_LATERAL_OFFSET)
+        val shift = clampedLat * proj.halfWidth
+        return pad.copy(
+            x = proj.closestX + proj.normalX * shift,
+            y = proj.closestY + proj.normalY * shift,
+            angleRad = proj.tangentAngleRad,
+            lateralOffset = clampedLat
+        )
+    }
+
+    /**
+     * Computes the spline-following full-width gravel trap paired immediately behind a non-Stunt
+     * jump ramp, inset by [GRAVEL_EDGE_INSET] so track curb borders render cleanly with zero overlap.
+     * Shared single source of truth for physics slowdown, dust particles, rendering, and Track Studio.
+     */
+    fun gravelPatchForRamp(track: TrackDefinition, ramp: TrackRamp): GravelPatch? {
+        if (track.isStunt) return null
+        if (!track.isArena && track.centerline.size >= 4) {
+            val proj = projectOntoCenterline(track.centerline, ramp.x, ramp.y)
+            val totalLen = proj.totalLength
+            if (totalLen < 24f) return null
+            val startS = proj.arcS + GRAVEL_START_OFFSET
+            val endS = startS + GRAVEL_LENGTH
+            val steps = 12
+            val leftEdge = ArrayList<Pair<Float, Float>>(steps + 1)
+            val rightEdge = ArrayList<Pair<Float, Float>>(steps + 1)
+            for (k in 0..steps) {
+                val frac = k.toFloat() / steps.toFloat()
+                val sample = sampleSplineAtArc(track.centerline, startS + frac * GRAVEL_LENGTH)
+                val insetHw = (sample.halfWidth - GRAVEL_EDGE_INSET).coerceAtLeast(16f)
+                leftEdge.add((sample.x - sample.normalX * insetHw) to (sample.y - sample.normalY * insetHw))
+                rightEdge.add((sample.x + sample.normalX * insetHw) to (sample.y + sample.normalY * insetHw))
+            }
+            val mid = sampleSplineAtArc(track.centerline, startS + GRAVEL_LENGTH * 0.5f)
+            val midHw = (mid.halfWidth - GRAVEL_EDGE_INSET).coerceAtLeast(16f)
+            return GravelPatch(
+                x = mid.x,
+                y = mid.y,
+                angleRad = mid.tangentAngleRad,
+                length = GRAVEL_LENGTH,
+                halfWidth = midHw,
+                leftEdge = leftEdge,
+                rightEdge = rightEdge,
+                startArcS = startS,
+                endArcS = endS,
+                totalSplineLength = totalLen,
+                isSplineRibbon = true
+            )
+        }
+
+        // Open arena fallback: straight ribbon behind the arena ramp
+        val c = cos(ramp.angleRad)
+        val s = sin(ramp.angleRad)
+        val nx = -s
+        val ny = c
+        val halfW = ARENA_GRAVEL_HALF_WIDTH
+        val steps = 4
+        val leftEdge = ArrayList<Pair<Float, Float>>(steps + 1)
+        val rightEdge = ArrayList<Pair<Float, Float>>(steps + 1)
+        for (k in 0..steps) {
+            val fwd = GRAVEL_START_OFFSET + (k.toFloat() / steps.toFloat()) * GRAVEL_LENGTH
+            val cx = ramp.x + c * fwd
+            val cy = ramp.y + s * fwd
+            leftEdge.add((cx - nx * halfW) to (cy - ny * halfW))
+            rightEdge.add((cx + nx * halfW) to (cy + ny * halfW))
+        }
+        val centerOffset = GRAVEL_START_OFFSET + GRAVEL_LENGTH * 0.5f
+        return GravelPatch(
+            x = ramp.x + c * centerOffset,
+            y = ramp.y + s * centerOffset,
+            angleRad = ramp.angleRad,
+            length = GRAVEL_LENGTH,
+            halfWidth = halfW,
+            leftEdge = leftEdge,
+            rightEdge = rightEdge,
+            isSplineRibbon = false
+        )
+    }
+
+    fun gravelPatchesForTrack(track: TrackDefinition): List<GravelPatch> {
+        if (track.isStunt || track.ramps.isEmpty()) return emptyList()
+        trackGravelCache[track]?.let { return it }
+        val built = track.ramps.mapNotNull { gravelPatchForRamp(track, it) }
+        trackGravelCache[track] = built
+        return built
+    }
+
+    /**
+     * Returns true when world point (x, y) lies inside the spline-bounded gravel ribbon
+     * immediately behind any non-Stunt jump ramp (exact match with rendered curb-inset polygon).
      */
     fun isPointOnGravelPatch(track: TrackDefinition, x: Float, y: Float): Boolean {
         if (track.isStunt || track.ramps.isEmpty()) return false
+        val patches = gravelPatchesForTrack(track)
+        if (patches.isEmpty()) return false
+
+        if (!track.isArena && track.centerline.size >= 4) {
+            val proj = projectOntoCenterline(track.centerline, x, y)
+            val maxLat = (proj.halfWidth - GRAVEL_EDGE_INSET).coerceAtLeast(16f)
+            if (abs(proj.lateralOffsetPx) > maxLat) return false
+            for (patch in patches) {
+                val totalLen = patch.totalSplineLength
+                if (totalLen <= 1e-3f) continue
+                val deltaS = ((proj.arcS - patch.startArcS) % totalLen + totalLen) % totalLen
+                if (deltaS <= patch.length) return true
+            }
+            return false
+        }
+
+        // Open arena gravel rectangle hit check
         val maxCheckDist = GRAVEL_START_OFFSET + GRAVEL_LENGTH + 160f
         for (ramp in track.ramps) {
             if (abs(x - ramp.x) > maxCheckDist || abs(y - ramp.y) > maxCheckDist) continue
@@ -1339,13 +1655,7 @@ object TrackCatalog {
             val localFwd = dx * c + dy * s
             if (localFwd < GRAVEL_START_OFFSET || localFwd > GRAVEL_START_OFFSET + GRAVEL_LENGTH) continue
             val localLat = -dx * s + dy * c
-            val patchHalfWidth = if (!track.isArena && track.centerline.isNotEmpty()) {
-                val (idx, _) = nearestTrackPoint(track, ramp.x, ramp.y)
-                track.centerline[idx].halfWidth.coerceAtLeast(RAMP_HALF_WIDTH + 44f)
-            } else {
-                ARENA_GRAVEL_HALF_WIDTH
-            }
-            if (abs(localLat) <= patchHalfWidth) return true
+            if (abs(localLat) <= ARENA_GRAVEL_HALF_WIDTH) return true
         }
         return false
     }

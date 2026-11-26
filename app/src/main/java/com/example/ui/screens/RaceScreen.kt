@@ -426,11 +426,10 @@ fun RaceScreen(
     val activeEvent = runCatching {
         ExternalEventType.valueOf(snapshot?.activeEvent ?: ExternalEventType.NONE.name)
     }.getOrDefault(ExternalEventType.NONE)
-    val isNightActive = track.isNightTrack ||
-        (activeEvent == ExternalEventType.DAY_NIGHT && snapshot?.phase == RacePhase.RACING.name)
+    val isNightActive = track.isNightTrack
     val nightIntensity by animateFloatAsState(
         targetValue = if (isNightActive) 1f else 0f,
-        animationSpec = tween(durationMillis = 1200),
+        animationSpec = tween(durationMillis = 600),
         label = "night_intensity"
     )
     val winCond = runCatching {

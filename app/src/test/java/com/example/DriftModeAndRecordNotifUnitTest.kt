@@ -275,17 +275,18 @@ class DriftModeAndRecordNotifUnitTest {
         assertEquals(WinCondition.FIRST_TO_FINISH.name, locked.winCondition)
         assertEquals(DriftDailyChallenge.DAILY_DRIFT_LAPS, locked.totalLaps)
         assertTrue(locked.randomJumpsEnabled)
-        assertTrue(locked.randomConditionsEnabled)
+        assertFalse(locked.randomConditionsEnabled)
         assertNull(locked.hostRandomConditionsOverride)
 
-        // Across UTC dates, Daily Drift tracks deterministically include jumps and/or random ride conditions
+        // Across UTC dates, Daily Drift tracks deterministically include jumps and Day/Night lighting with no random environmental effects
         val sampleDriftDays = (1..30).map { day ->
             DriftDailyChallenge.dailyDriftCustomTrack("202611%02d".format(day))
         }
         assertTrue("Daily Drift should include days with jumps", sampleDriftDays.any { it.ramps.isNotEmpty() })
         assertTrue("Daily Drift should include days without jumps", sampleDriftDays.any { it.ramps.isEmpty() })
-        assertTrue("Daily Drift should include days with random ride conditions", sampleDriftDays.any { it.randomConditionsEnabled })
-        assertTrue("Daily Drift should include clear days", sampleDriftDays.any { !it.randomConditionsEnabled })
+        assertTrue("Daily Drift should include deterministic Night tracks", sampleDriftDays.any { it.isNightTrack })
+        assertTrue("Daily Drift should include deterministic Day tracks", sampleDriftDays.any { !it.isNightTrack })
+        assertTrue("Daily Drift must disable random environmental effects for fair ghost comparisons", sampleDriftDays.all { !it.randomConditionsEnabled })
 
         // Standings calculator keeps today's Daily Drift and excludes yesterday's Daily Drift
         val todayBoard = DriftDailyChallenge.boardKeyForDate(today)

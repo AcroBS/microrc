@@ -42,7 +42,7 @@ class NightTrackAndEventsTest {
     val composeTestRule = createAndroidComposeRule<MainActivity>()
 
     @Test
-    fun customTrackCodec_preservesNightTrackFlagAndDecodesLegacyV1() {
+    fun customTrackCodec_preservesNightTrackFlagLateralOffsetsAndDecodesLegacyV1() {
         val sample = CustomTrackData(
             id = "night_circuit_1",
             name = "Midnight Ring",
@@ -55,6 +55,12 @@ class NightTrackAndEventsTest {
                 TrackPoint(1750f, 1100f, 112f),
                 TrackPoint(1000f, 1200f, 112f),
                 TrackPoint(400f, 950f, 112f)
+            ),
+            boostPads = listOf(
+                com.example.model.BoostPad(x = 1100f, y = 350f, angleRad = 0f, lateralOffset = 0.45f)
+            ),
+            ramps = listOf(
+                com.example.model.TrackRamp(x = 900f, y = 260f, angleRad = 0f, lateralOffset = -0.45f)
             ),
             isNightTrack = true,
             randomConditionsEnabled = true
@@ -72,24 +78,11 @@ class NightTrackAndEventsTest {
         )
         assertNotNull(decoded)
         assertTrue("Encoded/decoded night track must preserve isNightTrack=true", decoded!!.isNightTrack)
-        assertTrue("Encoded/decoded track must preserve randomConditionsEnabled=true", decoded.randomConditionsEnabled)
+        assertFalse("Custom tracks must decode with randomConditionsEnabled=false (multiplayer host opt-in only)", decoded.randomConditionsEnabled)
+        assertEquals(-0.45f, decoded.ramps.first().lateralOffset, 0.02f)
+        assertEquals(0.45f, decoded.boostPads.first().lateralOffset, 0.02f)
 
-        // Legacy 7-section payload (night flag only, no weather section) keeps night=true and defaults randomConditionsEnabled=false
-        val legacy7Encoded = encoded.split('|').take(7).joinToString("|")
-        val legacy7Decoded = CustomTrackCodec.decode(
-            id = sample.id,
-            name = sample.name,
-            themeId = sample.themeId,
-            roadHalfWidth = sample.roadHalfWidth,
-            creatorUid = "uid_1",
-            creatorName = "Acro",
-            raw = legacy7Encoded
-        )
-        assertNotNull(legacy7Decoded)
-        assertTrue("7-section payload must preserve isNightTrack=true", legacy7Decoded!!.isNightTrack)
-        assertFalse("7-section payload without weather flag should default to randomConditionsEnabled=false", legacy7Decoded.randomConditionsEnabled)
-
-        // Legacy 6-section V1 payload without night or weather sections should decode cleanly with both false
+        // Legacy 6-section V1 payload without night section or lateralOffset decodes cleanly with defaults
         val legacy6Encoded = encoded.split('|').take(6).joinToString("|")
         val legacy6Decoded = CustomTrackCodec.decode(
             id = sample.id,
@@ -111,12 +104,16 @@ class NightTrackAndEventsTest {
             TrackCatalog.generateRandomTrack(seed = seed)
         }
         assertTrue(
-            "Procedural circuit tracks should include random night tracks",
+            "Procedural circuit tracks should include deterministic night tracks",
             circuitResults.any { it.isNightTrack }
         )
         assertTrue(
-            "Procedural circuit tracks should include daytime tracks",
+            "Procedural circuit tracks should include deterministic daytime tracks",
             circuitResults.any { !it.isNightTrack }
+        )
+        assertTrue(
+            "Procedural circuit tracks must not enable track-owned random environmental effects",
+            circuitResults.all { !it.randomConditionsEnabled }
         )
 
         val nightCircuit = TrackCatalog.generateRandomTrack(seed = 99L, forceNight = true)
@@ -127,24 +124,32 @@ class NightTrackAndEventsTest {
             DriftTrackCatalog.generateRandomDriftTrack(seed = seed)
         }
         assertTrue(
-            "Procedural drift tracks should include random night tracks",
+            "Procedural drift tracks should include deterministic night tracks",
             driftResults.any { it.isNightTrack }
         )
         assertTrue(
-            "Procedural drift tracks should include daytime tracks",
+            "Procedural drift tracks should include deterministic daytime tracks",
             driftResults.any { !it.isNightTrack }
+        )
+        assertTrue(
+            "Procedural drift tracks must not enable track-owned random environmental effects",
+            driftResults.all { !it.randomConditionsEnabled }
         )
     }
 
     @Test
-    fun racePhysicsEngine_dayNightEventTransitionsAndExcludedOnPermanentNightTracks() {
+    fun racePhysicsEngine_deterministicDayNightLightingNeverRandomlyTogglesAndPreservesBrakingTelemetry() {
         val player = LobbyPlayer(id = "p1", name = "Acro", isHost = true)
         val dayTrack = TrackCatalog.getTrack("LIVING_ROOM_GP")
+        val hostEnvRules = RaceRulesSettings(
+            randomConditionsEnabled = true,
+            hostRandomConditionsOverride = true
+        )
         val engineDay = RacePhysicsEngine(
             track = dayTrack,
             totalLaps = 3,
             players = listOf(player),
-            rules = RaceRulesSettings(randomConditionsEnabled = true),
+            rules = hostEnvRules,
             random = Random(1234L)
         )
 
@@ -153,20 +158,9 @@ class NightTrackAndEventsTest {
         repeat(79) { snap = engineDay.step(0.05f) }
         assertEquals(RacePhase.RACING.name, snap.phase)
 
-        engineDay.triggerExternalEvent(ExternalEventType.DAY_NIGHT, durationMs = 10_000L)
-        val nightSnap = engineDay.step(0.05f)
-        assertEquals(ExternalEventType.DAY_NIGHT.name, nightSnap.activeEvent)
-        assertTrue(nightSnap.eventBanner.orEmpty().contains("NIGHTFALL", ignoreCase = true))
-
-        // Step past duration so DAY_NIGHT ends with DAYBREAK banner
-        var dayBreakSnap = nightSnap
-        repeat(210) { dayBreakSnap = engineDay.step(0.05f) }
-        assertEquals(ExternalEventType.NONE.name, dayBreakSnap.activeEvent)
-        assertTrue(dayBreakSnap.eventBanner.orEmpty().contains("DAYBREAK", ignoreCase = true))
-
-        // Verify braking sets isBraking = true on racer and RaceTelemetryCodec preserves it + DAY_NIGHT
+        // Verify braking sets isBraking = true on racer and RaceTelemetryCodec preserves it
         engineDay.submitInput("p1", ControlInput(throttle = -1f, steer = 0f))
-        engineDay.triggerExternalEvent(ExternalEventType.DAY_NIGHT, durationMs = 9_000L)
+        engineDay.triggerExternalEvent(ExternalEventType.RAIN, durationMs = 9_000L)
         val brakingSnap = engineDay.step(0.05f)
         assertTrue("Braking input must set isBraking=true", brakingSnap.racers.first().isBraking)
 
@@ -177,21 +171,31 @@ class NightTrackAndEventsTest {
             previousSnapshot = null
         )
         assertNotNull(decoded)
-        assertEquals(ExternalEventType.DAY_NIGHT.name, decoded!!.snapshot.activeEvent)
+        assertEquals(ExternalEventType.RAIN.name, decoded!!.snapshot.activeEvent)
         assertTrue("RaceTelemetryCodec must preserve racer isBraking", decoded.snapshot.racers.first().isBraking)
 
-        // Verify random conditions on a permanent night track NEVER select DAY_NIGHT
-        val customNight = TrackCatalog.generateRandomTrack(
-            seed = 55L,
-            forceNight = true,
-            forceRandomConditions = true
-        )
+        // Even with host environmental effects enabled on a Day track, random events NEVER toggle Day/Night
+        val seenEventsOnDay = mutableSetOf<String>()
+        repeat(2400) {
+            val s = engineDay.step(0.05f)
+            assertFalse(
+                "Deterministic Day track must never randomly switch to DAY_NIGHT",
+                s.activeEvent == ExternalEventType.DAY_NIGHT.name
+            )
+            if (s.activeEvent != ExternalEventType.NONE.name) {
+                seenEventsOnDay.add(s.activeEvent)
+            }
+        }
+        assertTrue("Host-enabled environmental effects should trigger weather hazards (seen=$seenEventsOnDay)", seenEventsOnDay.isNotEmpty())
+
+        // Verify random conditions on a permanent night track also NEVER select DAY_NIGHT
+        val customNight = TrackCatalog.generateRandomTrack(seed = 55L, forceNight = true)
         val builtNight = TrackCatalog.buildCustomTrack(customNight)
         val engineNight = RacePhysicsEngine(
             track = builtNight,
             totalLaps = 3,
             players = listOf(player),
-            rules = RaceRulesSettings(randomConditionsEnabled = true),
+            rules = hostEnvRules,
             random = Random(42L)
         )
         repeat(80) { engineNight.step(0.05f) }
@@ -205,7 +209,7 @@ class NightTrackAndEventsTest {
     }
 
     @Test
-    fun trackEditorScreen_nightTrackSwitchTogglesAndSavesWithNightBadge() {
+    fun trackEditorScreen_nightTrackSwitchTogglesWithoutRandomConditionsAndSavesWithNightBadge() {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("open_track_editor_button").performClick()
         composeTestRule.waitForIdle()
@@ -213,6 +217,9 @@ class NightTrackAndEventsTest {
         composeTestRule.onNodeWithTag("editor_new_track_button").performClick()
         composeTestRule.waitForIdle()
 
+        // Random ride conditions switch must be removed from Track Studio
+        composeTestRule.onNodeWithTag("editor_random_conditions_switch").assertDoesNotExist()
+
         composeTestRule.onNodeWithTag("editor_night_track_switch")
             .performScrollTo()
             .assertIsDisplayed()
@@ -221,16 +228,6 @@ class NightTrackAndEventsTest {
         composeTestRule.waitForIdle()
 
         composeTestRule.onNodeWithTag("editor_night_track_switch")
-            .assertIsOn()
-
-        composeTestRule.onNodeWithTag("editor_random_conditions_switch")
-            .performScrollTo()
-            .assertIsDisplayed()
-            .assertIsOff()
-            .performClick()
-        composeTestRule.waitForIdle()
-
-        composeTestRule.onNodeWithTag("editor_random_conditions_switch")
             .assertIsOn()
 
         composeTestRule.onNodeWithTag("editor_save_button").performClick()
@@ -239,13 +236,14 @@ class NightTrackAndEventsTest {
         composeTestRule.onNodeWithTag("editor_saved_banner").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("editor_saved_tracks_row").performScrollTo()
         composeTestRule.waitForIdle()
-        composeTestRule.onAllNodes(hasText("NIGHT") and hasText("WEATHER"))
+        composeTestRule.onAllNodes(hasText("NIGHT"))
             .onFirst()
             .assertIsDisplayed()
+        composeTestRule.onNodeWithText("WEATHER").assertDoesNotExist()
     }
 
     @Test
-    fun trackOwnedRideConditionsAndHostOverride_governExternalEventsAndPreserveCustomJumps() {
+    fun multiplayerHostOnlyEnvironmentalEffects_governExternalEventsAndPreserveCustomJumps() {
         val player = LobbyPlayer(id = "p1", name = "Acro", isHost = true)
         val baseCustom = CustomTrackData(
             id = "custom_weather_test",
@@ -263,87 +261,76 @@ class NightTrackAndEventsTest {
             ramps = listOf(com.example.model.TrackRamp(x = 1100f, y = 300f, angleRad = 0f)),
             randomConditionsEnabled = false
         )
-        val dryTrack = TrackCatalog.buildCustomTrack(baseCustom)
-        val wetTrack = TrackCatalog.buildCustomTrack(baseCustom.copy(randomConditionsEnabled = true))
+        val builtTrack = TrackCatalog.buildCustomTrack(baseCustom)
+        val legacyWetTrack = TrackCatalog.buildCustomTrack(baseCustom.copy(randomConditionsEnabled = true))
 
-        // 1. Custom jumps designed in Track Studio are preserved on built TrackDefinition
-        assertEquals("Designer-placed jump ramp must remain intact", 1, dryTrack.ramps.size)
-        assertFalse(dryTrack.randomConditionsEnabled)
-        assertTrue(wetTrack.randomConditionsEnabled)
+        // 1. Custom jumps designed in Track Studio are preserved; track-owned randomConditionsEnabled is always false
+        assertEquals("Designer-placed jump ramp must remain intact", 1, builtTrack.ramps.size)
+        assertFalse(builtTrack.randomConditionsEnabled)
+        assertFalse(legacyWetTrack.randomConditionsEnabled)
 
-        // 2. Track default with randomConditionsEnabled=false never fires weather in Solo (override=null)
-        val dryRules = RaceRulesSettings(randomConditionsEnabled = true, hostRandomConditionsOverride = null)
-        assertFalse(dryRules.effectiveRandomConditions(dryTrack))
-        val dryEngine = RacePhysicsEngine(
-            track = dryTrack,
+        // 2. Solo / default rules (hostRandomConditionsOverride = null) NEVER trigger random weather
+        val soloRules = RaceRulesSettings(randomConditionsEnabled = true, hostRandomConditionsOverride = null)
+        assertFalse(soloRules.effectiveRandomConditions(builtTrack))
+        assertFalse(soloRules.effectiveRandomConditions(legacyWetTrack))
+        val soloEngine = RacePhysicsEngine(
+            track = builtTrack,
             totalLaps = 3,
             players = listOf(player),
-            rules = dryRules,
+            rules = soloRules,
             random = Random(7L)
         )
-        repeat(80) { dryEngine.step(0.05f) }
-        var sawEventOnDryTrack = false
+        repeat(80) { soloEngine.step(0.05f) }
+        var sawEventInSolo = false
         repeat(1500) {
-            if (dryEngine.step(0.05f).activeEvent != ExternalEventType.NONE.name) {
-                sawEventOnDryTrack = true
+            if (soloEngine.step(0.05f).activeEvent != ExternalEventType.NONE.name) {
+                sawEventInSolo = true
             }
         }
-        assertFalse("Custom track with randomConditionsEnabled=false must stay clear", sawEventOnDryTrack)
+        assertFalse("Solo / non-host races must never fire random environmental effects", sawEventInSolo)
 
-        // 3. Track default with randomConditionsEnabled=true DOES trigger random weather
-        assertTrue(dryRules.effectiveRandomConditions(wetTrack))
-        val wetEngine = RacePhysicsEngine(
-            track = wetTrack,
+        // 3. Multiplayer Host opt-in (hostRandomConditionsOverride = true) enables rain/tremor/wind/snow
+        val hostEnvOn = RaceRulesSettings(hostRandomConditionsOverride = true, randomConditionsEnabled = true)
+        assertTrue(hostEnvOn.effectiveRandomConditions(builtTrack))
+        val hostOnEngine = RacePhysicsEngine(
+            track = builtTrack,
             totalLaps = 3,
             players = listOf(player),
-            rules = dryRules,
+            rules = hostEnvOn,
             random = Random(7L)
         )
-        repeat(80) { wetEngine.step(0.05f) }
-        var sawEventOnWetTrack = false
+        repeat(80) { hostOnEngine.step(0.05f) }
+        var sawEventWithHostOn = false
         repeat(1500) {
-            if (wetEngine.step(0.05f).activeEvent != ExternalEventType.NONE.name) {
-                sawEventOnWetTrack = true
+            val ev = hostOnEngine.step(0.05f).activeEvent
+            assertFalse("Host environmental effects must never pick DAY_NIGHT", ev == ExternalEventType.DAY_NIGHT.name)
+            if (ev != ExternalEventType.NONE.name) {
+                sawEventWithHostOn = true
             }
         }
-        assertTrue("Custom track with randomConditionsEnabled=true must trigger weather events", sawEventOnWetTrack)
+        assertTrue("Multiplayer host opt-in must trigger environmental hazards", sawEventWithHostOn)
 
-        // 4. Multiplayer Host Force ON overrides even a clear custom track
-        val hostForceOn = RaceRulesSettings(hostRandomConditionsOverride = true)
-        assertTrue(hostForceOn.effectiveRandomConditions(dryTrack))
-        val forceOnEngine = RacePhysicsEngine(
-            track = dryTrack,
+        // 4. Multiplayer Host OFF suppresses environmental effects
+        val hostEnvOff = RaceRulesSettings(hostRandomConditionsOverride = false, randomConditionsEnabled = false)
+        assertFalse(hostEnvOff.effectiveRandomConditions(builtTrack))
+        val hostOffEngine = RacePhysicsEngine(
+            track = builtTrack,
             totalLaps = 3,
             players = listOf(player),
-            rules = hostForceOn,
+            rules = hostEnvOff,
             random = Random(7L)
         )
-        repeat(80) { forceOnEngine.step(0.05f) }
-        var sawEventWithHostForceOn = false
+        repeat(80) { hostOffEngine.step(0.05f) }
+        var sawEventWithHostOff = false
         repeat(1500) {
-            if (forceOnEngine.step(0.05f).activeEvent != ExternalEventType.NONE.name) {
-                sawEventWithHostForceOn = true
+            if (hostOffEngine.step(0.05f).activeEvent != ExternalEventType.NONE.name) {
+                sawEventWithHostOff = true
             }
         }
-        assertTrue("Multiplayer host Force ON must trigger weather even on clear custom tracks", sawEventWithHostForceOn)
+        assertFalse("Multiplayer host OFF must disable environmental effects", sawEventWithHostOff)
 
-        // 5. Multiplayer Host Force OFF suppresses weather even on a weather-enabled track
-        val hostForceOff = RaceRulesSettings(hostRandomConditionsOverride = false)
-        assertFalse(hostForceOff.effectiveRandomConditions(wetTrack))
-        val forceOffEngine = RacePhysicsEngine(
-            track = wetTrack,
-            totalLaps = 3,
-            players = listOf(player),
-            rules = hostForceOff,
-            random = Random(7L)
-        )
-        repeat(80) { forceOffEngine.step(0.05f) }
-        var sawEventWithHostForceOff = false
-        repeat(1500) {
-            if (forceOffEngine.step(0.05f).activeEvent != ExternalEventType.NONE.name) {
-                sawEventWithHostForceOff = true
-            }
-        }
-        assertFalse("Multiplayer host Force OFF must disable weather even on weather-enabled tracks", sawEventWithHostForceOff)
+        // 5. Stunt tracks never allow environmental effects even if host flag is true
+        val stuntTrack = TrackCatalog.getStuntTrack(com.example.model.StuntVariant.LONG_JUMP)
+        assertFalse(hostEnvOn.effectiveRandomConditions(stuntTrack))
     }
 }

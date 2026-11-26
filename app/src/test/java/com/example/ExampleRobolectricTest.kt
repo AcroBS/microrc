@@ -125,9 +125,8 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("setup_speed_MEDIUM").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setup_speed_FAST").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setup_random_jumps_switch").assertDoesNotExist()
-        composeTestRule.onNodeWithTag("setup_conditions_track").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("setup_conditions_on").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("setup_conditions_off").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("setup_conditions_track").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("setup_environmental_effects_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("setup_show_player_names_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("host_setup_open_lobby_button").assertIsDisplayed()
         composeTestRule.onNodeWithTag("host_setup_open_lobby_button").performClick()
@@ -141,9 +140,8 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("lobby_speed_FAST").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("lobby_mode_laps").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("lobby_mode_time").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("lobby_conditions_track").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("lobby_conditions_on").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("lobby_conditions_off").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("lobby_conditions_track").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("lobby_environmental_effects_switch").performScrollTo().assertIsDisplayed()
 
         composeTestRule.mainClock.autoAdvance = false
         try {

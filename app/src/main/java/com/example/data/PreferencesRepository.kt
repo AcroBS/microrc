@@ -168,7 +168,7 @@ class PreferencesRepository(context: Context) {
             autoAccelerate = true,
             hardTrackBoundary = true,
             randomJumpsEnabled = true,
-            randomConditionsEnabled = true,
+            randomConditionsEnabled = false,
             hostRandomConditionsOverride = null,
             showPlayerNames = prefs[Keys.RULE_SHOW_PLAYER_NAMES] ?: true,
             winCondition = winCond.name,

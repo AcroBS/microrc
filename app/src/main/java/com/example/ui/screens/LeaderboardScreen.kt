@@ -557,7 +557,6 @@ fun LeaderboardScreen(
                                         val dailyFeatureSummary = buildList {
                                             if (isDailyDriftTab) add("Drift Obstacles") else add("Fixed Portals")
                                             if (activeDailyTrack.ramps.isNotEmpty()) add("${activeDailyTrack.ramps.size} Jumps")
-                                            if (activeDailyTrack.randomConditionsEnabled) add("Dynamic Weather")
                                             if (activeDailyTrack.isNightTrack) add("Night")
                                             add("1 Nitro/Lap")
                                         }.joinToString(" • ")
@@ -824,41 +823,21 @@ fun LeaderboardScreen(
                                             Canvas(modifier = Modifier.fillMaxSize()) {
                                                 drawTrackMiniMap(previewDef)
                                             }
-                                            if (cTrack.isNightTrack || cTrack.randomConditionsEnabled) {
-                                                Row(
-                                                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                            if (cTrack.isNightTrack) {
+                                                Surface(
+                                                    color = Color(0xFF0D1B2A).copy(alpha = 0.92f),
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    border = BorderStroke(1.dp, Color(0xFF90CAF9).copy(alpha = 0.7f)),
                                                     modifier = Modifier
                                                         .align(Alignment.TopStart)
                                                         .padding(4.dp)
                                                 ) {
-                                                    if (cTrack.isNightTrack) {
-                                                        Surface(
-                                                            color = Color(0xFF0D1B2A).copy(alpha = 0.92f),
-                                                            shape = RoundedCornerShape(6.dp),
-                                                            border = BorderStroke(1.dp, Color(0xFF90CAF9).copy(alpha = 0.7f))
-                                                        ) {
-                                                            Text(
-                                                                text = "NIGHT",
-                                                                style = MaterialTheme.typography.labelSmall,
-                                                                color = Color(0xFF90CAF9),
-                                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                                                            )
-                                                        }
-                                                    }
-                                                    if (cTrack.randomConditionsEnabled) {
-                                                        Surface(
-                                                            color = Color(0xFF0B2538).copy(alpha = 0.92f),
-                                                            shape = RoundedCornerShape(6.dp),
-                                                            border = BorderStroke(1.dp, Color(0xFF4FC3F7).copy(alpha = 0.7f))
-                                                        ) {
-                                                            Text(
-                                                                text = "WEATHER",
-                                                                style = MaterialTheme.typography.labelSmall,
-                                                                color = Color(0xFF81D4FA),
-                                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                                                            )
-                                                        }
-                                                    }
+                                                    Text(
+                                                        text = "NIGHT",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = Color(0xFF90CAF9),
+                                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                                    )
                                                 }
                                             }
                                         }

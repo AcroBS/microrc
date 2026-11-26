@@ -230,7 +230,7 @@ data class RaceRulesSettings(
     val autoAccelerate: Boolean = true,
     val hardTrackBoundary: Boolean = true,
     val randomJumpsEnabled: Boolean = true,
-    val randomConditionsEnabled: Boolean = true,
+    val randomConditionsEnabled: Boolean = false,
     val hostRandomConditionsOverride: Boolean? = null,
     val showPlayerNames: Boolean = true,
     val winCondition: String = WinCondition.FIRST_TO_FINISH.name,
@@ -253,9 +253,13 @@ data class RaceRulesSettings(
     val carSpeedEnum: CarSpeedPreset
         get() = runCatching { CarSpeedPreset.valueOf(carSpeed) }.getOrDefault(CarSpeedPreset.FAST)
 
+    /**
+     * Random environmental effects (rain puddles, tremors, wind, snow) are strictly
+     * a Multiplayer Host-selectable option and never activate in Solo, Daily, or Stunt modes.
+     */
     fun effectiveRandomConditions(track: TrackDefinition): Boolean {
         if (track.isStunt) return false
-        return hostRandomConditionsOverride ?: (randomConditionsEnabled && track.randomConditionsEnabled)
+        return hostRandomConditionsOverride == true
     }
 
     fun enabledHybridModes(): List<GameMode> {
