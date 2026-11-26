@@ -101,6 +101,14 @@ data class TrackRamp(
     val impulse: Float = 1.0f
 )
 
+data class GravelPatch(
+    val x: Float,
+    val y: Float,
+    val angleRad: Float,
+    val length: Float,
+    val halfWidth: Float
+)
+
 data class ItemBoxSpawn(
     val id: Int,
     val x: Float,
@@ -206,6 +214,7 @@ data class CustomTrackData(
     val itemSpawns: List<ItemBoxSpawn> = emptyList(),
     val ramps: List<TrackRamp> = emptyList(),
     val props: List<TrackProp> = emptyList(),
+    val puddles: List<TrackPuddle> = emptyList(),
     val creatorUid: String = "",
     val creatorName: String = "",
     val isNightTrack: Boolean = false,
@@ -221,6 +230,7 @@ data class TrackDefinition(
     val itemSpawns: List<ItemBoxSpawn>,
     val props: List<TrackProp>,
     val ramps: List<TrackRamp> = emptyList(),
+    val puddles: List<TrackPuddle> = emptyList(),
     val defaultLaps: Int = 3,
     val customId: String? = null,
     val customName: String? = null,

@@ -594,6 +594,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         raceManager.startRace()
     }
 
+    fun startStudioTestDrive(draftTrack: CustomTrackData, laps: Int = 3) {
+        _lastRunWasPersonalBest.value = false
+        val cleanLaps = laps.coerceIn(1, 9)
+        val setupRules = rules.value.copy(
+            gameMode = GameMode.RACE.name,
+            winCondition = WinCondition.FIRST_TO_FINISH.name,
+            totalLaps = cleanLaps,
+            randomJumpsEnabled = true,
+            randomConditionsEnabled = true,
+            hostRandomConditionsOverride = null
+        )
+        raceManager.startSoloSession(
+            profile = profile.value,
+            initialRules = setupRules,
+            initialCustomTrack = draftTrack,
+            includeBots = false,
+            challengeGhost = null
+        )
+        raceManager.setTotalLaps(cleanLaps)
+        raceManager.startRace()
+    }
+
     fun startGhostChallenge(
         playback: GhostRunPlayback,
         resolvedCustomTrack: CustomTrackData? = null

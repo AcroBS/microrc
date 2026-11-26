@@ -84,10 +84,12 @@ fun ResultsScreen(
     isNewPersonalBest: Boolean = false,
     lastRunRecordEvaluated: Boolean = true,
     isDailyChallenge: Boolean = false,
+    isStudioTestDrive: Boolean = false,
     challengeGhost: GhostRunPlayback? = null,
     onRetryDailyChallenge: (() -> Unit)? = null,
     onTryAgainSameTrack: (() -> Unit)? = null,
     onOpenLeaderboards: (() -> Unit)? = null,
+    onReturnToStudio: (() -> Unit)? = null,
     onVoteRematch: (String) -> Unit = {},
     onLaunchRematchNow: () -> Unit = {},
     onReturnToLobby: () -> Unit,
@@ -96,7 +98,11 @@ fun ResultsScreen(
     val isHostOrSolo = role.isHostLike
     val canReturnToLobby = isHostOrSolo || role.isOnline
     BackHandler {
-        if (canReturnToLobby) onReturnToLobby() else onExitHome()
+        when {
+            isStudioTestDrive && onReturnToStudio != null -> onReturnToStudio()
+            canReturnToLobby -> onReturnToLobby()
+            else -> onExitHome()
+        }
     }
 
     val isArena = results?.gameMode == GameMode.ARENA.name
@@ -221,10 +227,12 @@ fun ResultsScreen(
                                 }
                             }
                             else -> {
+                                val lapCount = (results?.totalLaps ?: 3).coerceAtLeast(1)
+                                val lapLabel = if (lapCount == 1) "1 Lap" else "$lapCount Laps"
                                 when (winCond) {
                                     WinCondition.TIME_TRIAL_DISTANCE -> "${results?.timeLimitSec ?: 90}s Time Limit"
-                                    WinCondition.CHAMPIONSHIP_POINTS -> "Points & Hits (${results?.totalLaps ?: 3} Laps)"
-                                    WinCondition.FIRST_TO_FINISH -> "${results?.totalLaps ?: 3} Laps"
+                                    WinCondition.CHAMPIONSHIP_POINTS -> "Points & Hits ($lapLabel)"
+                                    WinCondition.FIRST_TO_FINISH -> lapLabel
                                 }
                             }
                         }
@@ -667,7 +675,27 @@ fun ResultsScreen(
                         Text("Home")
                     }
 
-                    if (isDailyChallenge && onRetryDailyChallenge != null) {
+                    if (isStudioTestDrive && onReturnToStudio != null) {
+                        Button(
+                            onClick = onReturnToStudio,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.secondary,
+                                contentColor = MaterialTheme.colorScheme.onSecondary
+                            ),
+                            shape = RoundedCornerShape(14.dp),
+                            modifier = Modifier
+                                .weight(1.6f)
+                                .height(52.dp)
+                                .testTag("results_return_to_studio_button")
+                        ) {
+                            Icon(Icons.Default.Replay, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Return to Studio",
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                        }
+                    } else if (isDailyChallenge && onRetryDailyChallenge != null) {
                         Button(
                             onClick = onRetryDailyChallenge,
                             colors = ButtonDefaults.buttonColors(
@@ -720,7 +748,7 @@ fun ResultsScreen(
                     ) {
                         Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = goldColor)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Leaderboards & Ghost Challenges", color = goldColor)
+                        Text("Tracks & Ghosts", color = goldColor)
                     }
                 }
             }

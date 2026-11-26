@@ -1249,7 +1249,8 @@ class RacePhysicsEngine(
             racer.spinImmunityMs = (racer.spinImmunityMs - dtMs).coerceAtLeast(0L)
         }
         if (racer.jumpZ > 0f || racer.vz > 0f) {
-            racer.vz -= 6.5f * dt
+            val jumpGravity = if (isStuntMode) 6.5f else TRACK_JUMP_GRAVITY
+            racer.vz -= jumpGravity * dt
             racer.jumpZ += racer.vz * dt
             if (racer.jumpZ <= 0f) {
                 racer.jumpZ = 0f
@@ -1591,14 +1592,22 @@ class RacePhysicsEngine(
         val hasBoost = racer.boostMs > 0L
         val hasOverdrive = racer.overdriveMs > 0L
 
-        val hitRainPuddle = if (!isAirborne && activeEvent == ExternalEventType.RAIN) {
-            rainPuddles.firstOrNull {
+        val hitRainPuddle = if (!isAirborne) {
+            val trackPlaced = track.puddles.firstOrNull {
                 TrackCatalog.distance(racer.x, racer.y, it.x, it.y) <= it.radius + racer.carType.radiusPx * 0.45f
+            }
+            trackPlaced ?: if (activeEvent == ExternalEventType.RAIN) {
+                rainPuddles.firstOrNull {
+                    TrackCatalog.distance(racer.x, racer.y, it.x, it.y) <= it.radius + racer.carType.radiusPx * 0.45f
+                }
+            } else {
+                null
             }
         } else {
             null
         }
         val inRainPuddle = hitRainPuddle != null
+        val inGravelTrap = !isAirborne && !track.isStunt && TrackCatalog.isPointOnGravelPatch(track, racer.x, racer.y)
 
         // Moving hydroplane spin/skid on rain puddles across all modes — retains forward
         // momentum and slides sideways while spinning, distinct from mine/rocket/shock stun.
@@ -1726,18 +1735,48 @@ class RacePhysicsEngine(
         racer.steerVisual = effectiveSteer
 
         if (!isAirborne) {
+            val gravelTargetSpeed = if (inGravelTrap && !hasOverdrive) {
+                val gravelCapFactor = (0.52f + 0.14f * racer.carType.offRoadRetention).coerceIn(0.56f, 0.68f)
+                racer.carType.maxSpeedPx *
+                    speedPreset.speedMultiplier *
+                    gravelCapFactor *
+                    weatherSpeedMult *
+                    (if (hasBoost) 1.18f else 1.0f)
+            } else {
+                null
+            }
+
             if (throttle > 0.05f) {
-                forwardVel += throttle * accel * dt
+                if (gravelTargetSpeed != null && forwardVel >= gravelTargetSpeed) {
+                    // Already above gravel speed cap: smoothly bleed excess tarmac speed into gravel
+                    val dampAlpha = kotlin.math.min(1f, 11.5f * dt)
+                    forwardVel += (gravelTargetSpeed - forwardVel) * dampAlpha
+                } else {
+                    forwardVel += throttle * accel * dt
+                    if (gravelTargetSpeed != null && forwardVel > gravelTargetSpeed) {
+                        forwardVel = gravelTargetSpeed
+                    }
+                }
             } else if (throttle < -0.05f) {
                 val brakeMult = if (forwardVel > 0f) 1.85f else 1.45f
                 forwardVel += throttle * accel * brakeMult * dt
             } else {
                 val drag = when {
                     isHydroplaning -> 0.85f
+                    inGravelTrap -> 3.8f
                     activeEvent == ExternalEventType.SNOW -> 1.15f
                     else -> 2.25f
                 }
                 forwardVel *= max(0f, 1f - drag * dt)
+                if (gravelTargetSpeed != null && forwardVel > gravelTargetSpeed) {
+                    val dampAlpha = kotlin.math.min(1f, 11.5f * dt)
+                    forwardVel += (gravelTargetSpeed - forwardVel) * dampAlpha
+                }
+            }
+
+            if (gravelTargetSpeed != null && forwardVel < -gravelTargetSpeed * 0.58f) {
+                val dampAlpha = kotlin.math.min(1f, 11.5f * dt)
+                forwardVel += (-gravelTargetSpeed * 0.58f - forwardVel) * dampAlpha
             }
 
             forwardVel = forwardVel.coerceIn(-maxSpeed * 0.58f, maxSpeed)
@@ -1822,7 +1861,8 @@ class RacePhysicsEngine(
                     track.id.surfaceGripMultiplier *
                     weatherGripMult *
                     (if (hasOverdrive) 1.55f else 1.0f) *
-                    (if (isOffRoad) 0.85f else 1.0f)
+                    (if (isOffRoad) 0.85f else 1.0f) *
+                    (if (inGravelTrap && !hasOverdrive) 0.82f else 1.0f)
                 lateralVel *= max(0f, 1f - grip * dt)
             }
 
@@ -2065,16 +2105,36 @@ class RacePhysicsEngine(
     private fun handleRamps(racer: MutableRacer) {
         if (racer.jumpZ > 0.01f || racer.jumpCooldownMs > 0L) return
         val speed = hypot(racer.vx, racer.vy)
-        if (speed < 130f * speedPreset.speedMultiplier) return
+        val minTriggerSpeed = 70f * speedPreset.speedMultiplier
+        if (speed < minTriggerSpeed) return
+        val baseTopSpeed = (racer.carType.maxSpeedPx * speedPreset.speedMultiplier).coerceAtLeast(180f)
         for (ramp in track.ramps) {
-            if (TrackCatalog.distance(racer.x, racer.y, ramp.x, ramp.y) <= ramp.radius + 10f) {
-                racer.vz = 3.15f * ramp.impulse
-                racer.jumpZ = 0.02f
-                racer.jumpCooldownMs = 680L
-                racer.vx *= 1.12f
-                racer.vy *= 1.12f
-                break
-            }
+            val c = cos(ramp.angleRad)
+            val s = sin(ramp.angleRad)
+            val dx = racer.x - ramp.x
+            val dy = racer.y - ramp.y
+            val localFwd = dx * c + dy * s
+            val localLat = -dx * s + dy * c
+            val hitMinFwd = if (track.isArena) -(TrackCatalog.RAMP_HALF_LENGTH + 6f) else -8f
+            val hitMaxFwd = TrackCatalog.RAMP_HALF_LENGTH + 8f
+            val hitHalfWidth = TrackCatalog.RAMP_HALF_WIDTH + racer.carType.radiusPx * 0.50f
+            if (localFwd < hitMinFwd || localFwd > hitMaxFwd || abs(localLat) > hitHalfWidth) continue
+
+            // On circuits, require forward travel onto the ramp so backing into the exit lip doesn't launch
+            val forwardAlongRamp = racer.vx * c + racer.vy * s
+            if (!track.isArena && forwardAlongRamp < 45f * speedPreset.speedMultiplier) continue
+
+            val speedRatio = (speed / baseTopSpeed).coerceIn(0.22f, 1.35f)
+            val fullSpeedAirtime = (240f / baseTopSpeed).coerceIn(0.36f, 0.54f)
+            val scaledAirtime = fullSpeedAirtime *
+                kotlin.math.exp(1.05f * kotlin.math.ln(speedRatio)) *
+                ramp.impulse.coerceIn(0.85f, 1.25f)
+            racer.vz = (0.5f * TRACK_JUMP_GRAVITY * scaledAirtime).coerceIn(2.35f, 8.6f)
+            racer.jumpZ = 0.02f
+            racer.jumpCooldownMs = 420L
+            racer.vx *= 1.02f
+            racer.vy *= 1.02f
+            break
         }
     }
 
@@ -3401,6 +3461,7 @@ class RacePhysicsEngine(
         const val LASER_DURATION_MS = 4000L
         const val LASER_LENGTH_PX = 340f
         const val ROCKET_DURATION_MS = 6000L
+        const val TRACK_JUMP_GRAVITY = 24.0f
         private const val MAX_FIELD_PICKUPS = 2
 
         fun computeSteeringSpeedFactor(

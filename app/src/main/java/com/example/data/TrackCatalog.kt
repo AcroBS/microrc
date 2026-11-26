@@ -3,6 +3,7 @@ package com.example.data
 import com.example.model.ArenaShape
 import com.example.model.BoostPad
 import com.example.model.CustomTrackData
+import com.example.model.GravelPatch
 import com.example.model.ItemBoxSpawn
 import com.example.model.PropShape
 import com.example.model.StuntGolfHole
@@ -14,6 +15,7 @@ import com.example.model.TrackPoint
 import com.example.model.TrackProp
 import com.example.model.TrackRamp
 import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -21,6 +23,12 @@ import kotlin.math.sin
 import kotlin.random.Random
 
 object TrackCatalog {
+
+    const val RAMP_HALF_LENGTH = 36f
+    const val RAMP_HALF_WIDTH = 34f
+    const val GRAVEL_START_OFFSET = 32f
+    const val GRAVEL_LENGTH = 176f
+    const val ARENA_GRAVEL_HALF_WIDTH = 94f
 
     private val tracks: Map<TrackId, TrackDefinition> = TrackId.entries.associateWith { id ->
         buildTrack(id)
@@ -333,6 +341,7 @@ object TrackCatalog {
             itemSpawns = items,
             props = data.props,
             ramps = ramps,
+            puddles = data.puddles,
             customId = data.id,
             customName = data.name,
             isNightTrack = data.isNightTrack,
@@ -354,6 +363,7 @@ object TrackCatalog {
             itemSpawns = track.itemSpawns,
             ramps = track.ramps,
             props = track.props,
+            puddles = track.puddles,
             isNightTrack = track.isNightTrack,
             randomConditionsEnabled = track.randomConditionsEnabled
         )
@@ -1288,6 +1298,56 @@ object TrackCatalog {
             )
         }
         return placed.sortedBy { it.number }
+    }
+
+    /**
+     * Computes the full-width gravel trap paired immediately behind a non-Stunt jump ramp.
+     * Shared single source of truth for physics slowdown, dust particles, rendering, and Track Studio preview.
+     */
+    fun gravelPatchForRamp(track: TrackDefinition, ramp: TrackRamp): GravelPatch? {
+        if (track.isStunt) return null
+        val roadHalfWidth = if (!track.isArena && track.centerline.isNotEmpty()) {
+            val (idx, _) = nearestTrackPoint(track, ramp.x, ramp.y)
+            track.centerline[idx].halfWidth.coerceAtLeast(RAMP_HALF_WIDTH + 44f)
+        } else {
+            ARENA_GRAVEL_HALF_WIDTH
+        }
+        val centerOffset = GRAVEL_START_OFFSET + GRAVEL_LENGTH * 0.5f
+        val cx = ramp.x + cos(ramp.angleRad) * centerOffset
+        val cy = ramp.y + sin(ramp.angleRad) * centerOffset
+        return GravelPatch(
+            x = cx,
+            y = cy,
+            angleRad = ramp.angleRad,
+            length = GRAVEL_LENGTH,
+            halfWidth = roadHalfWidth
+        )
+    }
+
+    /**
+     * Returns true when world point (x, y) lies inside the gravel patch immediately behind any ramp.
+     */
+    fun isPointOnGravelPatch(track: TrackDefinition, x: Float, y: Float): Boolean {
+        if (track.isStunt || track.ramps.isEmpty()) return false
+        val maxCheckDist = GRAVEL_START_OFFSET + GRAVEL_LENGTH + 160f
+        for (ramp in track.ramps) {
+            if (abs(x - ramp.x) > maxCheckDist || abs(y - ramp.y) > maxCheckDist) continue
+            val c = cos(ramp.angleRad)
+            val s = sin(ramp.angleRad)
+            val dx = x - ramp.x
+            val dy = y - ramp.y
+            val localFwd = dx * c + dy * s
+            if (localFwd < GRAVEL_START_OFFSET || localFwd > GRAVEL_START_OFFSET + GRAVEL_LENGTH) continue
+            val localLat = -dx * s + dy * c
+            val patchHalfWidth = if (!track.isArena && track.centerline.isNotEmpty()) {
+                val (idx, _) = nearestTrackPoint(track, ramp.x, ramp.y)
+                track.centerline[idx].halfWidth.coerceAtLeast(RAMP_HALF_WIDTH + 44f)
+            } else {
+                ARENA_GRAVEL_HALF_WIDTH
+            }
+            if (abs(localLat) <= patchHalfWidth) return true
+        }
+        return false
     }
 
     fun distance(x1: Float, y1: Float, x2: Float, y2: Float): Float = hypot(x2 - x1, y2 - y1)

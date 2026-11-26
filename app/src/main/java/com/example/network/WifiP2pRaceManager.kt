@@ -203,7 +203,7 @@ class WifiP2pRaceManager(
                         val replayOption = RematchVoteOption(
                             id = activeCustomTrack.id.take(64),
                             displayName = activeCustomTrack.name.take(24),
-                            subtitle = "Custom Circuit • Replay",
+                            subtitle = "Custom Circuit • Race Again",
                             isRandom = false
                         )
                         val builtInPick = TrackId.entries
@@ -2104,7 +2104,7 @@ class WifiP2pRaceManager(
                     currentTrackId = runCatching { TrackId.valueOf(replayCustom.themeId) }
                         .getOrDefault(TrackId.NEON_ROOFTOP)
                     _activeTrack.value = TrackCatalog.buildCustomTrack(replayCustom)
-                    addSystemChat("Vote winner: ${replayCustom.name} (Replay)!")
+                    addSystemChat("Vote winner: ${replayCustom.name} (Race Again)!")
                 } else {
                     val nextTrack = runCatching { TrackId.valueOf(winnerId) }.getOrDefault(currentTrackId)
                     currentTrackId = nextTrack

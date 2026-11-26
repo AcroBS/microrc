@@ -417,6 +417,7 @@ object CustomTrackCodec {
     private const val MAX_ITEMS = 24
     private const val MAX_RAMPS = 24
     private const val MAX_PROPS = 48
+    private const val MAX_PUDDLES = 24
 
     fun encode(track: CustomTrackData): String {
         val hw = track.roadHalfWidth.coerceIn(80f, 150f)
@@ -457,7 +458,10 @@ object CustomTrackCodec {
         }
         val nightFlag = if (track.isNightTrack) "1" else "0"
         val conditionsFlag = if (track.randomConditionsEnabled) "1" else "0"
-        return "$VERSION_PREFIX|$ptsStr|$boostsStr|$itemsStr|$rampsStr|$propsStr|$nightFlag|$conditionsFlag".take(24_500)
+        val puddlesStr = track.puddles.take(MAX_PUDDLES).joinToString(";") { pd ->
+            String.format(Locale.US, "%.1f,%.1f,%.1f", pd.x, pd.y, pd.radius.coerceIn(18f, 76f))
+        }
+        return "$VERSION_PREFIX|$ptsStr|$boostsStr|$itemsStr|$rampsStr|$propsStr|$nightFlag|$conditionsFlag|$puddlesStr".take(24_500)
     }
 
     fun decode(
@@ -554,6 +558,17 @@ object CustomTrackCodec {
 
         val isNightTrack = sections.getOrNull(6)?.trim() == "1"
         val randomConditionsEnabled = sections.getOrNull(7)?.trim() == "1"
+        val puddles = sections.getOrNull(8).orEmpty()
+            .split(';')
+            .filter { it.isNotBlank() }
+            .mapNotNull { token ->
+                val p = token.split(',')
+                if (p.size < 2) return@mapNotNull null
+                val x = p[0].toFloatOrNull() ?: return@mapNotNull null
+                val y = p[1].toFloatOrNull() ?: return@mapNotNull null
+                val rad = p.getOrNull(2)?.toFloatOrNull()?.coerceIn(18f, 76f) ?: 38f
+                TrackPuddle(x = x, y = y, radius = rad)
+            }
 
         return CustomTrackData(
             id = LeaderboardBoardKey.sanitizeKeyToken(id, 36),
@@ -565,6 +580,7 @@ object CustomTrackCodec {
             itemSpawns = items,
             ramps = ramps,
             props = props,
+            puddles = puddles,
             creatorUid = creatorUid.trim(),
             creatorName = creatorName.trim().take(24),
             isNightTrack = isNightTrack,

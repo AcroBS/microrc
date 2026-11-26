@@ -40,9 +40,11 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.OpenWith
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.Thunderstorm
+import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -81,6 +83,7 @@ import com.example.model.RacerState
 import com.example.model.RcCarType
 import com.example.model.TrackId
 import com.example.model.TrackPoint
+import com.example.model.TrackPuddle
 import com.example.model.TrackRamp
 import com.example.ui.components.drawTrackMiniMap
 import com.example.ui.components.drawTrackWorld
@@ -92,7 +95,8 @@ private enum class EditorTool(val label: String) {
     MOVE_NODE("Drag Corner"),
     ADD_NODE("Add Corner"),
     TOGGLE_RAMP("Toggle Jump"),
-    TOGGLE_BOOST("Toggle Boost")
+    TOGGLE_BOOST("Toggle Boost"),
+    TOGGLE_PUDDLE("Toggle Puddle")
 }
 
 @Composable
@@ -101,6 +105,7 @@ fun TrackEditorScreen(
     savedTracks: List<CustomTrackData>,
     canApplyToLobby: Boolean,
     hasBottomNav: Boolean = false,
+    onTestDrive: ((CustomTrackData) -> Unit)? = null,
     onSaveTrack: (CustomTrackData, Boolean) -> Unit,
     onDeleteTrack: (String) -> Unit,
     onBack: () -> Unit
@@ -409,6 +414,31 @@ fun TrackEditorScreen(
                                                     }
                                                     savedBannerName = null
                                                 }
+                                                EditorTool.TOGGLE_PUDDLE -> {
+                                                    val existingIdx = curDraft.puddles.indexOfFirst {
+                                                        hypot(it.x - wx, it.y - wy) < 130f
+                                                    }
+                                                    if (existingIdx >= 0) {
+                                                        draft = curDraft.copy(
+                                                            puddles = curDraft.puddles.filterIndexed { i, _ -> i != existingIdx }
+                                                        )
+                                                    } else {
+                                                        val (closestIdx, distToCenter) = TrackCatalog.nearestTrackPoint(curPreview, wx, wy)
+                                                        val centerPt = curPreview.centerline[closestIdx]
+                                                        val maxOffset = (centerPt.halfWidth * 0.65f).coerceAtLeast(24f)
+                                                        val (px, py) = if (distToCenter <= maxOffset || distToCenter < 0.01f) {
+                                                            wx to wy
+                                                        } else {
+                                                            val scaleToRoad = maxOffset / distToCenter
+                                                            (centerPt.x + (wx - centerPt.x) * scaleToRoad) to
+                                                                (centerPt.y + (wy - centerPt.y) * scaleToRoad)
+                                                        }
+                                                        draft = curDraft.copy(
+                                                            puddles = curDraft.puddles + TrackPuddle(px, py, radius = 38f)
+                                                        )
+                                                    }
+                                                    savedBannerName = null
+                                                }
                                             }
                                         }
                                     }
@@ -501,7 +531,8 @@ fun TrackEditorScreen(
                                     draggingNodeIdx >= 0 -> "Moving Corner #${draggingNodeIdx + 1}..."
                                     activeTool == EditorTool.MOVE_NODE -> "Touch & drag any corner dot smoothly"
                                     activeTool == EditorTool.ADD_NODE -> "Tap anywhere to insert a new corner"
-                                    activeTool == EditorTool.TOGGLE_RAMP -> "Tap on track to add or remove a Jump Ramp"
+                                    activeTool == EditorTool.TOGGLE_RAMP -> "Tap on track to add or remove a Jump Ramp + Gravel Trap"
+                                    activeTool == EditorTool.TOGGLE_PUDDLE -> "Tap on track to add or remove a Rain Puddle"
                                     else -> "Tap on track to add or remove a Boost Pad"
                                 },
                                 style = MaterialTheme.typography.labelSmall,
@@ -538,12 +569,14 @@ fun TrackEditorScreen(
                             EditorTool.ADD_NODE -> Icons.Default.AddCircleOutline
                             EditorTool.TOGGLE_RAMP -> Icons.Default.FlightTakeoff
                             EditorTool.TOGGLE_BOOST -> Icons.Default.Bolt
+                            EditorTool.TOGGLE_PUDDLE -> Icons.Default.WaterDrop
                         }
                         FilterChip(
                             selected = active,
                             onClick = { activeTool = tool },
                             leadingIcon = { Icon(icon, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                            label = { Text(tool.label, style = MaterialTheme.typography.labelSmall) }
+                            label = { Text(tool.label, style = MaterialTheme.typography.labelSmall) },
+                            modifier = Modifier.testTag("editor_tool_${tool.name}")
                         )
                     }
                 }
@@ -843,31 +876,67 @@ fun TrackEditorScreen(
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Button(
-                        onClick = {
-                            val cleanName = draft.name.trim().ifEmpty { "Custom Circuit" }
-                            val fallbackId = TrackCatalog.defaultEditorOval(selectedTheme).id
-                            val finalTrack = draft.copy(
-                                id = draft.id.ifBlank { fallbackId }.take(36),
-                                name = cleanName
-                            )
-                            draft = finalTrack
-                            savedBannerName = cleanName
-                            onSaveTrack(finalTrack, canApplyToLobby)
-                        },
-                        shape = RoundedCornerShape(16.dp),
+                    val buildDraftTrack: () -> CustomTrackData = {
+                        val cleanName = draft.name.trim().ifEmpty { "Custom Circuit" }
+                        val fallbackId = TrackCatalog.defaultEditorOval(selectedTheme).id
+                        draft.copy(
+                            id = draft.id.ifBlank { fallbackId }.take(36),
+                            name = cleanName
+                        )
+                    }
+                    Row(
                         modifier = Modifier
                             .widthIn(max = 680.dp)
-                            .fillMaxWidth()
-                            .height(52.dp)
-                            .testTag("editor_save_button")
+                            .fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Default.Check, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (canApplyToLobby) "SAVE & SELECT IN LOBBY" else "SAVE CUSTOM TRACK",
-                            style = MaterialTheme.typography.labelLarge
-                        )
+                        if (onTestDrive != null) {
+                            OutlinedButton(
+                                onClick = {
+                                    val finalTrack = buildDraftTrack()
+                                    draft = finalTrack
+                                    onTestDrive(finalTrack)
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                                modifier = Modifier
+                                    .weight(0.75f)
+                                    .height(52.dp)
+                                    .testTag("editor_test_drive_button")
+                            ) {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Test Drive",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        Button(
+                            onClick = {
+                                val finalTrack = buildDraftTrack()
+                                draft = finalTrack
+                                savedBannerName = finalTrack.name
+                                onSaveTrack(finalTrack, canApplyToLobby)
+                            },
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .weight(1.25f)
+                                .height(52.dp)
+                                .testTag("editor_save_button")
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (canApplyToLobby) "SAVE & SELECT IN LOBBY" else "SAVE CUSTOM TRACK",
+                                style = MaterialTheme.typography.labelLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
             }

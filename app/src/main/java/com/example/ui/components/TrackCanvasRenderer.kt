@@ -319,26 +319,117 @@ fun DrawScope.drawTrackWorld(
         }
     }
 
-    // Rain puddles on road surface (glossy blue with animated ripples)
-    for (i in rainPuddles.indices) {
-        val p = rainPuddles[i]
+    // 4b. Full-width Gravel Traps paired immediately behind every non-Stunt Jump Ramp
+    if (!track.isStunt && track.ramps.isNotEmpty()) {
+        for ((rampIdx, ramp) in track.ramps.withIndex()) {
+            val patch = TrackCatalog.gravelPatchForRamp(track, ramp) ?: continue
+            val deg = patch.angleRad * 180f / PI.toFloat()
+            val halfLen = patch.length * 0.5f
+            val halfW = patch.halfWidth
+            withTransform({
+                translate(patch.x, patch.y)
+                rotate(deg, Offset.Zero)
+            }) {
+                // Soft outer berm shadow
+                drawRoundRect(
+                    color = Color(0xFF4E3B28).copy(alpha = 0.45f),
+                    topLeft = Offset(-halfLen - 4f, -halfW - 3f),
+                    size = Size(patch.length + 8f, halfW * 2f + 6f),
+                    cornerRadius = CornerRadius(14f, 14f)
+                )
+                // Loose sandy-tan gravel base spanning the full road width
+                drawRoundRect(
+                    color = Color(0xFFB5966A).copy(alpha = 0.90f),
+                    topLeft = Offset(-halfLen, -halfW),
+                    size = Size(patch.length, halfW * 2f),
+                    cornerRadius = CornerRadius(10f, 10f)
+                )
+                // Inner darker compacted gravel bed
+                drawRoundRect(
+                    color = Color(0xFF9A7B52).copy(alpha = 0.55f),
+                    topLeft = Offset(-halfLen + 8f, -halfW + 8f),
+                    size = Size(patch.length - 16f, (halfW * 2f - 16f).coerceAtLeast(12f)),
+                    cornerRadius = CornerRadius(8f, 8f)
+                )
+                // Deterministic loose-stone / pebble grain dots
+                for (pIdx in 0 until 32) {
+                    val hashA = kotlin.math.sin((rampIdx * 37 + pIdx * 19 + 3).toFloat())
+                    val hashB = kotlin.math.cos((rampIdx * 23 + pIdx * 31 + 7).toFloat())
+                    val px = hashA * (halfLen - 14f)
+                    val py = hashB * (halfW - 14f)
+                    val pebbleR = 2.4f + (pIdx % 3) * 1.1f
+                    val pebbleColor = when (pIdx % 3) {
+                        0 -> Color(0xFFDCC8A6).copy(alpha = 0.85f)
+                        1 -> Color(0xFF6B5237).copy(alpha = 0.72f)
+                        else -> Color(0xFF8C6E4A).copy(alpha = 0.80f)
+                    }
+                    drawCircle(
+                        color = pebbleColor,
+                        radius = pebbleR,
+                        center = Offset(px, py)
+                    )
+                }
+                // Crisp gravel-trap border & entry/exit warning dashed edges
+                drawRoundRect(
+                    color = Color(0xFF5D4037).copy(alpha = 0.65f),
+                    topLeft = Offset(-halfLen, -halfW),
+                    size = Size(patch.length, halfW * 2f),
+                    cornerRadius = CornerRadius(10f, 10f),
+                    style = Stroke(
+                        width = 3.5f,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 8f), 0f)
+                    )
+                )
+            }
+        }
+    }
+
+    // Rain puddles on road surface (permanent track puddles + active rainstorm puddles)
+    val allPuddles = if (track.puddles.isEmpty()) {
+        rainPuddles
+    } else if (rainPuddles.isEmpty()) {
+        track.puddles
+    } else {
+        track.puddles + rainPuddles
+    }
+    for (i in allPuddles.indices) {
+        val p = allPuddles[i]
+        val rx = p.radius
+        val ry = p.radius * 0.78f
+        // Deep water body
         drawOval(
-            color = Color(0xFF0277BD).copy(alpha = 0.56f),
-            topLeft = Offset(p.x - p.radius, p.y - p.radius * 0.78f),
-            size = Size(p.radius * 2f, p.radius * 1.56f)
+            color = Color(0xFF01579B).copy(alpha = 0.62f),
+            topLeft = Offset(p.x - rx, p.y - ry),
+            size = Size(rx * 2f, ry * 2f)
+        )
+        // Bright translucent inner sheen
+        drawOval(
+            color = Color(0xFF4FC3F7).copy(alpha = 0.46f),
+            topLeft = Offset(p.x - rx * 0.72f, p.y - ry * 0.68f),
+            size = Size(rx * 1.44f, ry * 1.36f)
+        )
+        // Subtle animated shoreline water-ripple outline (readable on dark/night & bright surfaces)
+        val edgePulse = 0.55f + 0.45f * sin(animTimeSec * 3.4f + i * 1.1f)
+        drawOval(
+            color = Color(0xFF81D4FA).copy(alpha = 0.52f + 0.30f * edgePulse),
+            topLeft = Offset(p.x - rx, p.y - ry),
+            size = Size(rx * 2f, ry * 2f),
+            style = Stroke(width = 2.6f)
+        )
+        // Dual animated expanding concentric water ripples
+        val ripplePhase1 = ((animTimeSec * 1.55f + i * 0.37f) % 1f)
+        val ripplePhase2 = ((animTimeSec * 1.55f + i * 0.37f + 0.5f) % 1f)
+        drawOval(
+            color = Color(0xFFE1F5FE).copy(alpha = (1f - ripplePhase1) * 0.78f),
+            topLeft = Offset(p.x - rx * (0.26f + 0.72f * ripplePhase1), p.y - ry * (0.26f + 0.72f * ripplePhase1)),
+            size = Size(rx * 2f * (0.26f + 0.72f * ripplePhase1), ry * 2f * (0.26f + 0.72f * ripplePhase1)),
+            style = Stroke(width = 2.4f)
         )
         drawOval(
-            color = Color(0xFF4FC3F7).copy(alpha = 0.45f),
-            topLeft = Offset(p.x - p.radius * 0.72f, p.y - p.radius * 0.52f),
-            size = Size(p.radius * 1.44f, p.radius * 1.04f)
-        )
-        val ripplePhase = ((animTimeSec * 1.8f + i * 0.37f) % 1f)
-        val rr = p.radius * (0.25f + 0.65f * ripplePhase)
-        drawCircle(
-            color = Color(0xFFB3E5FC).copy(alpha = (1f - ripplePhase) * 0.6f),
-            radius = rr,
-            center = Offset(p.x, p.y),
-            style = Stroke(width = 2.5f)
+            color = Color(0xFFB3E5FC).copy(alpha = (1f - ripplePhase2) * 0.58f),
+            topLeft = Offset(p.x - rx * (0.22f + 0.70f * ripplePhase2), p.y - ry * (0.22f + 0.70f * ripplePhase2)),
+            size = Size(rx * 2f * (0.22f + 0.70f * ripplePhase2), ry * 2f * (0.22f + 0.70f * ripplePhase2)),
+            style = Stroke(width = 1.8f)
         )
     }
 
@@ -372,60 +463,62 @@ fun DrawScope.drawTrackWorld(
         }
     }
 
-    // 5b. Jump Ramps (top-down 2.5D sloped deck + launch shadow; Stunt mode draws its own wide Mega Ramp)
+    // 5b. Narrow Jump Ramps centered on the racing line (leaving left/right bypass lanes into gravel)
     if (!track.isStunt) {
+        val rampHalfLen = TrackCatalog.RAMP_HALF_LENGTH
+        val rampHalfW = TrackCatalog.RAMP_HALF_WIDTH
         for (ramp in track.ramps) {
-        val deg = ramp.angleRad * 180f / PI.toFloat()
-        withTransform({
-            translate(ramp.x, ramp.y)
-            rotate(deg, Offset.Zero)
-        }) {
-            drawRoundRect(
-                color = Color.Black.copy(alpha = 0.48f),
-                topLeft = Offset(-28f, -24f),
-                size = Size(82f, 54f),
-                cornerRadius = CornerRadius(8f, 8f)
-            )
-            drawRoundRect(
-                color = Color(0xFF4E342E),
-                topLeft = Offset(-42f, -26f),
-                size = Size(44f, 52f),
-                cornerRadius = CornerRadius(6f, 6f)
-            )
-            drawRoundRect(
-                color = Color(0xFF8D6E63),
-                topLeft = Offset(-2f, -26f),
-                size = Size(42f, 52f),
-                cornerRadius = CornerRadius(6f, 6f)
-            )
-            drawRect(
-                color = Color(0xFFFFAB00),
-                topLeft = Offset(30f, -27f),
-                size = Size(12f, 54f)
-            )
-            drawRect(
-                color = Color(0xFFFFEA00),
-                topLeft = Offset(-42f, -28f),
-                size = Size(84f, 5f)
-            )
-            drawRect(
-                color = Color(0xFFFFEA00),
-                topLeft = Offset(-42f, 23f),
-                size = Size(84f, 5f)
-            )
-            for (c in -1..1) {
-                val cx = c * 18f - 4f
-                val chev = Path().apply {
-                    moveTo(cx - 7f, -13f)
-                    lineTo(cx + 8f, 0f)
-                    lineTo(cx - 7f, 13f)
-                }
-                drawPath(
-                    path = chev,
-                    color = Color(0xFFFFEA00),
-                    style = Stroke(width = 4.5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            val deg = ramp.angleRad * 180f / PI.toFloat()
+            withTransform({
+                translate(ramp.x, ramp.y)
+                rotate(deg, Offset.Zero)
+            }) {
+                drawRoundRect(
+                    color = Color.Black.copy(alpha = 0.48f),
+                    topLeft = Offset(-rampHalfLen + 10f, -rampHalfW + 3f),
+                    size = Size(rampHalfLen * 2f - 4f, rampHalfW * 2f + 2f),
+                    cornerRadius = CornerRadius(8f, 8f)
                 )
-            }
+                drawRoundRect(
+                    color = Color(0xFF4E342E),
+                    topLeft = Offset(-rampHalfLen, -rampHalfW),
+                    size = Size(rampHalfLen + 2f, rampHalfW * 2f),
+                    cornerRadius = CornerRadius(6f, 6f)
+                )
+                drawRoundRect(
+                    color = Color(0xFF8D6E63),
+                    topLeft = Offset(-2f, -rampHalfW),
+                    size = Size(rampHalfLen + 2f, rampHalfW * 2f),
+                    cornerRadius = CornerRadius(6f, 6f)
+                )
+                drawRect(
+                    color = Color(0xFFFFAB00),
+                    topLeft = Offset(rampHalfLen - 10f, -rampHalfW - 1f),
+                    size = Size(11f, rampHalfW * 2f + 2f)
+                )
+                drawRect(
+                    color = Color(0xFFFFEA00),
+                    topLeft = Offset(-rampHalfLen, -rampHalfW - 2f),
+                    size = Size(rampHalfLen * 2f, 5f)
+                )
+                drawRect(
+                    color = Color(0xFFFFEA00),
+                    topLeft = Offset(-rampHalfLen, rampHalfW - 3f),
+                    size = Size(rampHalfLen * 2f, 5f)
+                )
+                for (c in -1..1) {
+                    val cx = c * 16f - 4f
+                    val chev = Path().apply {
+                        moveTo(cx - 7f, -15f)
+                        lineTo(cx + 8f, 0f)
+                        lineTo(cx - 7f, 15f)
+                    }
+                    drawPath(
+                        path = chev,
+                        color = Color(0xFFFFEA00),
+                        style = Stroke(width = 4.5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                    )
+                }
             }
         }
     }
@@ -894,6 +987,34 @@ fun DrawScope.drawTrackWorld(
                     radius = puff,
                     center = Offset(-28f, 11f)
                 )
+            }
+        }
+        // Subtle sandy dust plume kicked up behind rear tires when driving through a gravel patch
+        if (r.jumpZ <= 0.05f && r.speed > 45f && !track.isStunt && TrackCatalog.isPointOnGravelPatch(track, r.x, r.y)) {
+            val deg = r.angleRad * 180f / PI.toFloat()
+            val dustIntensity = ((r.speed - 45f) / 220f).coerceIn(0.25f, 1f)
+            withTransform({
+                translate(r.x, r.y)
+                rotate(deg, Offset.Zero)
+            }) {
+                for (dIdx in 0 until 3) {
+                    val phase = ((animTimeSec * 4.2f + dIdx * 0.33f + r.x * 0.02f) % 1f)
+                    val backX = -18f - phase * 30f
+                    val spreadY = 10f + phase * 8f
+                    val puffR = (4.5f + phase * 6.5f) * dustIntensity
+                    val alpha = (1f - phase) * 0.56f * dustIntensity
+                    val puffColor = if (dIdx % 2 == 0) Color(0xFFD7C09E) else Color(0xFFB5966A)
+                    drawCircle(
+                        color = puffColor.copy(alpha = alpha),
+                        radius = puffR,
+                        center = Offset(backX, -spreadY)
+                    )
+                    drawCircle(
+                        color = puffColor.copy(alpha = alpha),
+                        radius = puffR,
+                        center = Offset(backX, spreadY)
+                    )
+                }
             }
         }
         if (r.jumpZ <= 0.05f && r.stunnedMs == 0L && kotlin.math.abs(r.spinVisualOffset) > 0.04f) {

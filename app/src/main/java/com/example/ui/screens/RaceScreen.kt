@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AcUnit
@@ -146,6 +147,8 @@ fun RaceScreen(
     onlinePingMs: Int? = null,
     isOnlineFallback: Boolean = false,
     personalBestLapMs: Long? = null,
+    isStudioTestDrive: Boolean = false,
+    onReturnToStudio: (() -> Unit)? = null,
     onRestartRace: () -> Unit = {},
     onLeaveRace: () -> Unit
 ) {
@@ -551,7 +554,7 @@ fun RaceScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.Top
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Surface(
                     color = hudSurface,
                     shape = RoundedCornerShape(16.dp),
@@ -737,6 +740,78 @@ fun RaceScreen(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = deltaColor,
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Ghost Target & Split Delta Pill (stacked cleanly below LAP DELTA with 4.dp gap — zero overlap)
+                if (ghostCar != null && snapshot?.phase != RacePhase.FINISHED.name) {
+                    val delta = ghostCar.splitDeltaMs
+                    val ahead = delta != null && delta <= 0L
+                    val deltaText = when {
+                        delta == null -> "TARGET ${formatRaceTime(ghostCar.finishTimeMs)}"
+                        delta <= 0L -> String.format(java.util.Locale.US, "%.2fs", delta / 1000f)
+                        else -> String.format(java.util.Locale.US, "+%.2fs", delta / 1000f)
+                    }
+                    val badgeColor = when {
+                        delta == null -> secondaryAccent
+                        ahead -> tertiaryAccent
+                        else -> primaryAccent
+                    }
+                    Surface(
+                        color = hudSurface,
+                        shape = RoundedCornerShape(50),
+                        border = BorderStroke(1.2.dp, badgeColor.copy(alpha = 0.88f)),
+                        modifier = Modifier.testTag("ghost_delta_badge")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "GHOST • ${ghostCar.driverName.take(10).uppercase()}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = secondaryAccent,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = deltaText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = badgeColor
+                            )
+                        }
+                    }
+                }
+
+                // Quick exit pill when testing a circuit from Track Studio
+                if (isStudioTestDrive && onReturnToStudio != null) {
+                    Surface(
+                        color = colorScheme.secondaryContainer.copy(alpha = 0.94f),
+                        shape = RoundedCornerShape(50),
+                        border = BorderStroke(1.2.dp, secondaryAccent),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .clickable { onReturnToStudio() }
+                            .testTag("return_to_studio_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Return to Studio",
+                                tint = colorScheme.onSecondaryContainer,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "RETURN TO STUDIO",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = colorScheme.onSecondaryContainer
                             )
                         }
                     }
@@ -963,64 +1038,48 @@ fun RaceScreen(
             }
         }
 
-        // Top-Anchored Notification & Status Stack — strictly at the top of the screen so the center car is never covered
+        // Dedicated Center-Top Notification & Status Callout Stack — positioned clear of top-left pills & top-right mini-map
         val invertedRemMs = localRacer?.invertedSteerMs ?: 0L
         val electroParalyzedRemMs = localRacer?.electroParalyzedMs ?: 0L
+        val isWrongWay = remember(
+            localRacer?.x,
+            localRacer?.y,
+            localRacer?.vx,
+            localRacer?.vy,
+            localRacer?.angleRad,
+            localRacer?.jumpZ,
+            localRacer?.stunnedMs,
+            localRacer?.spinVisualOffset,
+            localRacer?.finished,
+            snapshot?.phase,
+            isArenaMode,
+            isStuntsMode,
+            track
+        ) {
+            isDrivingWrongWay(
+                track = track,
+                racer = localRacer,
+                isRacingPhase = snapshot?.phase == RacePhase.RACING.name,
+                isArenaMode = isArenaMode,
+                isStuntsMode = isStuntsMode
+            )
+        }
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .windowInsetsPadding(WindowInsets.statusBars)
                 .padding(
-                    top = if (isWideHud) 8.dp else 64.dp,
-                    start = if (isWideHud) 244.dp else 12.dp,
+                    top = if (isWideHud) 8.dp else 124.dp,
+                    start = if (isWideHud) 252.dp else 12.dp,
                     end = when {
-                        isWideHud -> 154.dp
-                        !overviewCamera -> 154.dp
+                        isWideHud -> 160.dp
+                        !overviewCamera && profile.showTrackMiniMap -> 156.dp
                         else -> 12.dp
                     }
                 ),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            if (ghostCar != null && snapshot?.phase != RacePhase.FINISHED.name) {
-                val delta = ghostCar.splitDeltaMs
-                val ahead = delta != null && delta <= 0L
-                val deltaText = when {
-                    delta == null -> "TARGET ${formatRaceTime(ghostCar.finishTimeMs)}"
-                    delta <= 0L -> String.format(java.util.Locale.US, "%.2fs", delta / 1000f)
-                    else -> String.format(java.util.Locale.US, "+%.2fs", delta / 1000f)
-                }
-                val badgeColor = when {
-                    delta == null -> secondaryAccent
-                    ahead -> tertiaryAccent
-                    else -> primaryAccent
-                }
-                Surface(
-                    color = hudSurface,
-                    shape = RoundedCornerShape(50),
-                    border = BorderStroke(1.5.dp, badgeColor),
-                    modifier = Modifier.testTag("ghost_delta_badge")
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text(
-                            text = "GHOST • ${ghostCar.driverName.take(10).uppercase()}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = secondaryAccent,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = deltaText,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = badgeColor
-                        )
-                    }
-                }
-            }
 
             if (isStuntsMode && snapshot?.phase != RacePhase.FINISHED.name && stuntState != null) {
                 Surface(
@@ -1160,24 +1219,35 @@ fun RaceScreen(
                 }
             }
 
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                if (isArenaMode && arenaFlagToDraw?.carrierId == localRacer?.playerId) {
-                    StatusChip("CARRYING FLAG!", goldAccent)
-                }
-                if (stuntControlsLocked && isLocalActiveStuntDriver) StatusChip("LANDED — COASTING", secondaryAccent)
-                if ((localRacer?.jumpZ ?: 0f) > 0.1f) StatusChip("AIRBORNE!", goldAccent)
-                if ((localRacer?.boostMs ?: 0L) > 0L) StatusChip("TURBO", primaryAccent)
-                if ((localRacer?.shieldMs ?: 0L) > 0L) StatusChip("SHIELD", tertiaryAccent)
-                if ((localRacer?.overdriveMs ?: 0L) > 0L) StatusChip("OVERDRIVE", secondaryAccent)
-                if ((localRacer?.laserBeamMs ?: 0L) > 0L) StatusChip("RED LASER", errorAccent)
-                if ((localRacer?.electroShockAuraMs ?: 0L) > 0L) StatusChip("ELECTRO AURA", tertiaryAccent)
-                if ((localRacer?.electroParalyzedMs ?: 0L) > 0L) StatusChip("MOTIONLESS!", errorAccent)
-                if ((localRacer?.stunnedMs ?: 0L) > 0L) StatusChip("ZAPPED!", errorAccent)
+            val momentaryCallouts = buildList<Pair<String, Color>> {
+                if (isWrongWay) add("WRONG WAY" to errorAccent)
                 if ((localRacer?.stunnedMs ?: 0L) == 0L && kotlin.math.abs(localRacer?.spinVisualOffset ?: 0f) > 0.04f) {
-                    StatusChip("HYDROPLANE!", secondaryAccent)
+                    add("HYDROPLANE!" to secondaryAccent)
+                }
+                if ((localRacer?.shieldMs ?: 0L) > 0L) add("SHIELDED" to tertiaryAccent)
+                if ((localRacer?.overdriveMs ?: 0L) > 0L) add("OVERDRIVE" to secondaryAccent)
+                if ((localRacer?.jumpZ ?: 0f) > 0.1f) add("AIRBORNE!" to goldAccent)
+                if ((localRacer?.boostMs ?: 0L) > 0L) add("TURBO" to primaryAccent)
+                if ((localRacer?.laserBeamMs ?: 0L) > 0L) add("RED LASER" to errorAccent)
+                if ((localRacer?.electroShockAuraMs ?: 0L) > 0L) add("ELECTRO AURA" to tertiaryAccent)
+                if ((localRacer?.electroParalyzedMs ?: 0L) > 0L) add("MOTIONLESS!" to errorAccent)
+                if ((localRacer?.stunnedMs ?: 0L) > 0L) add("ZAPPED!" to errorAccent)
+                if (isArenaMode && arenaFlagToDraw?.carrierId == localRacer?.playerId) {
+                    add("CARRYING FLAG!" to goldAccent)
+                }
+                if (stuntControlsLocked && isLocalActiveStuntDriver) {
+                    add("LANDED — COASTING" to secondaryAccent)
+                }
+            }
+            if (momentaryCallouts.isNotEmpty()) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.testTag("race_status_callout_pill")
+                ) {
+                    momentaryCallouts.forEach { (label, accentColor) ->
+                        StatusChip(label, accentColor)
+                    }
                 }
             }
         }
@@ -1382,7 +1452,7 @@ fun RaceScreen(
             val actionAndBrakeControlsContent: @Composable () -> Unit = {
                 Column(
                     horizontalAlignment = if (profile.swapControls) Alignment.Start else Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(actionRowSpacing),
@@ -1704,12 +1774,22 @@ fun RaceScreen(
                             Text("Restart")
                         }
                     }
-                    TextButton(
-                        onClick = {
-                            showPauseDialog = false
-                            onLeaveRace()
-                        }
-                    ) { Text("Exit Race", color = MaterialTheme.colorScheme.error) }
+                    if (isStudioTestDrive && onReturnToStudio != null) {
+                        TextButton(
+                            onClick = {
+                                showPauseDialog = false
+                                onReturnToStudio()
+                            },
+                            modifier = Modifier.testTag("pause_return_to_studio_button")
+                        ) { Text("Return to Studio", color = MaterialTheme.colorScheme.secondary) }
+                    } else {
+                        TextButton(
+                            onClick = {
+                                showPauseDialog = false
+                                onLeaveRace()
+                            }
+                        ) { Text("Exit Race", color = MaterialTheme.colorScheme.error) }
+                    }
                 }
             }
         )
@@ -2064,18 +2144,47 @@ fun SpringSteeringSlider(
 
 @Composable
 private fun StatusChip(text: String, color: Color) {
+    val surfaceBg = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.95f)
     Surface(
-        color = color.copy(alpha = 0.24f),
+        color = surfaceBg,
         shape = RoundedCornerShape(50),
-        border = BorderStroke(1.dp, color)
+        border = BorderStroke(1.8.dp, color),
+        shadowElevation = 4.dp
     ) {
         Text(
             text = text,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.labelMedium,
             color = color,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
         )
     }
+}
+
+internal fun isDrivingWrongWay(
+    track: TrackDefinition,
+    racer: RacerState?,
+    isRacingPhase: Boolean,
+    isArenaMode: Boolean,
+    isStuntsMode: Boolean
+): Boolean {
+    if (!isRacingPhase || isArenaMode || isStuntsMode) return false
+    if (racer == null || racer.finished || racer.jumpZ > 0.08f || racer.stunnedMs > 0L) return false
+    if (kotlin.math.abs(racer.spinVisualOffset) > 0.04f) return false
+    val pts = track.centerline
+    if (pts.size < 3) return false
+    val speed = hypot(racer.vx, racer.vy)
+    if (speed < 85f) return false
+    val (idx, _) = TrackCatalog.nearestTrackPoint(track, racer.x, racer.y)
+    val cur = pts[idx]
+    val next = pts[(idx + 1) % pts.size]
+    val tx = next.x - cur.x
+    val ty = next.y - cur.y
+    val tLen = hypot(tx, ty).coerceAtLeast(0.001f)
+    val tnx = tx / tLen
+    val tny = ty / tLen
+    val velDot = (racer.vx / speed) * tnx + (racer.vy / speed) * tny
+    val headingDot = cos(racer.angleRad) * tnx + sin(racer.angleRad) * tny
+    return velDot < -0.50f && headingDot < -0.45f
 }
 
 internal fun computeLiveLapDeltaMs(

@@ -186,6 +186,8 @@ fun MicroRCApp(
     val overviewCamera by viewModel.overviewCamera.collectAsState()
     val appUpdateState by viewModel.appUpdateState.collectAsState()
     val dismissedUpdateTag by viewModel.dismissedUpdateTag.collectAsState()
+    var studioTestDriveDraft by remember { mutableStateOf<CustomTrackData?>(null) }
+    var isStudioTestDrive by remember { mutableStateOf(false) }
 
     // Reactive Firebase Auth observation — automatically picks up late/runtime Firebase init
     val authFlow = remember(appContext) {
@@ -1090,10 +1092,16 @@ fun MicroRCApp(
                 val canApplyToLobby = sessionRole.isHostLike
                 val creatorUid = currentUser?.uid.orEmpty()
                 TrackEditorScreen(
-                    initialTrack = lobbyState?.activeCustomTrack ?: customTracks.firstOrNull(),
+                    initialTrack = studioTestDriveDraft ?: lobbyState?.activeCustomTrack ?: customTracks.firstOrNull(),
                     savedTracks = customTracks,
                     canApplyToLobby = canApplyToLobby,
                     hasBottomNav = showBottomNav,
+                    onTestDrive = { draftTrack ->
+                        studioTestDriveDraft = draftTrack
+                        isStudioTestDrive = true
+                        activeOnlineVm?.leaveRoom()
+                        viewModel.startStudioTestDrive(draftTrack)
+                    },
                     onSaveTrack = { track, apply ->
                         val stamped = if (creatorUid.isNotBlank() && (track.creatorUid.isBlank() || track.creatorUid == creatorUid)) {
                             track.copy(
@@ -1103,6 +1111,7 @@ fun MicroRCApp(
                         } else {
                             track
                         }
+                        studioTestDriveDraft = null
                         viewModel.saveCustomTrack(
                             track = stamped,
                             applyToLobby = apply && !isOnlineSession,
@@ -1118,10 +1127,14 @@ fun MicroRCApp(
                         }
                     },
                     onDeleteTrack = { trackId ->
+                        if (studioTestDriveDraft?.id == trackId) {
+                            studioTestDriveDraft = null
+                        }
                         viewModel.deleteCustomTrack(trackId)
                         activeOnlineVm?.deleteCustomTrackFromCloud(trackId)
                     },
                     onBack = {
+                        studioTestDriveDraft = null
                         if (showBottomNav) {
                             navController.navigate(Routes.HOME) {
                                 popUpTo(Routes.HOME) { inclusive = false }
@@ -1321,6 +1334,21 @@ fun MicroRCApp(
                     onlinePingMs = if (isOnlineSession) onlinePingMs else null,
                     isOnlineFallback = isOnlineSession && isOnlineFallback,
                     personalBestLapMs = pbLapMs,
+                    isStudioTestDrive = isStudioTestDrive && !isOnlineSession,
+                    onReturnToStudio = if (isStudioTestDrive && !isOnlineSession) {
+                        {
+                            isStudioTestDrive = false
+                            viewModel.leaveSession()
+                            val popped = navController.popBackStack(Routes.TRACK_EDITOR, inclusive = false)
+                            if (!popped) {
+                                navController.navigate(Routes.TRACK_EDITOR) {
+                                    launchSingleTop = true
+                                }
+                            }
+                        }
+                    } else {
+                        null
+                    },
                     onToggleOverviewCamera = viewModel::toggleOverviewCamera,
                     onUpdateControlInput = { throttle, steer ->
                         if (isOnlineSession) {
@@ -1347,6 +1375,7 @@ fun MicroRCApp(
                     onUpdateAudioSettings = viewModel::updateAudioSettings,
                     onRestartRace = { viewModel.restartActiveRace() },
                     onLeaveRace = {
+                        isStudioTestDrive = false
                         if (isOnlineSession) {
                             onlineVm?.leaveRoom()
                             val popped = navController.popBackStack(Routes.ONLINE_HUB, inclusive = false)
@@ -1376,7 +1405,22 @@ fun MicroRCApp(
                     isNewPersonalBest = !isOnlineSession && lastRunWasPersonalBest,
                     lastRunRecordEvaluated = !isOnlineSession && lastRunRecordEvaluated,
                     isDailyChallenge = !isOnlineSession && isDailyChallengeSession,
+                    isStudioTestDrive = isStudioTestDrive && !isOnlineSession,
                     challengeGhost = if (!isOnlineSession) activeChallengeGhost else null,
+                    onReturnToStudio = if (isStudioTestDrive && !isOnlineSession) {
+                        {
+                            isStudioTestDrive = false
+                            viewModel.leaveSession()
+                            val popped = navController.popBackStack(Routes.TRACK_EDITOR, inclusive = false)
+                            if (!popped) {
+                                navController.navigate(Routes.TRACK_EDITOR) {
+                                    launchSingleTop = true
+                                }
+                            }
+                        }
+                    } else {
+                        null
+                    },
                     onTryAgainSameTrack = if (!isOnlineSession && sessionRole == SessionRole.Solo) {
                         { viewModel.restartActiveRace() }
                     } else {
@@ -1405,6 +1449,7 @@ fun MicroRCApp(
                     },
                     onOpenLeaderboards = if (!isOnlineSession) {
                         {
+                            isStudioTestDrive = false
                             val isDriftRun = lastResults?.gameMode == GameMode.DRIFT.name ||
                                 com.example.drift.DriftDailyChallenge.isDailyDriftTrackId(
                                     lastResults?.trackId ?: lobbyState?.activeCustomTrack?.id
@@ -1428,9 +1473,11 @@ fun MicroRCApp(
                         if (isOnlineSession) onlineVm?.launchRematchNow() else viewModel.launchRematchNow()
                     },
                     onReturnToLobby = {
+                        isStudioTestDrive = false
                         if (isOnlineSession) onlineVm?.returnToLobby() else viewModel.returnToLobby()
                     },
                     onExitHome = {
+                        isStudioTestDrive = false
                         if (isOnlineSession) {
                             onlineVm?.leaveRoom()
                             val popped = navController.popBackStack(Routes.ONLINE_HUB, inclusive = false)
