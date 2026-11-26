@@ -107,7 +107,11 @@ class RacePhysicsEngine(
         var electroImmunityMs: Long = 0L,
         var laserBeamMs: Long = 0L,
         var stalledMs: Long = 0L,
-        var isBraking: Boolean = false
+        var isBraking: Boolean = false,
+        var puddleSkidMs: Long = 0L,
+        var puddleSkidTotalMs: Long = 0L,
+        var puddleSkidDir: Float = 1f,
+        var puddleSkidCooldownMs: Long = 0L
     )
 
     private data class MutableRocket(
@@ -211,10 +215,12 @@ class RacePhysicsEngine(
     private var arenaSuddenDeathStage: Int = 0
     private var suddenDeathWarningShown: Boolean = false
 
-    // Random external weather/quake event state
+    // Random external weather/quake event state (owned by track, overridable by multiplayer host)
+    private val effectiveRandomConditionsEnabled: Boolean =
+        !isStuntMode && rules.effectiveRandomConditions(track)
     private var activeEvent: ExternalEventType = ExternalEventType.NONE
     private var eventRemainingMs: Long = 0L
-    private var nextEventCooldownMs: Long = if (rules.randomConditionsEnabled) {
+    private var nextEventCooldownMs: Long = if (effectiveRandomConditionsEnabled) {
         random.nextLong(6000L, 9500L)
     } else {
         Long.MAX_VALUE
@@ -471,6 +477,14 @@ class RacePhysicsEngine(
         flagTransferCooldownMs = 0L
     }
 
+    fun setRainPuddlesForTest(puddles: List<TrackPuddle>, durationMs: Long = 9000L) {
+        activeEvent = ExternalEventType.RAIN
+        lastEventType = ExternalEventType.RAIN
+        eventRemainingMs = durationMs.coerceAtLeast(1000L)
+        rainPuddles.clear()
+        rainPuddles.addAll(puddles)
+    }
+
     fun givePowerUpForTest(playerId: String, powerUp: PowerUpType, triggerImmediately: Boolean = false) {
         val racer = racers.find { it.playerId == playerId } ?: return
         racer.heldPowerUp = powerUp
@@ -553,7 +567,7 @@ class RacePhysicsEngine(
                 val msg = if (isArenaMode) {
                     "RAINFALL! Puddles spin cars & drop the flag!"
                 } else {
-                    "RAINFALL! Puddles slow & pull steering!"
+                    "RAINFALL! Puddles cause hydroplane skids & spins!"
                 }
                 setBanner(msg, 2600L)
             }
@@ -582,7 +596,7 @@ class RacePhysicsEngine(
         eventRemainingMs = 0L
         windStrength = 0f
         rainPuddles.clear()
-        nextEventCooldownMs = if (rules.randomConditionsEnabled) {
+        nextEventCooldownMs = if (effectiveRandomConditionsEnabled) {
             random.nextLong(8500L, 14000L)
         } else {
             Long.MAX_VALUE
@@ -649,7 +663,7 @@ class RacePhysicsEngine(
     }
 
     private fun updateExternalEvents(dtMs: Long, dt: Float) {
-        if (!rules.randomConditionsEnabled || phase != RacePhase.RACING) return
+        if (!effectiveRandomConditionsEnabled || phase != RacePhase.RACING) return
 
         if (activeEvent != ExternalEventType.NONE) {
             eventRemainingMs = (eventRemainingMs - dtMs).coerceAtLeast(0L)
@@ -1190,9 +1204,21 @@ class RacePhysicsEngine(
     private fun tickTimers(racer: MutableRacer, dtMs: Long, dt: Float) {
         if (racer.boostMs > 0L) racer.boostMs = (racer.boostMs - dtMs).coerceAtLeast(0L)
         if (racer.shieldMs > 0L) racer.shieldMs = (racer.shieldMs - dtMs).coerceAtLeast(0L)
+        if (racer.puddleSkidCooldownMs > 0L) {
+            racer.puddleSkidCooldownMs = (racer.puddleSkidCooldownMs - dtMs).coerceAtLeast(0L)
+        }
+        if (racer.puddleSkidMs > 0L) {
+            racer.puddleSkidMs = (racer.puddleSkidMs - dtMs).coerceAtLeast(0L)
+        }
         if (racer.stunnedMs > 0L) {
             racer.stunnedMs = (racer.stunnedMs - dtMs).coerceAtLeast(0L)
+            racer.puddleSkidMs = 0L
             racer.spinVisualOffset = (racer.spinVisualOffset + dt * 14f) % (2f * PI.toFloat())
+        } else if (racer.puddleSkidMs > 0L && racer.puddleSkidTotalMs > 0L) {
+            // Smooth ease-out 360-degree hydroplane spin while the car glides forward on momentum
+            val progress = 1f - (racer.puddleSkidMs.toFloat() / racer.puddleSkidTotalMs.toFloat()).coerceIn(0f, 1f)
+            val eased = 1f - (1f - progress) * (1f - progress)
+            racer.spinVisualOffset = eased * (2f * PI.toFloat()) * racer.puddleSkidDir
         } else {
             racer.spinVisualOffset = 0f
         }
@@ -1202,6 +1228,7 @@ class RacePhysicsEngine(
         }
         if (racer.electroParalyzedMs > 0L) {
             racer.electroParalyzedMs = (racer.electroParalyzedMs - dtMs).coerceAtLeast(0L)
+            racer.puddleSkidMs = 0L
             racer.vx = 0f
             racer.vy = 0f
         }
@@ -1564,25 +1591,73 @@ class RacePhysicsEngine(
         val hasBoost = racer.boostMs > 0L
         val hasOverdrive = racer.overdriveMs > 0L
 
-        val inRainPuddle = !isAirborne && activeEvent == ExternalEventType.RAIN && rainPuddles.any {
-            TrackCatalog.distance(racer.x, racer.y, it.x, it.y) <= it.radius + racer.carType.radiusPx * 0.45f
+        val hitRainPuddle = if (!isAirborne && activeEvent == ExternalEventType.RAIN) {
+            rainPuddles.firstOrNull {
+                TrackCatalog.distance(racer.x, racer.y, it.x, it.y) <= it.radius + racer.carType.radiusPx * 0.45f
+            }
+        } else {
+            null
         }
+        val inRainPuddle = hitRainPuddle != null
 
-        // In Arena mode, hitting a rain puddle spins the car & drops the flag!
-        if (isArenaMode && inRainPuddle && racer.shieldMs == 0L && !hasOverdrive &&
-            racer.stunnedMs == 0L && racer.spinImmunityMs == 0L
+        // Moving hydroplane spin/skid on rain puddles across all modes — retains forward
+        // momentum and slides sideways while spinning, distinct from mine/rocket/shock stun.
+        if (hitRainPuddle != null &&
+            racer.shieldMs == 0L &&
+            !hasOverdrive &&
+            racer.stunnedMs == 0L &&
+            racer.electroParalyzedMs == 0L &&
+            racer.puddleSkidMs == 0L &&
+            racer.puddleSkidCooldownMs == 0L
         ) {
-            racer.stunnedMs = 1050L
-            racer.spinImmunityMs = 2400L
-            racer.vx *= 0.45f
-            racer.vy *= 0.45f
-            racer.collisionSeq += 1
-            if (flagCarrierId == racer.playerId) {
-                dropFlagFrom(racer, "hydroplaned in a puddle")
+            val currentSpeed = hypot(racer.vx, racer.vy)
+            if (currentSpeed >= 80f) {
+                val steerHint = input.steer.coerceIn(-1f, 1f)
+                val skidDir = when {
+                    abs(steerHint) > 0.15f -> if (steerHint >= 0f) 1f else -1f
+                    else -> {
+                        val toPuddleX = hitRainPuddle.x - racer.x
+                        val toPuddleY = hitRainPuddle.y - racer.y
+                        val cross = racer.vx * toPuddleY - racer.vy * toPuddleX
+                        when {
+                            cross > 40f -> -1f
+                            cross < -40f -> 1f
+                            else -> if (random.nextBoolean()) 1f else -1f
+                        }
+                    }
+                }
+                val speedRatio = ((currentSpeed - 80f) / 260f).coerceIn(0f, 1f)
+                val skidDurationMs = 700L + (220f * speedRatio).toLong()
+                racer.puddleSkidDir = skidDir
+                racer.puddleSkidTotalMs = skidDurationMs
+                racer.puddleSkidMs = skidDurationMs
+                racer.puddleSkidCooldownMs = skidDurationMs + 950L
+                racer.collisionSeq += 1
+
+                // Keep forward momentum (~88%) while kicking the rear out sideways into a moving skid
+                val entryCos = cos(racer.angleRad)
+                val entrySin = sin(racer.angleRad)
+                val entryRightX = -entrySin
+                val entryRightY = entryCos
+                val entryFwd = (racer.vx * entryCos + racer.vy * entrySin) * 0.88f
+                val lateralKick = skidDir * (currentSpeed * 0.44f).coerceIn(105f, 225f)
+                val entryLat = (racer.vx * entryRightX + racer.vy * entryRightY) + lateralKick
+                racer.vx = entryCos * entryFwd + entryRightX * entryLat
+                racer.vy = entrySin * entryFwd + entryRightY * entryLat
+
+                if (isArenaMode && flagCarrierId == racer.playerId) {
+                    dropFlagFrom(racer, "hydroplaned in a puddle")
+                }
             }
         }
 
         val isStunned = racer.stunnedMs > 0L
+        val isHydroplaning = racer.puddleSkidMs > 0L && !isStunned && !isAirborne && !hasOverdrive
+        val hydroplaneIntensity = if (isHydroplaning && racer.puddleSkidTotalMs > 0L) {
+            (racer.puddleSkidMs.toFloat() / racer.puddleSkidTotalMs.toFloat()).coerceIn(0f, 1f)
+        } else {
+            0f
+        }
 
         val offRoadFactor = if (isOffRoad && !hasOverdrive && !hasBoost) {
             val blended = racer.carType.offRoadRetention * (0.65f + 0.35f * track.id.offRoadDragMultiplier)
@@ -1592,7 +1667,8 @@ class RacePhysicsEngine(
         }
 
         val weatherSpeedMult = when {
-            inRainPuddle && !hasOverdrive -> 0.76f
+            isHydroplaning -> 0.86f
+            inRainPuddle && !hasOverdrive -> 0.84f
             activeEvent == ExternalEventType.RAIN -> 0.93f
             activeEvent == ExternalEventType.SNOW -> 0.89f
             else -> 1.0f
@@ -1633,12 +1709,20 @@ class RacePhysicsEngine(
         } else {
             inputSteer
         }
-        val puddleSteerJitter = if (inRainPuddle && !hasOverdrive) {
-            sin((elapsedMs / 110f) + closestIdx.toFloat()) * 0.55f
+        val steer = if (isHydroplaning) {
+            // Player keeps partial counter-steer authority while hydroplane yaw pulls the car off-line
+            val counterSteerAuthority = 0.48f + 0.52f * (1f - hydroplaneIntensity)
+            val hydroYawPull = racer.puddleSkidDir * 0.62f * hydroplaneIntensity +
+                sin((elapsedMs / 95f) + closestIdx.toFloat()) * 0.18f * hydroplaneIntensity
+            (effectiveSteer * counterSteerAuthority + hydroYawPull).coerceIn(-1.2f, 1.2f)
         } else {
-            0f
+            val puddleSteerJitter = if (inRainPuddle && !hasOverdrive) {
+                sin((elapsedMs / 110f) + closestIdx.toFloat()) * 0.45f
+            } else {
+                0f
+            }
+            (effectiveSteer + puddleSteerJitter).coerceIn(-1.15f, 1.15f)
         }
-        val steer = (effectiveSteer + puddleSteerJitter).coerceIn(-1.15f, 1.15f)
         racer.steerVisual = effectiveSteer
 
         if (!isAirborne) {
@@ -1648,7 +1732,11 @@ class RacePhysicsEngine(
                 val brakeMult = if (forwardVel > 0f) 1.85f else 1.45f
                 forwardVel += throttle * accel * brakeMult * dt
             } else {
-                val drag = if (activeEvent == ExternalEventType.SNOW) 1.15f else 2.25f
+                val drag = when {
+                    isHydroplaning -> 0.85f
+                    activeEvent == ExternalEventType.SNOW -> 1.15f
+                    else -> 2.25f
+                }
                 forwardVel *= max(0f, 1f - drag * dt)
             }
 
@@ -1671,9 +1759,11 @@ class RacePhysicsEngine(
         val reverseFlip = if (forwardVel < -25f) -1f else 1f
         val gripTurnBoost = if (hasOverdrive) 1.18f else 1.0f
         val airSteerFactor = if (isAirborne) 0.25f else 1.0f
+        val hydroGripMult = 0.14f + 0.42f * (1f - hydroplaneIntensity)
 
         if (isDriftMode && !isAirborne) {
             val weatherGripMult = when {
+                isHydroplaning -> hydroGripMult
                 inRainPuddle && !hasOverdrive -> 0.45f
                 activeEvent == ExternalEventType.SNOW -> 0.40f
                 activeEvent == ExternalEventType.RAIN -> 0.72f
@@ -1701,12 +1791,27 @@ class RacePhysicsEngine(
             racer.vx = driftStep.vx
             racer.vy = driftStep.vy
         } else {
+            val preWorldVx = cosA * forwardVel + rightX * lateralVel
+            val preWorldVy = sinA * forwardVel + rightY * lateralVel
+
             racer.angleRad = normalizeAngle(
                 racer.angleRad + steer * racer.carType.turnRateRad * gripTurnBoost * airSteerFactor * speedNorm * reverseFlip * dt
             )
 
+            val nCos = cos(racer.angleRad)
+            val nSin = sin(racer.angleRad)
+            val nRightX = -nSin
+            val nRightY = nCos
+
+            if (isHydroplaning) {
+                // Preserve world momentum vector while rotating chassis so the car truly skids sideways
+                forwardVel = preWorldVx * nCos + preWorldVy * nSin
+                lateralVel = preWorldVx * nRightX + preWorldVy * nRightY
+            }
+
             if (!isAirborne) {
                 val weatherGripMult = when {
+                    isHydroplaning -> hydroGripMult
                     inRainPuddle && !hasOverdrive -> 0.45f
                     activeEvent == ExternalEventType.SNOW -> 0.40f
                     activeEvent == ExternalEventType.RAIN -> 0.72f
@@ -1720,11 +1825,6 @@ class RacePhysicsEngine(
                     (if (isOffRoad) 0.85f else 1.0f)
                 lateralVel *= max(0f, 1f - grip * dt)
             }
-
-            val nCos = cos(racer.angleRad)
-            val nSin = sin(racer.angleRad)
-            val nRightX = -nSin
-            val nRightY = nCos
 
             racer.vx = nCos * forwardVel + nRightX * lateralVel
             racer.vy = nSin * forwardVel + nRightY * lateralVel

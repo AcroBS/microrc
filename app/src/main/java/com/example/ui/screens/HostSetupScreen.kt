@@ -192,8 +192,7 @@ fun HostSetupScreen(
                                                 draft = if (mode == GameMode.DRIFT) {
                                                     draft.copy(
                                                         gameMode = mode.name,
-                                                        winCondition = WinCondition.FIRST_TO_FINISH.name,
-                                                        randomJumpsEnabled = false
+                                                        winCondition = WinCondition.FIRST_TO_FINISH.name
                                                     )
                                                 } else {
                                                     draft.copy(gameMode = mode.name)
@@ -709,25 +708,68 @@ fun HostSetupScreen(
                     }
                 }
 
-                // Ride Conditions & Core Rules
-                SetupSwitchCard(
-                    icon = Icons.Default.Thunderstorm,
-                    title = "Random Ride Conditions",
-                    description = "Temporary weather & quakes appear: rain puddles, screen-shaking tremors, leaf-blowing crosswinds & icy snow skids.",
-                    checked = draft.randomConditionsEnabled,
-                    testTag = "setup_random_conditions_switch",
-                    onCheckedChange = { draft = draft.copy(randomConditionsEnabled = it) }
-                )
-
-                if (selectedMode != GameMode.DRIFT && selectedMode != GameMode.STUNTS) {
-                    SetupSwitchCard(
-                        icon = Icons.Default.FlightTakeoff,
-                        title = "Random Jumps",
-                        description = "Spawn launch ramps on the circuit or arena floor for mid-air action.",
-                        checked = draft.randomJumpsEnabled,
-                        testTag = "setup_random_jumps_switch",
-                        onCheckedChange = { draft = draft.copy(randomJumpsEnabled = it) }
-                    )
+                // Multiplayer Host Ride Conditions Override
+                if (selectedMode != GameMode.STUNTS) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainer,
+                        shape = RoundedCornerShape(16.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("setup_random_conditions_card")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Thunderstorm,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.secondary
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Random Ride Conditions",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = "Follow each track's design or manually force weather & quakes on/off for this lobby.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(
+                                    Triple(null, "Track Default", "setup_conditions_track"),
+                                    Triple(true, "Force On", "setup_conditions_on"),
+                                    Triple(false, "Force Off", "setup_conditions_off")
+                                ).forEach { (overrideVal, label, tag) ->
+                                    FilterChip(
+                                        selected = draft.hostRandomConditionsOverride == overrideVal,
+                                        onClick = {
+                                            draft = draft.copy(
+                                                hostRandomConditionsOverride = overrideVal,
+                                                randomConditionsEnabled = overrideVal ?: true
+                                            )
+                                        },
+                                        label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .testTag(tag)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
                 SetupSwitchCard(
@@ -756,8 +798,7 @@ fun HostSetupScreen(
                         onClick = {
                             val finalRules = if (selectedMode == GameMode.DRIFT) {
                                 draft.copy(
-                                    winCondition = WinCondition.FIRST_TO_FINISH.name,
-                                    randomJumpsEnabled = false
+                                    winCondition = WinCondition.FIRST_TO_FINISH.name
                                 )
                             } else {
                                 draft

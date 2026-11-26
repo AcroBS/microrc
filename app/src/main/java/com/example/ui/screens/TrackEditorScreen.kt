@@ -42,6 +42,7 @@ import androidx.compose.material.icons.filled.FlightTakeoff
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RemoveCircleOutline
+import androidx.compose.material.icons.filled.Thunderstorm
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -575,7 +576,8 @@ fun TrackEditorScreen(
                             draft = TrackCatalog.defaultEditorOval(selectedTheme).copy(
                                 id = draft.id,
                                 name = draft.name,
-                                isNightTrack = draft.isNightTrack
+                                isNightTrack = draft.isNightTrack,
+                                randomConditionsEnabled = draft.randomConditionsEnabled
                             )
                             selectedNodeIdx = 0
                         },
@@ -679,6 +681,50 @@ fun TrackEditorScreen(
                     }
                 }
 
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = RoundedCornerShape(16.dp),
+                    border = BorderStroke(
+                        width = 1.dp,
+                        color = if (draft.randomConditionsEnabled) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outlineVariant
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Thunderstorm,
+                            contentDescription = "Random ride conditions",
+                            tint = if (draft.randomConditionsEnabled) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Random ride conditions",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "Rain puddles, tremors, crosswinds, snow & nightfall",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = draft.randomConditionsEnabled,
+                            onCheckedChange = { checked ->
+                                draft = draft.copy(randomConditionsEnabled = checked)
+                                savedBannerName = null
+                            },
+                            modifier = Modifier.testTag("editor_random_conditions_switch")
+                        )
+                    }
+                }
+
                 Text(
                     text = "Saved circuits sync automatically when signed in so friends can challenge your times & race live with you.",
                     style = MaterialTheme.typography.bodySmall,
@@ -720,21 +766,41 @@ fun TrackEditorScreen(
                                         Canvas(modifier = Modifier.fillMaxSize()) {
                                             drawTrackMiniMap(preview)
                                         }
-                                        if (saved.isNightTrack) {
-                                            Surface(
-                                                color = Color(0xFF0D1B2A).copy(alpha = 0.9f),
-                                                shape = RoundedCornerShape(6.dp),
-                                                border = BorderStroke(1.dp, Color(0xFF90CAF9).copy(alpha = 0.7f)),
+                                        if (saved.isNightTrack || saved.randomConditionsEnabled) {
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(3.dp),
                                                 modifier = Modifier
                                                     .align(Alignment.TopStart)
                                                     .padding(4.dp)
                                             ) {
-                                                Text(
-                                                    text = "NIGHT",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = Color(0xFF90CAF9),
-                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                                                )
+                                                if (saved.isNightTrack) {
+                                                    Surface(
+                                                        color = Color(0xFF0D1B2A).copy(alpha = 0.9f),
+                                                        shape = RoundedCornerShape(6.dp),
+                                                        border = BorderStroke(1.dp, Color(0xFF90CAF9).copy(alpha = 0.7f))
+                                                    ) {
+                                                        Text(
+                                                            text = "NIGHT",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = Color(0xFF90CAF9),
+                                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                                        )
+                                                    }
+                                                }
+                                                if (saved.randomConditionsEnabled) {
+                                                    Surface(
+                                                        color = Color(0xFF0B2538).copy(alpha = 0.9f),
+                                                        shape = RoundedCornerShape(6.dp),
+                                                        border = BorderStroke(1.dp, Color(0xFF4FC3F7).copy(alpha = 0.7f))
+                                                    ) {
+                                                        Text(
+                                                            text = "WEATHER",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = Color(0xFF81D4FA),
+                                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                                        )
+                                                    }
+                                                }
                                             }
                                         }
                                         IconButton(

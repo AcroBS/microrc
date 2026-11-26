@@ -77,21 +77,31 @@ class DailyChallengeAndNotificationsTest {
         )
         assertEquals("RACE_daily_20261120_3L", DailyChallengeCatalog.boardKeyForDate(dateA))
 
-        // Fair rules lock random conditions off while enabling ramps on fixed layout
+        // Fair rules lock speed/laps/boundaries while delegating jumps & ride conditions to the deterministic daily track
         val locked = DailyChallengeCatalog.lockedDailyRules(
             RaceRulesSettings(
                 totalLaps = 1,
                 carSpeed = CarSpeedPreset.LOW.name,
                 hardTrackBoundary = false,
-                randomConditionsEnabled = true,
-                randomJumpsEnabled = false
+                randomConditionsEnabled = false,
+                randomJumpsEnabled = false,
+                hostRandomConditionsOverride = false
             )
         )
         assertEquals(DailyChallengeCatalog.DAILY_LAPS, locked.totalLaps)
         assertEquals(CarSpeedPreset.FAST.name, locked.carSpeed)
         assertTrue(locked.hardTrackBoundary)
         assertTrue(locked.randomJumpsEnabled)
-        assertFalse(locked.randomConditionsEnabled)
+        assertTrue(locked.randomConditionsEnabled)
+        assertNull(locked.hostRandomConditionsOverride)
+
+        // Across UTC dates, Daily Challenge tracks deterministically include jumps and/or random ride conditions
+        val sampleDays = (1..30).map { day ->
+            DailyChallengeCatalog.dailyCustomTrack("202611%02d".format(day))
+        }
+        assertTrue("Daily Challenges should include days with track jumps", sampleDays.any { it.ramps.isNotEmpty() })
+        assertTrue("Daily Challenges should include days with random ride conditions", sampleDays.any { it.randomConditionsEnabled })
+        assertTrue("Daily Challenges should include clear days", sampleDays.any { !it.randomConditionsEnabled })
     }
 
     @Test

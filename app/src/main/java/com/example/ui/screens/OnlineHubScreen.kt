@@ -112,6 +112,9 @@ fun OnlineHubScreen(
     var roomName by remember(profile.name) { mutableStateOf("${profile.name.take(12)}'s Group") }
     var maxPlayers by remember { mutableIntStateOf(4) }
     var selectedMode by remember(initialRules.gameMode) { mutableStateOf(initialRules.gameModeEnum) }
+    var hostConditionsOverride by remember(initialRules.hostRandomConditionsOverride) {
+        mutableStateOf<Boolean?>(initialRules.hostRandomConditionsOverride)
+    }
     var passwordProtected by remember { mutableStateOf(false) }
     var roomPassword by remember { mutableStateOf("") }
     var unlistedCodeOnly by remember { mutableStateOf(false) }
@@ -496,6 +499,35 @@ fun OnlineHubScreen(
                             }
                         }
 
+                        if (selectedMode != GameMode.STUNTS) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = "RANDOM RIDE CONDITIONS (HOST OVERRIDE)",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf(
+                                        Triple(null, "Track Default", "online_conditions_track"),
+                                        Triple(true, "Force On", "online_conditions_on"),
+                                        Triple(false, "Force Off", "online_conditions_off")
+                                    ).forEach { (overrideVal, label, tag) ->
+                                        FilterChip(
+                                            selected = hostConditionsOverride == overrideVal,
+                                            onClick = { hostConditionsOverride = overrideVal },
+                                            label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .testTag(tag)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
                         // Password Protection Toggle
                         Surface(
                             color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -599,7 +631,11 @@ fun OnlineHubScreen(
                                         maxPlayers,
                                         !unlistedCodeOnly,
                                         effectivePw,
-                                        initialRules.copy(gameMode = selectedMode.name)
+                                        initialRules.copy(
+                                            gameMode = selectedMode.name,
+                                            hostRandomConditionsOverride = hostConditionsOverride,
+                                            randomConditionsEnabled = hostConditionsOverride ?: true
+                                        )
                                     )
                                 }
                             },

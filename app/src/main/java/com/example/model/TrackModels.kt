@@ -208,7 +208,8 @@ data class CustomTrackData(
     val props: List<TrackProp> = emptyList(),
     val creatorUid: String = "",
     val creatorName: String = "",
-    val isNightTrack: Boolean = false
+    val isNightTrack: Boolean = false,
+    val randomConditionsEnabled: Boolean = false
 )
 
 data class TrackDefinition(
@@ -228,7 +229,8 @@ data class TrackDefinition(
     val arenaBoundary: List<TrackPoint> = emptyList(),
     val isStunt: Boolean = false,
     val stuntVariant: StuntVariant? = null,
-    val isNightTrack: Boolean = false
+    val isNightTrack: Boolean = false,
+    val randomConditionsEnabled: Boolean = true
 ) {
     val displayTitle: String
         get() = customName ?: stuntVariant?.displayName ?: arenaShape?.displayName ?: id.displayName

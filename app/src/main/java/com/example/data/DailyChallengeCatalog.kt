@@ -90,12 +90,18 @@ object DailyChallengeCatalog {
     fun dailyCustomTrack(dateKey: String = todayDateKey()): CustomTrackData {
         val normalized = normalizeDateKey(dateKey)
         val label = displayDateLabel(normalized)
+        val daySeed = seedForDate(normalized)
+        val featureRng = kotlin.random.Random(daySeed xor 0x5A3C19F1L)
+        val includeJumps = featureRng.nextFloat() < 0.70f
+        val includeConditions = featureRng.nextFloat() < 0.50f
         return TrackCatalog.generateRandomTrack(
-            seed = seedForDate(normalized),
+            seed = daySeed,
             preferredTheme = null,
             roadHalfWidth = 112f,
             trackIdOverride = trackIdForDate(normalized),
-            trackNameOverride = "Daily GP ($label)"
+            trackNameOverride = "Daily GP ($label)",
+            forceRandomConditions = includeConditions,
+            forceIncludeJumps = includeJumps
         ).copy(
             // Daily Challenge has no power-ups along the track; racers get 1 manual Nitro per lap
             itemSpawns = emptyList()
@@ -110,7 +116,8 @@ object DailyChallengeCatalog {
             carSpeed = CarSpeedPreset.FAST.name,
             hardTrackBoundary = true,
             randomJumpsEnabled = true,
-            randomConditionsEnabled = false
+            randomConditionsEnabled = true,
+            hostRandomConditionsOverride = null
         )
     }
 

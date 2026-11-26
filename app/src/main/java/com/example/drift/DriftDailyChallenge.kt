@@ -60,12 +60,18 @@ object DriftDailyChallenge {
     fun dailyDriftCustomTrack(dateKey: String = DailyChallengeCatalog.todayDateKey()): CustomTrackData {
         val normalized = DailyChallengeCatalog.normalizeDateKey(dateKey)
         val label = displayDateLabel(normalized)
+        val daySeed = seedForDate(normalized)
+        val featureRng = kotlin.random.Random(daySeed xor 0x3D2E9B71L)
+        val includeJumps = featureRng.nextFloat() < 0.45f
+        val includeConditions = featureRng.nextFloat() < 0.50f
         return DriftTrackCatalog.generateRandomDriftTrack(
-            seed = seedForDate(normalized),
+            seed = daySeed,
             preferredTheme = null,
             roadHalfWidth = 122f,
             trackIdOverride = trackIdForDate(normalized),
-            trackNameOverride = "Daily Drift ($label)"
+            trackNameOverride = "Daily Drift ($label)",
+            forceRandomConditions = includeConditions,
+            includeJumps = includeJumps
         )
     }
 
@@ -76,8 +82,9 @@ object DriftDailyChallenge {
             totalLaps = DAILY_DRIFT_LAPS,
             carSpeed = CarSpeedPreset.FAST.name,
             hardTrackBoundary = true,
-            randomJumpsEnabled = false,
-            randomConditionsEnabled = false
+            randomJumpsEnabled = true,
+            randomConditionsEnabled = true,
+            hostRandomConditionsOverride = null
         )
     }
 }

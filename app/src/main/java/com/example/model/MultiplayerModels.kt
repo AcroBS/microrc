@@ -231,6 +231,7 @@ data class RaceRulesSettings(
     val hardTrackBoundary: Boolean = true,
     val randomJumpsEnabled: Boolean = true,
     val randomConditionsEnabled: Boolean = true,
+    val hostRandomConditionsOverride: Boolean? = null,
     val showPlayerNames: Boolean = true,
     val winCondition: String = WinCondition.FIRST_TO_FINISH.name,
     val totalLaps: Int = 3,
@@ -251,6 +252,11 @@ data class RaceRulesSettings(
 
     val carSpeedEnum: CarSpeedPreset
         get() = runCatching { CarSpeedPreset.valueOf(carSpeed) }.getOrDefault(CarSpeedPreset.FAST)
+
+    fun effectiveRandomConditions(track: TrackDefinition): Boolean {
+        if (track.isStunt) return false
+        return hostRandomConditionsOverride ?: (randomConditionsEnabled && track.randomConditionsEnabled)
+    }
 
     fun enabledHybridModes(): List<GameMode> {
         val list = buildList {

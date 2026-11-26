@@ -896,6 +896,58 @@ fun DrawScope.drawTrackWorld(
                 )
             }
         }
+        if (r.jumpZ <= 0.05f && r.stunnedMs == 0L && kotlin.math.abs(r.spinVisualOffset) > 0.04f) {
+            val speedMag = kotlin.math.hypot(r.vx.toDouble(), r.vy.toDouble()).toFloat()
+            if (speedMag > 45f) {
+                val velDeg = kotlin.math.atan2(r.vy, r.vx) * 180f / PI.toFloat()
+                val wakeLen = (32f + speedMag * 0.075f).coerceIn(32f, 64f)
+                withTransform({
+                    translate(r.x, r.y)
+                    rotate(velDeg, Offset.Zero)
+                }) {
+                    // Velocity-aligned hydroplane water wake & rooster-tail spray
+                    drawLine(
+                        color = Color(0xFF81D4FA).copy(alpha = 0.62f),
+                        start = Offset(-8f, -12f),
+                        end = Offset(-wakeLen, -20f),
+                        strokeWidth = 5.5f,
+                        cap = StrokeCap.Round
+                    )
+                    drawLine(
+                        color = Color(0xFF81D4FA).copy(alpha = 0.62f),
+                        start = Offset(-8f, 12f),
+                        end = Offset(-wakeLen, 20f),
+                        strokeWidth = 5.5f,
+                        cap = StrokeCap.Round
+                    )
+                    drawLine(
+                        color = Color(0xFFE1F5FE).copy(alpha = 0.72f),
+                        start = Offset(-10f, -9f),
+                        end = Offset(-wakeLen * 0.72f, -15f),
+                        strokeWidth = 2.6f,
+                        cap = StrokeCap.Round
+                    )
+                    drawLine(
+                        color = Color(0xFFE1F5FE).copy(alpha = 0.72f),
+                        start = Offset(-10f, 9f),
+                        end = Offset(-wakeLen * 0.72f, 15f),
+                        strokeWidth = 2.6f,
+                        cap = StrokeCap.Round
+                    )
+                    val sprayPulse = 4.2f + 2.4f * sin(animTimeSec * 30f + r.x * 0.07f)
+                    drawCircle(
+                        color = Color(0xFFB3E5FC).copy(alpha = 0.52f),
+                        radius = sprayPulse,
+                        center = Offset(-wakeLen * 0.58f, -18f)
+                    )
+                    drawCircle(
+                        color = Color(0xFFB3E5FC).copy(alpha = 0.52f),
+                        radius = sprayPulse,
+                        center = Offset(-wakeLen * 0.58f, 18f)
+                    )
+                }
+            }
+        }
         val carType = runCatching { RcCarType.valueOf(r.carType) }.getOrDefault(RcCarType.VOLT_BUGGY)
         drawRcCar(
             x = r.x,

@@ -520,8 +520,7 @@ class OnlineRaceSessionManager(
                 nextPlannedHybridMode = null
                 currentRules = rules.copy(
                     gameMode = GameMode.DRIFT.name,
-                    winCondition = WinCondition.FIRST_TO_FINISH.name,
-                    randomJumpsEnabled = false
+                    winCondition = WinCondition.FIRST_TO_FINISH.name
                 )
                 val driftTrack = initialCustomTrack?.takeIf { com.example.drift.DriftFeature.isDriftTrackKey(it.id) }
                     ?: com.example.drift.DriftTrackCatalog.defaultDriftCustomTracks().firstOrNull()
@@ -682,8 +681,7 @@ class OnlineRaceSessionManager(
         }
         val normalizedRules = if (concreteMode == GameMode.DRIFT) {
             initialRules.copy(
-                winCondition = WinCondition.FIRST_TO_FINISH.name,
-                randomJumpsEnabled = false
+                winCondition = WinCondition.FIRST_TO_FINISH.name
             )
         } else {
             initialRules
@@ -1655,13 +1653,7 @@ class OnlineRaceSessionManager(
             customData != null -> TrackCatalog.buildCustomTrack(customData)
             else -> TrackCatalog.getTrack(currentTrackId)
         }
-        val track = when {
-            isStuntMode || isDriftMode -> baseTrack
-            customData == null -> TrackCatalog.withRandomJumps(baseTrack, enabled = currentRules.randomJumpsEnabled)
-            !currentRules.randomJumpsEnabled -> baseTrack.copy(ramps = emptyList())
-            baseTrack.ramps.isEmpty() -> TrackCatalog.withRandomJumps(baseTrack, enabled = true)
-            else -> baseTrack
-        }
+        val track = baseTrack
         _activeTrack.value = track
 
         val effectiveStageRules = currentRules.copy(gameMode = concreteMode.name)

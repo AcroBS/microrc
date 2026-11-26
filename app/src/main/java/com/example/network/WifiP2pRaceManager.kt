@@ -471,8 +471,7 @@ class WifiP2pRaceManager(
                 nextPlannedHybridMode = null
                 currentRules = rules.copy(
                     gameMode = GameMode.DRIFT.name,
-                    winCondition = WinCondition.FIRST_TO_FINISH.name,
-                    randomJumpsEnabled = false
+                    winCondition = WinCondition.FIRST_TO_FINISH.name
                 )
                 val driftTrack = initialCustomTrack?.takeIf { com.example.drift.DriftFeature.isDriftTrackKey(it.id) }
                     ?: com.example.drift.DriftTrackCatalog.defaultDriftCustomTracks().firstOrNull()
@@ -1404,8 +1403,13 @@ class WifiP2pRaceManager(
                 }
             }
             add("Speed: ${rules.carSpeedEnum.displayName}")
-            if (rules.randomJumpsEnabled && rules.gameModeEnum != GameMode.STUNTS && rules.gameModeEnum != GameMode.DRIFT) add("Jumps")
-            if (rules.randomConditionsEnabled && rules.gameModeEnum != GameMode.STUNTS) add("Random Weather")
+            if (rules.gameModeEnum != GameMode.STUNTS) {
+                when (rules.hostRandomConditionsOverride) {
+                    true -> add("Ride Conditions: Force On")
+                    false -> add("Ride Conditions: Off")
+                    null -> add("Ride Conditions: Track Default")
+                }
+            }
             if (rules.showPlayerNames) add("Name Tags")
         }.joinToString(" • ").ifEmpty { "Standard Rules" }
         addSystemChat("Match settings updated: $summary")
@@ -1539,14 +1543,7 @@ class WifiP2pRaceManager(
             else -> TrackCatalog.getTrack(currentTrackId)
         }
         val dailyChallengeRun = _isDailyChallenge.value
-        val track = when {
-            isStuntMode || isDriftMode -> baseTrack
-            dailyChallengeRun -> baseTrack
-            customData == null -> TrackCatalog.withRandomJumps(baseTrack, enabled = currentRules.randomJumpsEnabled)
-            !currentRules.randomJumpsEnabled -> baseTrack.copy(ramps = emptyList())
-            baseTrack.ramps.isEmpty() -> TrackCatalog.withRandomJumps(baseTrack, enabled = true)
-            else -> baseTrack
-        }
+        val track = baseTrack
         _activeTrack.value = track
 
         val effectiveStageRules = currentRules.copy(gameMode = concreteMode.name)

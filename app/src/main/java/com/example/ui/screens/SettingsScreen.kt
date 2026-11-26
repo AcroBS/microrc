@@ -448,28 +448,6 @@ fun SettingsScreen(
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
 
                             GroupedSwitchRow(
-                                icon = Icons.Default.FlightTakeoff,
-                                accent = MaterialTheme.colorScheme.secondary,
-                                title = "Random Track Jumps",
-                                subtitle = "Launch ramps spawned on tracks",
-                                checked = rules.randomJumpsEnabled,
-                                enabled = true,
-                                switchTestTag = "setting_random_jumps_switch",
-                                onCheckedChange = { onUpdateRules(rules.copy(randomJumpsEnabled = it)) }
-                            )
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
-                            GroupedSwitchRow(
-                                icon = Icons.Default.Thunderstorm,
-                                accent = MaterialTheme.colorScheme.secondary,
-                                title = "Random Ride Conditions",
-                                subtitle = "Rain puddles, tremors, wind & snow",
-                                checked = rules.randomConditionsEnabled,
-                                enabled = true,
-                                switchTestTag = "setting_random_conditions_switch",
-                                onCheckedChange = { onUpdateRules(rules.copy(randomConditionsEnabled = it)) }
-                            )
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
-                            GroupedSwitchRow(
                                 icon = Icons.Default.Badge,
                                 accent = MaterialTheme.colorScheme.primary,
                                 title = "Driver Name Tags",
@@ -603,8 +581,7 @@ fun SettingsScreen(
                                                 val updated = if (mode == GameMode.DRIFT) {
                                                     rules.copy(
                                                         gameMode = mode.name,
-                                                        winCondition = WinCondition.FIRST_TO_FINISH.name,
-                                                        randomJumpsEnabled = false
+                                                        winCondition = WinCondition.FIRST_TO_FINISH.name
                                                     )
                                                 } else {
                                                     rules.copy(gameMode = mode.name)
@@ -836,28 +813,6 @@ fun SettingsScreen(
 
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
 
-                            GroupedSwitchRow(
-                                icon = Icons.Default.FlightTakeoff,
-                                accent = MaterialTheme.colorScheme.secondary,
-                                title = "Random Track Jumps",
-                                subtitle = "Launch ramps on tracks",
-                                checked = rules.randomJumpsEnabled,
-                                enabled = canEditRules,
-                                switchTestTag = "setting_random_jumps_switch",
-                                onCheckedChange = { onUpdateRules(rules.copy(randomJumpsEnabled = it)) }
-                            )
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
-                            GroupedSwitchRow(
-                                icon = Icons.Default.Thunderstorm,
-                                accent = MaterialTheme.colorScheme.secondary,
-                                title = "Random Ride Conditions",
-                                subtitle = "Rain, tremors, wind & snow",
-                                checked = rules.randomConditionsEnabled,
-                                enabled = canEditRules,
-                                switchTestTag = "setting_random_conditions_switch",
-                                onCheckedChange = { onUpdateRules(rules.copy(randomConditionsEnabled = it)) }
-                            )
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
                             GroupedSwitchRow(
                                 icon = Icons.Default.Badge,
                                 accent = MaterialTheme.colorScheme.primary,

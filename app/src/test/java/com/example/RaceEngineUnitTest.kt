@@ -26,6 +26,7 @@ import com.example.model.RaceRulesSettings
 import com.example.model.RaceSnapshot
 import com.example.model.RcCarType
 import com.example.model.TrackId
+import com.example.model.TrackPuddle
 import com.example.model.WinCondition
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -2356,6 +2357,193 @@ class RaceEngineUnitTest {
                 )
                 assertEquals(expected, actual, 0.0001f)
             }
+        }
+    }
+
+    @Test
+    fun rainPuddle_triggersMovingHydroplaneSpinAndSkidDistinctFromMineStun() {
+        val track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP).copy(props = emptyList())
+        val players = listOf(
+            LobbyPlayer("p1", "Tester", isHost = true, isBot = false, carType = RcCarType.VOLT_BUGGY.name)
+        )
+        val rules = RaceRulesSettings(
+            gameMode = GameMode.RACE.name,
+            autoAccelerate = false,
+            hardTrackBoundary = false,
+            randomConditionsEnabled = false
+        )
+        val engine = RacePhysicsEngine(track, totalLaps = 3, players = players, rules = rules, random = Random(123L))
+        repeat(70) { engine.step(0.05f) } // Finish countdown
+
+        // Accelerate straight up to cruising speed
+        var snap = engine.step(0.02f)
+        repeat(35) {
+            engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+            snap = engine.step(0.02f)
+        }
+        val preHit = snap.racers.first()
+        val preSpeed = kotlin.math.hypot(preHit.vx.toDouble(), preHit.vy.toDouble()).toFloat()
+        assertTrue("Car should be cruising before puddle ($preSpeed)", preSpeed > 220f)
+
+        // Place a rain puddle slightly to the left of heading so skid curves into open interior
+        val dirX = kotlin.math.cos(preHit.angleRad)
+        val dirY = kotlin.math.sin(preHit.angleRad)
+        val rightX = -dirY
+        val rightY = dirX
+        engine.setRainPuddlesForTest(
+            listOf(
+                TrackPuddle(
+                    x = preHit.x + dirX * 55f - rightX * 10f,
+                    y = preHit.y + dirY * 55f - rightY * 10f,
+                    radius = 48f
+                )
+            ),
+            durationMs = 10_000L
+        )
+
+        var sawSpinVisual = false
+        var everStunned = false
+        var everParalyzed = false
+        var minSpeedDuringSpin = Float.MAX_VALUE
+        var maxLateralSpeedDuringSpin = 0f
+        var maxYawDelta = 0f
+        var startSpinX = 0f
+        var startSpinY = 0f
+        var endSpinX = 0f
+        var endSpinY = 0f
+        var spinFrames = 0
+
+        repeat(90) { // 1.8s total — covers entering, full hydroplane spin/skid, and clean recovery
+            engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+            snap = engine.step(0.02f)
+            val r = snap.racers.first()
+            if (r.stunnedMs > 0L) everStunned = true
+            if (r.electroParalyzedMs > 0L) everParalyzed = true
+            if (kotlin.math.abs(r.spinVisualOffset) > 0.05f) {
+                if (!sawSpinVisual) {
+                    startSpinX = r.x
+                    startSpinY = r.y
+                }
+                sawSpinVisual = true
+                spinFrames++
+                endSpinX = r.x
+                endSpinY = r.y
+                val spd = kotlin.math.hypot(r.vx.toDouble(), r.vy.toDouble()).toFloat()
+                if (spd < minSpeedDuringSpin) minSpeedDuringSpin = spd
+                val rCos = kotlin.math.cos(r.angleRad)
+                val rSin = kotlin.math.sin(r.angleRad)
+                val latSpd = kotlin.math.abs(r.vx * (-rSin) + r.vy * rCos)
+                if (latSpd > maxLateralSpeedDuringSpin) maxLateralSpeedDuringSpin = latSpd
+                val yawDiff = kotlin.math.abs(RacePhysicsEngine.normalizeAngle(r.angleRad - preHit.angleRad))
+                if (yawDiff > maxYawDelta) maxYawDelta = yawDiff
+            }
+        }
+
+        val recovered = snap.racers.first()
+        val distanceTraveledWhileSpinning = TrackCatalog.distance(startSpinX, startSpinY, endSpinX, endSpinY)
+
+        assertTrue("Driving through a rain puddle at speed must trigger moving spinVisualOffset", sawSpinVisual)
+        assertTrue("Hydroplane spin should last multiple frames ($spinFrames)", spinFrames >= 25)
+        assertFalse("Rain puddle hydroplane must NOT set mine/rocket stunnedMs", everStunned)
+        assertFalse("Rain puddle hydroplane must NOT set electroParalyzedMs", everParalyzed)
+        assertTrue(
+            "Car must keep moving rapidly during hydroplane spin (minSpeed=$minSpeedDuringSpin)",
+            minSpeedDuringSpin > 160f
+        )
+        assertTrue(
+            "Car must cover significant ground while hydroplane-spinning ($distanceTraveledWhileSpinning px)",
+            distanceTraveledWhileSpinning > 120f
+        )
+        assertTrue(
+            "Rain puddle must impart noticeable lateral skid velocity ($maxLateralSpeedDuringSpin px/s)",
+            maxLateralSpeedDuringSpin > 80f
+        )
+        assertTrue(
+            "Rain puddle skid must visibly pull car heading off-line ($maxYawDelta rad)",
+            maxYawDelta > 0.15f
+        )
+        assertEquals(
+            "spinVisualOffset should recover cleanly back to 0 after hydroplane ends",
+            0f,
+            recovered.spinVisualOffset,
+            0.001f
+        )
+    }
+
+    @Test
+    fun rainPuddle_doesNotSpinStationaryOrShieldedCar_andDropsFlagInArenaWithoutStun() {
+        val baseArena = TrackCatalog.getArenaTrack(ArenaShape.CIRCLE)
+            .copy(ramps = emptyList(), props = emptyList(), itemSpawns = emptyList())
+        val players = listOf(
+            LobbyPlayer("p1", "HydroDriver", isHost = true, isBot = false, carType = RcCarType.VOLT_BUGGY.name)
+        )
+        val rules = RaceRulesSettings(
+            gameMode = GameMode.ARENA.name,
+            arenaTargetMinutes = 1,
+            autoAccelerate = false,
+            hardTrackBoundary = true,
+            randomConditionsEnabled = false
+        )
+        val engine = RacePhysicsEngine(baseArena, totalLaps = 3, players = players, rules = rules, random = Random(77L))
+        repeat(70) { engine.step(0.05f) }
+
+        // 1. Stationary car sitting directly inside a rain puddle must NOT spin
+        var snap = engine.step(0.02f)
+        val startCar = snap.racers.first()
+        engine.setRainPuddlesForTest(listOf(TrackPuddle(startCar.x, startCar.y, radius = 50f)))
+        repeat(15) {
+            engine.submitInput("p1", ControlInput(throttle = 0f, steer = 0f))
+            snap = engine.step(0.02f)
+            assertEquals(
+                "Stationary car in rain puddle should not trigger moving hydroplane spin",
+                0f,
+                snap.racers.first().spinVisualOffset,
+                0.001f
+            )
+        }
+
+        // 2. Moving car in Arena carrying the flag hydroplanes into puddle ahead -> spins & drops flag, NO stun lock
+        engine.setFlagStateForTest(startCar.x, startCar.y, carrierId = "p1")
+        val dirX = kotlin.math.cos(startCar.angleRad)
+        val dirY = kotlin.math.sin(startCar.angleRad)
+        engine.setRainPuddlesForTest(
+            listOf(TrackPuddle(startCar.x + dirX * 150f, startCar.y + dirY * 150f, radius = 52f))
+        )
+        var sawHydroplane = false
+        var droppedFlag = false
+        var everStunned = false
+        repeat(60) {
+            engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+            snap = engine.step(0.02f)
+            val r = snap.racers.first()
+            if (kotlin.math.abs(r.spinVisualOffset) > 0.05f) sawHydroplane = true
+            if (snap.arenaFlag?.carrierId == null) droppedFlag = true
+            if (r.stunnedMs > 0L) everStunned = true
+        }
+        assertTrue("Arena car moving into rain puddle must hydroplane spin", sawHydroplane)
+        assertTrue("Arena car hydroplaning in rain puddle must drop the flag", droppedFlag)
+        assertFalse("Arena rain puddle hydroplane must stay distinct from mine stun", everStunned)
+
+        // 3. Shielded car driving through rain puddle is protected from hydroplane spin
+        val shieldEngine = RacePhysicsEngine(baseArena, totalLaps = 3, players = players, rules = rules, random = Random(88L))
+        repeat(70) { shieldEngine.step(0.05f) }
+        shieldEngine.givePowerUpForTest("p1", PowerUpType.SHIELD, triggerImmediately = true)
+        var shieldSnap = shieldEngine.step(0.02f)
+        val sc = shieldSnap.racers.first()
+        val sDirX = kotlin.math.cos(sc.angleRad)
+        val sDirY = kotlin.math.sin(sc.angleRad)
+        shieldEngine.setRainPuddlesForTest(
+            listOf(TrackPuddle(sc.x + sDirX * 130f, sc.y + sDirY * 130f, radius = 52f))
+        )
+        repeat(50) {
+            shieldEngine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+            shieldSnap = shieldEngine.step(0.02f)
+            assertEquals(
+                "Shielded car must not hydroplane in rain puddle",
+                0f,
+                shieldSnap.racers.first().spinVisualOffset,
+                0.001f
+            )
         }
     }
 }

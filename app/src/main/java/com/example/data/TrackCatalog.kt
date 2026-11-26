@@ -335,7 +335,8 @@ object TrackCatalog {
             ramps = ramps,
             customId = data.id,
             customName = data.name,
-            isNightTrack = data.isNightTrack
+            isNightTrack = data.isNightTrack,
+            randomConditionsEnabled = data.randomConditionsEnabled
         )
     }
 
@@ -353,7 +354,8 @@ object TrackCatalog {
             itemSpawns = track.itemSpawns,
             ramps = track.ramps,
             props = track.props,
-            isNightTrack = track.isNightTrack
+            isNightTrack = track.isNightTrack,
+            randomConditionsEnabled = track.randomConditionsEnabled
         )
     }
 
@@ -443,10 +445,14 @@ object TrackCatalog {
         roadHalfWidth: Float = 112f,
         trackIdOverride: String? = null,
         trackNameOverride: String? = null,
-        forceNight: Boolean? = null
+        forceNight: Boolean? = null,
+        forceRandomConditions: Boolean? = null,
+        forceIncludeJumps: Boolean? = null
     ): CustomTrackData {
         val rng = kotlin.random.Random(seed)
         val isNightTrack = forceNight ?: (rng.nextFloat() < 0.35f)
+        val randomConditionsEnabled = forceRandomConditions ?: (rng.nextFloat() < 0.50f)
+        val includeJumps = forceIncludeJumps ?: true
         val theme = preferredTheme ?: TrackId.entries[rng.nextInt(TrackId.entries.size)]
         val dayAdjectives = listOf("Hyper", "Turbo", "Apex", "Drift", "Nitro", "Volt", "Micro", "Ridge")
         val nightAdjectives = listOf("Midnight", "Nocturne", "Shadow", "Eclipse", "Starlight", "Moonlit")
@@ -487,8 +493,12 @@ object TrackCatalog {
             itemAt(spline, (n * frac).toInt(), id, lateralFrac = rng.nextFloat() * 1.44f - 0.72f)
         }
         val rampFracs = listOf(0.34f, 0.66f, 0.80f).take(rng.nextInt(2, 4))
-        val ramps = rampFracs.map { frac ->
-            rampAt(spline, (n * frac).toInt(), impulse = 1.0f + rng.nextFloat() * 0.15f)
+        val ramps = if (includeJumps) {
+            rampFracs.map { frac ->
+                rampAt(spline, (n * frac).toInt(), impulse = 1.0f + rng.nextFloat() * 0.15f)
+            }
+        } else {
+            emptyList()
         }
 
         // Place safe decorative props away from the track centerline
@@ -532,7 +542,8 @@ object TrackCatalog {
             itemSpawns = items,
             ramps = ramps,
             props = props,
-            isNightTrack = isNightTrack
+            isNightTrack = isNightTrack,
+            randomConditionsEnabled = randomConditionsEnabled
         )
     }
 
@@ -1213,7 +1224,8 @@ object TrackCatalog {
             defaultLaps = 4,
             customName = variant.displayName,
             isStunt = true,
-            stuntVariant = variant
+            stuntVariant = variant,
+            randomConditionsEnabled = false
         )
     }
 

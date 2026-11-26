@@ -68,10 +68,13 @@ object DriftTrackCatalog {
         roadHalfWidth: Float = 122f,
         trackIdOverride: String? = null,
         trackNameOverride: String? = null,
-        forceNight: Boolean? = null
+        forceNight: Boolean? = null,
+        forceRandomConditions: Boolean? = null,
+        includeJumps: Boolean = false
     ): CustomTrackData {
         val rng = Random(seed)
         val isNightTrack = forceNight ?: (rng.nextFloat() < 0.35f)
+        val randomConditionsEnabled = forceRandomConditions ?: (rng.nextFloat() < 0.45f)
         val driftThemes = listOf(
             TrackId.WAREHOUSE_DRIFT,
             TrackId.NEON_ROOFTOP,
@@ -172,6 +175,20 @@ object DriftTrackCatalog {
             )
         }
 
+        val ramps = if (includeJumps) {
+            val candidateFracs = listOf(0.25f, 0.52f, 0.78f)
+            candidateFracs.mapNotNull { frac ->
+                val cand = TrackCatalog.rampAt(spline, (n * frac).toInt(), impulse = 1.04f)
+                val nearBoost = boosts.any { TrackCatalog.distance(cand.x, cand.y, it.x, it.y) < 120f }
+                val nearProp = props.any { TrackCatalog.distance(cand.x, cand.y, it.x, it.y) < 95f }
+                if (!nearBoost && !nearProp) cand else null
+            }.take(2).ifEmpty {
+                listOf(TrackCatalog.rampAt(spline, (n * 0.50f).toInt(), impulse = 1.04f))
+            }
+        } else {
+            emptyList()
+        }
+
         return CustomTrackData(
             id = trackIdOverride ?: "${DriftFeature.DRIFT_TRACK_PREFIX}rand_$seed",
             name = trackName,
@@ -180,9 +197,10 @@ object DriftTrackCatalog {
             controlPoints = ctrl,
             boostPads = boosts,
             itemSpawns = emptyList(),
-            ramps = emptyList(),
+            ramps = ramps,
             props = props,
-            isNightTrack = isNightTrack
+            isNightTrack = isNightTrack,
+            randomConditionsEnabled = randomConditionsEnabled
         )
     }
 

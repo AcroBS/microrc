@@ -1176,6 +1176,9 @@ fun RaceScreen(
                 if ((localRacer?.electroShockAuraMs ?: 0L) > 0L) StatusChip("ELECTRO AURA", tertiaryAccent)
                 if ((localRacer?.electroParalyzedMs ?: 0L) > 0L) StatusChip("MOTIONLESS!", errorAccent)
                 if ((localRacer?.stunnedMs ?: 0L) > 0L) StatusChip("ZAPPED!", errorAccent)
+                if ((localRacer?.stunnedMs ?: 0L) == 0L && kotlin.math.abs(localRacer?.spinVisualOffset ?: 0f) > 0.04f) {
+                    StatusChip("HYDROPLANE!", secondaryAccent)
+                }
             }
         }
 

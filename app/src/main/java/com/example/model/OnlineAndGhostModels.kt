@@ -456,7 +456,8 @@ object CustomTrackCodec {
             )
         }
         val nightFlag = if (track.isNightTrack) "1" else "0"
-        return "$VERSION_PREFIX|$ptsStr|$boostsStr|$itemsStr|$rampsStr|$propsStr|$nightFlag".take(24_500)
+        val conditionsFlag = if (track.randomConditionsEnabled) "1" else "0"
+        return "$VERSION_PREFIX|$ptsStr|$boostsStr|$itemsStr|$rampsStr|$propsStr|$nightFlag|$conditionsFlag".take(24_500)
     }
 
     fun decode(
@@ -552,6 +553,7 @@ object CustomTrackCodec {
             }
 
         val isNightTrack = sections.getOrNull(6)?.trim() == "1"
+        val randomConditionsEnabled = sections.getOrNull(7)?.trim() == "1"
 
         return CustomTrackData(
             id = LeaderboardBoardKey.sanitizeKeyToken(id, 36),
@@ -565,7 +567,8 @@ object CustomTrackCodec {
             props = props,
             creatorUid = creatorUid.trim(),
             creatorName = creatorName.trim().take(24),
-            isNightTrack = isNightTrack
+            isNightTrack = isNightTrack,
+            randomConditionsEnabled = randomConditionsEnabled
         )
     }
 
