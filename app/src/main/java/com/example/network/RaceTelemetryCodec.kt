@@ -225,7 +225,11 @@ object RaceTelemetryCodec {
                 .append(r.electroParalyzedMs).append(',')
                 .append(r.laserBeamMs).append(',')
                 .append(if (r.isBraking) 1 else 0).append(',')
-                .append(r.equippedUpgradesMask)
+                .append(r.equippedUpgradesMask).append(',')
+                .append(if (r.isCountdownRevving) 1 else 0).append(',')
+                .append(r.launchBoostMs).append(',')
+                .append(r.perfectLaunchBannerMs).append(',')
+                .append(r.wheelspinSmokeMs)
         }
         sb.append('|')
 
@@ -481,6 +485,10 @@ object RaceTelemetryCodec {
                     ?: meta?.equippedUpgradesMask
                     ?: prev?.equippedUpgradesMask
                     ?: 0
+                val isCountdownRevving = f.getOrNull(33) == "1"
+                val launchBoostMs = f.getOrNull(34)?.toLongOrNull() ?: 0L
+                val perfectLaunchBannerMs = f.getOrNull(35)?.toLongOrNull() ?: 0L
+                val wheelspinSmokeMs = f.getOrNull(36)?.toLongOrNull() ?: 0L
 
                 val vx = f[4].toFloatOrNull() ?: 0f
                 val vy = f[5].toFloatOrNull() ?: 0f
@@ -523,7 +531,11 @@ object RaceTelemetryCodec {
                     electroParalyzedMs = electroParalyzedMs,
                     laserBeamMs = laserBeamMs,
                     isBraking = isBraking,
-                    equippedUpgradesMask = equippedUpgradesMask
+                    equippedUpgradesMask = equippedUpgradesMask,
+                    isCountdownRevving = isCountdownRevving,
+                    launchBoostMs = launchBoostMs,
+                    perfectLaunchBannerMs = perfectLaunchBannerMs,
+                    wheelspinSmokeMs = wheelspinSmokeMs
                 )
             }
         }

@@ -315,7 +315,11 @@ data class RacerState(
     val electroParalyzedMs: Long = 0L,
     val laserBeamMs: Long = 0L,
     val isBraking: Boolean = false,
-    val equippedUpgradesMask: Int = 0
+    val equippedUpgradesMask: Int = 0,
+    val isCountdownRevving: Boolean = false,
+    val launchBoostMs: Long = 0L,
+    val perfectLaunchBannerMs: Long = 0L,
+    val wheelspinSmokeMs: Long = 0L
 )
 
 @JsonClass(generateAdapter = true)

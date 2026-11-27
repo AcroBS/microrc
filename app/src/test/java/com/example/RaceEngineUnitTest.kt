@@ -2547,4 +2547,181 @@ class RaceEngineUnitTest {
             )
         }
     }
+
+    @Test
+    fun countdown_blocksNitroAndPowerUpActivationUntilRaceStarts() {
+        val players = listOf(
+            LobbyPlayer("p1", "Acro", isHost = true, isBot = false, carType = RcCarType.VOLT_BUGGY.name)
+        )
+        val track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP)
+        val engine = RacePhysicsEngine(
+            track = track,
+            totalLaps = 3,
+            players = players,
+            rules = RaceRulesSettings(autoAccelerate = true),
+            random = Random(17L),
+            isDailyChallenge = true
+        )
+
+        // During 3-2-1 countdown, player starts with lap-1 Nitro in Daily Challenge
+        var snap = engine.step(0.05f)
+        assertEquals(RacePhase.COUNTDOWN.name, snap.phase)
+        assertEquals(PowerUpType.TURBO_NITRO.name, snap.racers.first().heldPowerUp)
+
+        // Repeatedly tap Nitro during countdown — must stay locked and never buffer/fire on GO
+        repeat(40) {
+            engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f, usePowerUp = true))
+            snap = engine.step(0.05f)
+            if (snap.phase == RacePhase.COUNTDOWN.name) {
+                val r = snap.racers.first()
+                assertEquals("Nitro must not be consumed during countdown", PowerUpType.TURBO_NITRO.name, r.heldPowerUp)
+                assertEquals("Boost must not trigger during countdown", 0L, r.boostMs)
+            }
+        }
+
+        // Advance cleanly to GO with usePowerUp = false; buffered taps must NOT auto-fire Nitro
+        while (snap.phase == RacePhase.COUNTDOWN.name) {
+            engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f, usePowerUp = false))
+            snap = engine.step(0.02f)
+        }
+        assertEquals(RacePhase.RACING.name, snap.phase)
+        val atGo = snap.racers.first()
+        assertEquals("Countdown taps must not auto-fire Nitro on GO", PowerUpType.TURBO_NITRO.name, atGo.heldPowerUp)
+        assertEquals("Countdown taps must not trigger boost on GO", 0L, atGo.boostMs)
+
+        // Now that the race has started, tapping Nitro triggers boost normally
+        engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f, usePowerUp = true))
+        snap = engine.step(0.02f)
+        val afterRaceTap = snap.racers.first()
+        assertEquals("Nitro should be consumed once RACING", null, afterRaceTap.heldPowerUp)
+        assertTrue("Nitro boost must activate once RACING (${afterRaceTap.boostMs})", afterRaceTap.boostMs > 1000L)
+    }
+
+    @Test
+    fun brakeReleaseLaunchBoost_verifiesEarlyPerfectAndLateTimingWindows() {
+        val players = listOf(
+            LobbyPlayer("p1", "Acro", isHost = true, isBot = false, carType = RcCarType.VOLT_BUGGY.name)
+        )
+        val track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP)
+        val rules = RaceRulesSettings(autoAccelerate = true, randomConditionsEnabled = false)
+
+        fun newEngine() = RacePhysicsEngine(
+            track = track,
+            totalLaps = 3,
+            players = players,
+            rules = rules,
+            random = Random(31L),
+            isDailyChallenge = true
+        )
+
+        // 0) Baseline normal auto-accelerate start (no brake held during countdown)
+        val baselineEngine = newEngine()
+        var baseSnap = baselineEngine.step(0.02f)
+        while (baseSnap.phase == RacePhase.COUNTDOWN.name) {
+            baselineEngine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+            baseSnap = baselineEngine.step(0.02f)
+        }
+        repeat(15) {
+            baselineEngine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+            baseSnap = baselineEngine.step(0.02f)
+        }
+        val baselineSpeedAfter300ms = baseSnap.racers.first().speed
+
+        // 1) EARLY RELEASE: hold brake during countdown, release at ~2000ms (1.2s before 3200ms GO)
+        val earlyEngine = newEngine()
+        var earlySnap = earlyEngine.step(0.02f)
+        var sawRevving = false
+        for (tick in 1..159) {
+            val holdBrake = tick in 20..100 // held 400ms..2000ms, released 1200ms before GO
+            earlyEngine.submitInput("p1", ControlInput(throttle = if (holdBrake) -1f else 1f, steer = 0f))
+            earlySnap = earlyEngine.step(0.02f)
+            if (holdBrake && earlySnap.phase == RacePhase.COUNTDOWN.name && earlySnap.racers.first().isCountdownRevving) {
+                sawRevving = true
+            }
+        }
+        assertTrue("Holding BRAKE during countdown must set isCountdownRevving", sawRevving)
+        // Step onto GO (3200ms)
+        earlyEngine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+        earlySnap = earlyEngine.step(0.02f)
+        assertEquals(RacePhase.RACING.name, earlySnap.phase)
+        val earlyAtGo = earlySnap.racers.first()
+        assertEquals("Early release must NOT grant launch boost", 0L, earlyAtGo.launchBoostMs)
+        assertEquals("Early release must NOT show PERFECT LAUNCH banner", 0L, earlyAtGo.perfectLaunchBannerMs)
+        assertTrue(
+            "Early release must trigger ~250ms wheelspin smoke (${earlyAtGo.wheelspinSmokeMs})",
+            earlyAtGo.wheelspinSmokeMs in 180L..250L
+        )
+        repeat(15) {
+            earlyEngine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+            earlySnap = earlyEngine.step(0.02f)
+        }
+        assertTrue(
+            "Early wheelspin bog must be slower than baseline start (${earlySnap.racers.first().speed} < $baselineSpeedAfter300ms)",
+            earlySnap.racers.first().speed < baselineSpeedAfter300ms
+        )
+
+        // 2a) PERFECT RELEASE (slightly before GO, within -0.25s window: release at 3080ms, 120ms before GO)
+        val perfectBeforeEngine = newEngine()
+        var pbSnap = perfectBeforeEngine.step(0.02f)
+        for (tick in 1..159) {
+            val holdBrake = tick in 10..153 // released at ~3080ms (120ms before 3200ms GO)
+            perfectBeforeEngine.submitInput("p1", ControlInput(throttle = if (holdBrake) -1f else 1f, steer = 0f))
+            pbSnap = perfectBeforeEngine.step(0.02f)
+        }
+        perfectBeforeEngine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+        pbSnap = perfectBeforeEngine.step(0.02f)
+        assertEquals(RacePhase.RACING.name, pbSnap.phase)
+        val pbAtGo = pbSnap.racers.first()
+        assertTrue("Perfect pre-GO release must grant ~400ms launch boost (${pbAtGo.launchBoostMs})", pbAtGo.launchBoostMs in 340L..400L)
+        assertTrue("Perfect pre-GO release must activate PERFECT LAUNCH pill (${pbAtGo.perfectLaunchBannerMs})", pbAtGo.perfectLaunchBannerMs > 0L)
+        assertEquals("Perfect launch must not trigger wheelspin smoke", 0L, pbAtGo.wheelspinSmokeMs)
+        repeat(15) {
+            perfectBeforeEngine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+            pbSnap = perfectBeforeEngine.step(0.02f)
+        }
+        assertTrue(
+            "Perfect launch boost must accelerate faster than baseline (${pbSnap.racers.first().speed} > $baselineSpeedAfter300ms)",
+            pbSnap.racers.first().speed > baselineSpeedAfter300ms * 1.15f
+        )
+
+        // 2b) PERFECT RELEASE (slightly after GO, within +0.25s window: release at raceTimeMs = 140ms)
+        val perfectAfterEngine = newEngine()
+        var paSnap = perfectAfterEngine.step(0.02f)
+        while (paSnap.phase == RacePhase.COUNTDOWN.name) {
+            perfectAfterEngine.submitInput("p1", ControlInput(throttle = -1f, steer = 0f))
+            paSnap = perfectAfterEngine.step(0.02f)
+        }
+        assertEquals(RacePhase.RACING.name, paSnap.phase)
+        // Still holding brake for 120ms after GO -> brakes stay applied, no boost yet
+        repeat(6) {
+            perfectAfterEngine.submitInput("p1", ControlInput(throttle = -1f, steer = 0f))
+            paSnap = perfectAfterEngine.step(0.02f)
+        }
+        assertEquals("Boost must not trigger while brake is still held", 0L, paSnap.racers.first().launchBoostMs)
+        // Release brake at ~140ms after GO (inside +250ms window) -> triggers Perfect Launch!
+        perfectAfterEngine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+        paSnap = perfectAfterEngine.step(0.02f)
+        assertTrue("Post-GO release within +0.25s must trigger 0.4s launch boost (${paSnap.racers.first().launchBoostMs})", paSnap.racers.first().launchBoostMs in 350L..400L)
+        assertTrue("Post-GO perfect release must show PERFECT LAUNCH pill", paSnap.racers.first().perfectLaunchBannerMs > 0L)
+
+        // 3) LATE RELEASE: keep holding brake past GO + 250ms (for 400ms after GO), then release
+        val lateEngine = newEngine()
+        var lateSnap = lateEngine.step(0.02f)
+        while (lateSnap.phase == RacePhase.COUNTDOWN.name) {
+            lateEngine.submitInput("p1", ControlInput(throttle = -1f, steer = 0f))
+            lateSnap = lateEngine.step(0.02f)
+        }
+        repeat(20) {
+            lateEngine.submitInput("p1", ControlInput(throttle = -1f, steer = 0f))
+            lateSnap = lateEngine.step(0.02f)
+            assertTrue("Holding brake past GO must keep brakes applied", lateSnap.racers.first().isBraking)
+        }
+        // Now release brake at ~420ms after GO (outside +250ms window) -> no boost, no wheelspin
+        lateEngine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+        lateSnap = lateEngine.step(0.02f)
+        val lateAfterRelease = lateSnap.racers.first()
+        assertEquals("Late release must NOT trigger launch boost", 0L, lateAfterRelease.launchBoostMs)
+        assertEquals("Late release must NOT show PERFECT LAUNCH pill", 0L, lateAfterRelease.perfectLaunchBannerMs)
+        assertEquals("Late release must NOT trigger early wheelspin penalty", 0L, lateAfterRelease.wheelspinSmokeMs)
+    }
 }

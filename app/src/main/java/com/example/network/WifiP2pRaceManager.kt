@@ -1886,6 +1886,7 @@ class WifiP2pRaceManager(
     }
 
     fun triggerLocalPowerUp() {
+        if (_raceSnapshot.value?.phase != RacePhase.RACING.name) return
         synchronized(this) {
             pendingLocalPowerUp = true
         }
@@ -1905,6 +1906,7 @@ class WifiP2pRaceManager(
     }
 
     fun triggerLocalMineDrop() {
+        if (_raceSnapshot.value?.phase != RacePhase.RACING.name) return
         synchronized(this) {
             pendingLocalMineDrop = true
         }

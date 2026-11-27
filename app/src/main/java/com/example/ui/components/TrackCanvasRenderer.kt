@@ -1091,16 +1091,75 @@ fun DrawScope.drawTrackWorld(
                 }
             }
         }
+        // Countdown brake-revving: subtle rear-wheel sparks spraying behind the tires
+        if (r.isCountdownRevving && r.jumpZ <= 0.05f) {
+            val deg = r.angleRad * 180f / PI.toFloat()
+            withTransform({
+                translate(r.x, r.y)
+                rotate(deg, Offset.Zero)
+            }) {
+                for (sIdx in 0 until 4) {
+                    val sparkPhase = ((animTimeSec * 9.5f + sIdx * 0.25f) % 1f)
+                    val backX = -17f - sparkPhase * 18f
+                    val spreadY = 10.5f + ((sIdx % 2) * 2 - 1) * sparkPhase * 5.5f
+                    val sparkAlpha = (1f - sparkPhase) * 0.92f
+                    val sparkColor = if (sIdx % 2 == 0) Color(0xFFFFD54F) else Color(0xFFFF6D00)
+                    drawLine(
+                        color = sparkColor.copy(alpha = sparkAlpha),
+                        start = Offset(backX + 4.5f, -spreadY),
+                        end = Offset(backX, -spreadY - 1.5f),
+                        strokeWidth = 2.0f,
+                        cap = StrokeCap.Round
+                    )
+                    drawLine(
+                        color = sparkColor.copy(alpha = sparkAlpha),
+                        start = Offset(backX + 4.5f, spreadY),
+                        end = Offset(backX, spreadY + 1.5f),
+                        strokeWidth = 2.0f,
+                        cap = StrokeCap.Round
+                    )
+                }
+            }
+        }
+        // Early brake-release wheelspin: brief dense rear tire smoke with no boost
+        if (r.wheelspinSmokeMs > 0L && r.jumpZ <= 0.05f) {
+            val deg = r.angleRad * 180f / PI.toFloat()
+            val smokeIntensity = (r.wheelspinSmokeMs / 250f).coerceIn(0.35f, 1f)
+            withTransform({
+                translate(r.x, r.y)
+                rotate(deg, Offset.Zero)
+            }) {
+                for (wIdx in 0 until 4) {
+                    val smokePhase = ((animTimeSec * 6.5f + wIdx * 0.25f) % 1f)
+                    val backX = -16f - smokePhase * 26f
+                    val spreadY = 10f + smokePhase * 8.5f
+                    val puffR = (5.5f + smokePhase * 7.5f) * smokeIntensity
+                    val alpha = (1f - smokePhase) * 0.68f * smokeIntensity
+                    drawCircle(
+                        color = Color(0xFFECEFF1).copy(alpha = alpha),
+                        radius = puffR,
+                        center = Offset(backX, -spreadY)
+                    )
+                    drawCircle(
+                        color = Color(0xFFECEFF1).copy(alpha = alpha),
+                        radius = puffR,
+                        center = Offset(backX, spreadY)
+                    )
+                }
+            }
+        }
+        val revJitterX = if (r.isCountdownRevving) sin(animTimeSec * 95f) * 1.4f else 0f
+        val revJitterY = if (r.isCountdownRevving) cos(animTimeSec * 115f) * 1.1f else 0f
         val carType = runCatching { RcCarType.valueOf(r.carType) }.getOrDefault(RcCarType.VOLT_BUGGY)
         drawRcCar(
-            x = r.x,
-            y = r.y,
+            x = r.x + revJitterX,
+            y = r.y + revJitterY,
             angleRad = r.angleRad,
             carType = carType,
             primaryColor = Color(r.primaryColorArgb),
             accentColor = Color(r.accentColorArgb),
             steerVisual = r.steerVisual,
-            isBoosting = r.boostMs > 0L,
+            isBoosting = r.boostMs > 0L || r.launchBoostMs > 0L,
             hasShield = r.shieldMs > 0L,
             isStunned = r.stunnedMs > 0L,
             hasOverdrive = r.overdriveMs > 0L,

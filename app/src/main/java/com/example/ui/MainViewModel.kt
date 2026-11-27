@@ -40,7 +40,12 @@ import com.example.network.WifiP2pRaceManager
 import com.example.sensors.RcHapticController
 import com.example.sensors.TiltSteeringController
 import com.example.util.AppUpdateUiState
+import com.example.util.GitHubReleaseInfo
 import com.example.util.GitHubUpdateChecker
+import com.example.util.InAppUpdateDialogState
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -48,6 +53,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -136,6 +143,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _appUpdateState = MutableStateFlow<AppUpdateUiState>(AppUpdateUiState.Idle)
     val appUpdateState: StateFlow<AppUpdateUiState> = _appUpdateState.asStateFlow()
 
+    private val _inAppUpdateDialogState = MutableStateFlow<InAppUpdateDialogState>(InAppUpdateDialogState.Hidden)
+    val inAppUpdateDialogState: StateFlow<InAppUpdateDialogState> = _inAppUpdateDialogState.asStateFlow()
+
+    private var apkDownloadJob: Job? = null
+
     private val _overviewCamera = MutableStateFlow(false)
     val overviewCamera: StateFlow<Boolean> = _overviewCamera.asStateFlow()
 
@@ -148,6 +160,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch {
             prefsRepo.ensurePlayerId()
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            GitHubUpdateChecker.cleanupStaleCachedApks(
+                context = application,
+                currentVersion = BuildConfig.VERSION_NAME
+            )
         }
         if (!isPlayStoreInstall && BuildConfig.GITHUB_REPOSITORY.isNotBlank()) {
             checkForAppUpdate(manual = false)
@@ -220,6 +238,121 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 result
             }
+            if (result is AppUpdateUiState.UpdateAvailable) {
+                val shouldOpenDialog = manual ||
+                    (result.release.tagName != dismissedUpdateTag.value &&
+                        _inAppUpdateDialogState.value is InAppUpdateDialogState.Hidden)
+                if (shouldOpenDialog) {
+                    _inAppUpdateDialogState.value = InAppUpdateDialogState.Prompt(
+                        currentVersion = result.currentVersion,
+                        release = result.release
+                    )
+                }
+            }
+        }
+    }
+
+    fun openUpdateDialog(release: GitHubReleaseInfo? = null) {
+        if (isPlayStoreInstall) return
+        val currentState = _appUpdateState.value as? AppUpdateUiState.UpdateAvailable
+        val targetRelease = release ?: currentState?.release ?: return
+        val currentVersion = currentState?.currentVersion
+            ?: GitHubUpdateChecker.normalizeVersion(BuildConfig.VERSION_NAME).ifBlank { BuildConfig.VERSION_NAME }
+        _inAppUpdateDialogState.value = InAppUpdateDialogState.Prompt(
+            currentVersion = currentVersion,
+            release = targetRelease
+        )
+    }
+
+    fun dismissUpdateDialog(dismissTag: String? = null) {
+        apkDownloadJob?.cancel()
+        apkDownloadJob = null
+        _inAppUpdateDialogState.value = InAppUpdateDialogState.Hidden
+        if (!dismissTag.isNullOrBlank()) {
+            dismissUpdateHint(dismissTag)
+        }
+    }
+
+    fun cancelInAppApkDownload() {
+        apkDownloadJob?.cancel()
+        apkDownloadJob = null
+        val current = _appUpdateState.value as? AppUpdateUiState.UpdateAvailable
+        _inAppUpdateDialogState.value = if (current != null) {
+            InAppUpdateDialogState.Prompt(current.currentVersion, current.release)
+        } else {
+            InAppUpdateDialogState.Hidden
+        }
+    }
+
+    fun startInAppApkUpdate(release: GitHubReleaseInfo) {
+        if (isPlayStoreInstall) return
+        val app = getApplication<Application>()
+        val apkUrl = release.apkDownloadUrl
+        if (apkUrl.isNullOrBlank()) {
+            GitHubUpdateChecker.openUpdateUrl(app, release.releasePageUrl)
+            _inAppUpdateDialogState.value = InAppUpdateDialogState.Hidden
+            return
+        }
+        apkDownloadJob?.cancel()
+        _inAppUpdateDialogState.value = InAppUpdateDialogState.Downloading(
+            release = release,
+            progressPercent = 0,
+            indeterminate = false
+        )
+        apkDownloadJob = viewModelScope.launch {
+            val destFile = GitHubUpdateChecker.targetApkFile(app)
+            val result = GitHubUpdateChecker.downloadApk(
+                apkUrl = apkUrl,
+                destFile = destFile,
+                expectedVersion = release.normalizedVersion.ifBlank { release.tagName }
+            ) { percent, indeterminate ->
+                _inAppUpdateDialogState.value = InAppUpdateDialogState.Downloading(
+                    release = release,
+                    progressPercent = percent,
+                    indeterminate = indeterminate
+                )
+            }
+            result.fold(
+                onSuccess = { downloadedFile ->
+                    proceedToInstallDownloadedApk(release, downloadedFile)
+                },
+                onFailure = { err ->
+                    if (err is CancellationException) throw err
+                    _inAppUpdateDialogState.value = InAppUpdateDialogState.Error(
+                        release = release,
+                        message = err.message?.takeIf { it.isNotBlank() }
+                            ?: "Couldn't download the update APK. Check your connection and try again."
+                    )
+                }
+            )
+        }
+    }
+
+    private fun proceedToInstallDownloadedApk(release: GitHubReleaseInfo, apkFile: File) {
+        val app = getApplication<Application>()
+        if (!GitHubUpdateChecker.canRequestPackageInstalls(app)) {
+            _inAppUpdateDialogState.value = InAppUpdateDialogState.NeedsInstallPermission(
+                release = release,
+                apkFile = apkFile
+            )
+            return
+        }
+        val launched = GitHubUpdateChecker.launchApkInstaller(app, apkFile)
+        _inAppUpdateDialogState.value = if (launched) {
+            InAppUpdateDialogState.Hidden
+        } else {
+            InAppUpdateDialogState.Error(
+                release = release,
+                message = "Unable to launch the Android package installer for this APK."
+            )
+        }
+    }
+
+    fun onResumeCheckPendingApkInstall() {
+        val state = _inAppUpdateDialogState.value as? InAppUpdateDialogState.NeedsInstallPermission ?: return
+        val app = getApplication<Application>()
+        if (state.apkFile.exists() && GitHubUpdateChecker.canRequestPackageInstalls(app)) {
+            proceedToInstallDownloadedApk(state.release, state.apkFile)
         }
     }
 

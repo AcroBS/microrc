@@ -93,7 +93,10 @@ android {
         providers.environmentVariable("GITHUB_UPDATE_REPO").orNull
           ?.trim()
           ?.takeIf { it.isNotBlank() }
-          ?: providers.environmentVariable("GITHUB_REPOSITORY").orNull?.trim().orEmpty()
+          ?: providers.environmentVariable("GITHUB_REPOSITORY").orNull
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+          ?: "AcroBS/microrc"
       }
     buildConfigField(
       "String",

@@ -44,6 +44,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Download
@@ -96,12 +97,17 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -151,6 +157,19 @@ internal fun resolveDailyLeadStatus(
     } else {
         DailyLeadStatus.NotPlayedYet
     }
+}
+
+internal fun isDailySweepAmongFriends(
+    standings: FriendStandingsSummary?,
+    friendsCount: Int
+): Boolean {
+    val gp = standings?.todayDailyGpStanding ?: return false
+    val drift = standings.todayDailyDriftStanding ?: return false
+    val hasFriends = friendsCount > 0 ||
+        standings.totalFriendsCount > 0 ||
+        !gp.topFriendName.isNullOrBlank() ||
+        !drift.topFriendName.isNullOrBlank()
+    return hasFriends && gp.myRank == 1 && drift.myRank == 1 && gp.myTimeMs > 0L && drift.myTimeMs > 0L
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -221,6 +240,17 @@ fun HomeScreen(
     val dailyDriftStatus = remember(friendStandings?.todayDailyDriftStanding, dailyDriftBestTimeMs) {
         resolveDailyLeadStatus(friendStandings?.todayDailyDriftStanding, dailyDriftBestTimeMs)
     }
+    val dailyGpCompletedToday = remember(friendStandings?.todayDailyGpStanding, dailyBestTimeMs) {
+        (dailyBestTimeMs != null && dailyBestTimeMs > 0L) ||
+            ((friendStandings?.todayDailyGpStanding?.myTimeMs ?: 0L) > 0L)
+    }
+    val dailyDriftCompletedToday = remember(friendStandings?.todayDailyDriftStanding, dailyDriftBestTimeMs) {
+        (dailyDriftBestTimeMs != null && dailyDriftBestTimeMs > 0L) ||
+            ((friendStandings?.todayDailyDriftStanding?.myTimeMs ?: 0L) > 0L)
+    }
+    val hasDailySweep = remember(friendStandings, friendsCount) {
+        isDailySweepAmongFriends(friendStandings, friendsCount)
+    }
 
     Surface(
         color = MaterialTheme.colorScheme.background,
@@ -270,7 +300,7 @@ fun HomeScreen(
                                 )
                         )
 
-                        // Top-right overlay: Flame Streak Pill beside Driver Tag Pill
+                        // Top-right overlay: Daily Sweep Crown (when #1 in both Dailies) + Flame Streak Pill + Driver Tag Pill
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -278,6 +308,9 @@ fun HomeScreen(
                                 .align(Alignment.TopEnd)
                                 .padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
+                            if (hasDailySweep) {
+                                DailySweepCrownBadge(goldAccent = goldAccent)
+                            }
                             val streakActive = playStreak.currentStreakDays > 0
                             Surface(
                                 color = Color(0xFF0E131B).copy(alpha = 0.72f),
@@ -559,6 +592,9 @@ fun HomeScreen(
                                 dailyChallengeResetLabel = dailyChallengeResetLabel,
                                 dailyGpStatus = dailyGpStatus,
                                 dailyDriftStatus = dailyDriftStatus,
+                                dailyGpCompletedToday = dailyGpCompletedToday,
+                                dailyDriftCompletedToday = dailyDriftCompletedToday,
+                                completedAccentColor = onlineAccent,
                                 goldAccent = goldAccent,
                                 onOpenDailyChallenge = onOpenDailyChallenge,
                                 onOpenDailyDriftChallenge = onOpenDailyDriftChallenge,
@@ -683,11 +719,60 @@ private fun LiveOnlineGameplayAction(
 }
 
 @Composable
+private fun DailySweepCrownBadge(goldAccent: Color) {
+    Surface(
+        color = Color(0xFF0E131B).copy(alpha = 0.78f),
+        border = BorderStroke(1.dp, goldAccent.copy(alpha = 0.75f)),
+        shape = CircleShape,
+        modifier = Modifier
+            .testTag("home_daily_sweep_crown")
+            .semantics(mergeDescendants = true) {
+                contentDescription = "Daily Sweep: #1 among friends on Daily GP and Daily Drift"
+            }
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+        ) {
+            Canvas(modifier = Modifier.size(16.dp)) {
+                val w = size.width
+                val h = size.height
+                val crownPath = Path().apply {
+                    moveTo(w * 0.12f, h * 0.76f)
+                    lineTo(w * 0.08f, h * 0.30f)
+                    lineTo(w * 0.33f, h * 0.50f)
+                    lineTo(w * 0.50f, h * 0.18f)
+                    lineTo(w * 0.67f, h * 0.50f)
+                    lineTo(w * 0.92f, h * 0.30f)
+                    lineTo(w * 0.88f, h * 0.76f)
+                    close()
+                }
+                drawPath(path = crownPath, color = goldAccent)
+                drawPath(
+                    path = crownPath,
+                    color = Color(0xFFFFF8E1).copy(alpha = 0.65f),
+                    style = Stroke(width = w * 0.06f, join = StrokeJoin.Round)
+                )
+                drawLine(
+                    color = goldAccent,
+                    start = Offset(w * 0.14f, h * 0.86f),
+                    end = Offset(w * 0.86f, h * 0.86f),
+                    strokeWidth = h * 0.10f
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun DailyChallengesAndTracksBlock(
     modifier: Modifier = Modifier,
     dailyChallengeResetLabel: String,
     dailyGpStatus: DailyLeadStatus,
     dailyDriftStatus: DailyLeadStatus,
+    dailyGpCompletedToday: Boolean,
+    dailyDriftCompletedToday: Boolean,
+    completedAccentColor: Color,
     goldAccent: Color,
     onOpenDailyChallenge: () -> Unit,
     onOpenDailyDriftChallenge: () -> Unit,
@@ -736,6 +821,9 @@ private fun DailyChallengesAndTracksBlock(
                     iconContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
                     iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
                     status = dailyGpStatus,
+                    completedToday = dailyGpCompletedToday,
+                    completedBadgeTag = "daily_gp_completed_badge",
+                    completedAccentColor = completedAccentColor,
                     goldAccent = goldAccent,
                     onClick = onOpenDailyChallenge,
                     modifier = Modifier
@@ -750,6 +838,9 @@ private fun DailyChallengesAndTracksBlock(
                         iconContainerColor = MaterialTheme.colorScheme.secondaryContainer,
                         iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
                         status = dailyDriftStatus,
+                        completedToday = dailyDriftCompletedToday,
+                        completedBadgeTag = "daily_drift_completed_badge",
+                        completedAccentColor = completedAccentColor,
                         goldAccent = goldAccent,
                         onClick = onOpenDailyDriftChallenge,
                         modifier = Modifier
@@ -833,23 +924,25 @@ private fun DailyChallengeCompactCard(
     iconContainerColor: Color,
     iconTint: Color,
     status: DailyLeadStatus,
+    completedToday: Boolean,
+    completedBadgeTag: String,
+    completedAccentColor: Color,
     goldAccent: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isLeading = status is DailyLeadStatus.YouLead
+    val borderColor = when {
+        isLeading -> goldAccent.copy(alpha = 0.62f)
+        completedToday -> completedAccentColor.copy(alpha = 0.56f)
+        else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+    }
+    val borderWidth = if (isLeading || completedToday) 1.25.dp else 1.dp
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         ),
-        border = BorderStroke(
-            1.dp,
-            if (isLeading) {
-                goldAccent.copy(alpha = 0.55f)
-            } else {
-                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-            }
-        ),
+        border = BorderStroke(borderWidth, borderColor),
         shape = RoundedCornerShape(18.dp),
         modifier = modifier
             .clip(RoundedCornerShape(18.dp))
@@ -894,12 +987,27 @@ private fun DailyChallengeCompactCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(16.dp)
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    if (completedToday) {
+                        Icon(
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = "$title completed today",
+                            tint = if (isLeading) goldAccent else completedAccentColor,
+                            modifier = Modifier
+                                .size(15.dp)
+                                .testTag(completedBadgeTag)
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
 
             Row(

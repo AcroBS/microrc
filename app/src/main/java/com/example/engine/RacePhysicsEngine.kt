@@ -112,7 +112,15 @@ class RacePhysicsEngine(
         var puddleSkidMs: Long = 0L,
         var puddleSkidTotalMs: Long = 0L,
         var puddleSkidDir: Float = 1f,
-        var puddleSkidCooldownMs: Long = 0L
+        var puddleSkidCooldownMs: Long = 0L,
+        var countdownBrakeHeld: Boolean = false,
+        var isCountdownRevving: Boolean = false,
+        var countdownEarlyReleasePending: Boolean = false,
+        var countdownPerfectReleasePending: Boolean = false,
+        var launchEvaluated: Boolean = false,
+        var launchBoostMs: Long = 0L,
+        var perfectLaunchBannerMs: Long = 0L,
+        var wheelspinSmokeMs: Long = 0L
     )
 
     private data class MutableRocket(
@@ -465,11 +473,13 @@ class RacePhysicsEngine(
 
     fun submitInput(playerId: String, input: ControlInput) {
         latestInputs[playerId] = input
-        if (input.usePowerUp) {
-            pendingPowerUpTrigger.add(playerId)
-        }
-        if (input.dropMine) {
-            pendingMineDropTrigger.add(playerId)
+        if (phase == RacePhase.RACING) {
+            if (input.usePowerUp) {
+                pendingPowerUpTrigger.add(playerId)
+            }
+            if (input.dropMine) {
+                pendingMineDropTrigger.add(playerId)
+            }
         }
     }
 
@@ -921,10 +931,46 @@ class RacePhysicsEngine(
         }
 
         if (phase == RacePhase.COUNTDOWN) {
-            val countdownDuration = 3200L
+            pendingPowerUpTrigger.clear()
+            pendingMineDropTrigger.clear()
+            val countdownDuration = COUNTDOWN_DURATION_MS
             if (elapsedMs >= countdownDuration) {
                 phase = RacePhase.RACING
                 raceTimeMs = 0L
+                if (stuntController == null) {
+                    for (r in racers) {
+                        r.isCountdownRevving = false
+                        if (r.isBot) {
+                            r.launchEvaluated = true
+                        } else {
+                            val rawInput = latestInputs[r.playerId]
+                            val holdingBrakeNow = rawInput != null && rawInput.throttle < -0.05f
+                            if (r.countdownBrakeHeld && !holdingBrakeNow) {
+                                r.countdownBrakeHeld = false
+                                r.countdownPerfectReleasePending = true
+                            }
+                            when {
+                                r.countdownPerfectReleasePending -> {
+                                    r.countdownPerfectReleasePending = false
+                                    r.launchEvaluated = true
+                                    r.launchBoostMs = LAUNCH_BOOST_DURATION_MS
+                                    r.perfectLaunchBannerMs = LAUNCH_BANNER_DURATION_MS
+                                }
+                                r.countdownEarlyReleasePending -> {
+                                    r.countdownEarlyReleasePending = false
+                                    r.launchEvaluated = true
+                                    r.wheelspinSmokeMs = LAUNCH_WHEELSPIN_DURATION_MS
+                                }
+                                r.countdownBrakeHeld -> {
+                                    r.launchEvaluated = false
+                                }
+                                else -> {
+                                    r.launchEvaluated = true
+                                }
+                            }
+                        }
+                    }
+                }
                 val startBanner = when {
                     stuntController != null -> {
                         val starter = racers.getOrNull(stuntController.turnIndex)?.name ?: "DRIVER"
@@ -935,6 +981,33 @@ class RacePhysicsEngine(
                 }
                 setBanner(startBanner, 1800L)
             } else {
+                if (stuntController == null) {
+                    val timeToGoMs = countdownDuration - elapsedMs
+                    for (r in racers) {
+                        if (r.isBot) continue
+                        val rawInput = latestInputs[r.playerId]
+                        val holdingBrake = rawInput != null && rawInput.throttle < -0.05f
+                        if (holdingBrake) {
+                            r.countdownBrakeHeld = true
+                            r.isCountdownRevving = true
+                            r.isBraking = true
+                            r.countdownEarlyReleasePending = false
+                            r.countdownPerfectReleasePending = false
+                        } else if (r.countdownBrakeHeld) {
+                            r.countdownBrakeHeld = false
+                            r.isCountdownRevving = false
+                            r.isBraking = false
+                            if (timeToGoMs <= LAUNCH_PERFECT_WINDOW_MS) {
+                                r.countdownPerfectReleasePending = true
+                            } else {
+                                r.countdownEarlyReleasePending = true
+                            }
+                        } else {
+                            r.isCountdownRevving = false
+                            r.isBraking = false
+                        }
+                    }
+                }
                 val secLeft = (((countdownDuration - elapsedMs) / 1000L) + 1).toInt().coerceIn(1, 3)
                 return buildSnapshot(countdownSec = secLeft)
             }
@@ -1089,6 +1162,20 @@ class RacePhysicsEngine(
                 pendingMineDropTrigger.remove(racer.playerId)
             }
 
+            if (phase == RacePhase.RACING && !racer.isBot && !racer.launchEvaluated && racer.countdownBrakeHeld) {
+                val holdingBrake = input.throttle < -0.05f
+                if (!holdingBrake) {
+                    racer.countdownBrakeHeld = false
+                    racer.launchEvaluated = true
+                    if (raceTimeMs <= LAUNCH_PERFECT_WINDOW_MS) {
+                        racer.launchBoostMs = LAUNCH_BOOST_DURATION_MS
+                        racer.perfectLaunchBannerMs = LAUNCH_BANNER_DURATION_MS
+                    }
+                } else if (raceTimeMs > LAUNCH_PERFECT_WINDOW_MS) {
+                    racer.launchEvaluated = true
+                }
+            }
+
             integrateCarPhysics(racer, input, dt)
             handleWorldAndPropCollisions(racer, input.throttle)
             if (phase == RacePhase.RACING && !racer.finished) {
@@ -1204,6 +1291,13 @@ class RacePhysicsEngine(
 
     private fun tickTimers(racer: MutableRacer, dtMs: Long, dt: Float) {
         if (racer.boostMs > 0L) racer.boostMs = (racer.boostMs - dtMs).coerceAtLeast(0L)
+        if (racer.launchBoostMs > 0L) racer.launchBoostMs = (racer.launchBoostMs - dtMs).coerceAtLeast(0L)
+        if (racer.perfectLaunchBannerMs > 0L) {
+            racer.perfectLaunchBannerMs = (racer.perfectLaunchBannerMs - dtMs).coerceAtLeast(0L)
+        }
+        if (racer.wheelspinSmokeMs > 0L) {
+            racer.wheelspinSmokeMs = (racer.wheelspinSmokeMs - dtMs).coerceAtLeast(0L)
+        }
         if (racer.shieldMs > 0L) racer.shieldMs = (racer.shieldMs - dtMs).coerceAtLeast(0L)
         if (racer.puddleSkidCooldownMs > 0L) {
             racer.puddleSkidCooldownMs = (racer.puddleSkidCooldownMs - dtMs).coerceAtLeast(0L)
@@ -1684,10 +1778,13 @@ class RacePhysicsEngine(
             else -> 1.0f
         }
 
+        val hasLaunchBoost = racer.launchBoostMs > 0L
+        val hasWheelspin = racer.wheelspinSmokeMs > 0L
         val boostMult = if (isStuntMode) 1.20f else 1.44f
         val speedMult = when {
             isStunned -> 0.36f
             hasBoost -> boostMult
+            hasLaunchBoost -> 1.24f
             hasOverdrive -> 1.18f
             else -> 1.0f
         } * offRoadFactor * weatherSpeedMult
@@ -1697,7 +1794,13 @@ class RacePhysicsEngine(
         val accel = racer.carType.accelRate *
             speedPreset.accelMultiplier *
             accelWeatherMult *
-            (if (hasBoost) (if (isStuntMode) 1.38f else 1.75f) else if (hasOverdrive) 1.3f else 1.0f)
+            when {
+                hasBoost -> if (isStuntMode) 1.38f else 1.75f
+                hasLaunchBoost -> 1.85f
+                hasOverdrive -> 1.3f
+                hasWheelspin -> 0.22f
+                else -> 1.0f
+            }
 
         val cosA = cos(racer.angleRad)
         val sinA = sin(racer.angleRad)
@@ -3383,7 +3486,11 @@ class RacePhysicsEngine(
                     electroParalyzedMs = r.electroParalyzedMs,
                     laserBeamMs = r.laserBeamMs,
                     isBraking = r.isBraking,
-                    equippedUpgradesMask = r.equippedUpgradesMask
+                    equippedUpgradesMask = r.equippedUpgradesMask,
+                    isCountdownRevving = r.isCountdownRevving,
+                    launchBoostMs = r.launchBoostMs,
+                    perfectLaunchBannerMs = r.perfectLaunchBannerMs,
+                    wheelspinSmokeMs = r.wheelspinSmokeMs
                 )
             },
             itemBoxes = itemBoxes.toList(),
@@ -3451,6 +3558,11 @@ class RacePhysicsEngine(
          */
         val GLOBAL_STEERING_BEHAVIOR: SteeringBehaviorMode = SteeringBehaviorMode.SPEED_SCALED_RADIUS
 
+        const val COUNTDOWN_DURATION_MS = 3200L
+        const val LAUNCH_PERFECT_WINDOW_MS = 250L
+        const val LAUNCH_BOOST_DURATION_MS = 400L
+        const val LAUNCH_WHEELSPIN_DURATION_MS = 250L
+        const val LAUNCH_BANNER_DURATION_MS = 1400L
         const val FINISH_GRACE_MS = 10_000L
         const val STALLED_RIVAL_MIN_GRACE_MS = 2_000L
         const val STALLED_RIVAL_THRESHOLD_MS = 3_500L

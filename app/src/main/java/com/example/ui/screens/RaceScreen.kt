@@ -1222,6 +1222,7 @@ fun RaceScreen(
 
             val momentaryCallouts = buildList<Pair<String, Color>> {
                 if (isWrongWay) add("WRONG WAY" to errorAccent)
+                if ((localRacer?.perfectLaunchBannerMs ?: 0L) > 0L) add("PERFECT LAUNCH" to goldAccent)
                 if ((localRacer?.stunnedMs ?: 0L) == 0L && kotlin.math.abs(localRacer?.spinVisualOffset ?: 0f) > 0.04f) {
                     add("HYDROPLANE!" to secondaryAccent)
                 }
@@ -1455,6 +1456,8 @@ fun RaceScreen(
                     horizontalAlignment = if (profile.swapControls) Alignment.Start else Alignment.End,
                     verticalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
+                    val isRacingPhase = snapshot?.phase == RacePhase.RACING.name
+                    val isCountdownPhase = snapshot?.phase == RacePhase.COUNTDOWN.name
                     val hasOpponentsOrBots = (snapshot?.racers?.size ?: 0) > 1
                     val minesAllowed = !isArenaMode &&
                         !isStuntsMode &&
@@ -1467,30 +1470,32 @@ fun RaceScreen(
                     ) {
                         if (minesAllowed) {
                             val currentLap = localRacer?.lap ?: 1
+                            val canDropMine = hasMine && isRacingPhase
                             val mineFlash = 0.5f + 0.5f * sin(animTimeSec * 14f)
                             val mineActiveBg = if (mineFlash > 0.45f) {
                                 errorAccent.copy(alpha = 0.94f)
                             } else {
                                 colorScheme.errorContainer.copy(alpha = 0.94f)
                             }
-                            val mineBorder = if (hasMine) {
+                            val mineBorder = if (canDropMine) {
                                 if (mineFlash > 0.45f) colorScheme.onError else errorAccent
                             } else {
                                 hudBorder
                             }
                             val mineLabel = when {
+                                hasMine && isCountdownPhase -> "LOCKED"
                                 hasMine -> "MINE"
                                 currentLap <= 1 -> "LAP 2"
                                 else -> "USED"
                             }
                             Surface(
-                                color = if (hasMine) mineActiveBg else hudSurface.copy(alpha = 0.72f),
+                                color = if (canDropMine) mineActiveBg else hudSurface.copy(alpha = 0.72f),
                                 shape = RoundedCornerShape(18.dp),
                                 border = BorderStroke(2.dp, mineBorder),
                                 modifier = Modifier
                                     .size(width = mineBtnWidth, height = 56.dp)
                                     .clip(RoundedCornerShape(18.dp))
-                                    .clickable(enabled = hasMine) {
+                                    .clickable(enabled = canDropMine) {
                                         hapticController?.onMineDropped()
                                         onDropMine()
                                     }
@@ -1508,7 +1513,7 @@ fun RaceScreen(
                                             .size(10.dp)
                                             .clip(CircleShape)
                                             .background(
-                                                if (hasMine) {
+                                                if (canDropMine) {
                                                     if (mineFlash > 0.45f) colorScheme.onError else errorAccent
                                                 } else {
                                                     hudMuted.copy(alpha = 0.5f)
@@ -1520,7 +1525,7 @@ fun RaceScreen(
                                         text = mineLabel,
                                         maxLines = 1,
                                         style = MaterialTheme.typography.labelLarge,
-                                        color = if (hasMine) {
+                                        color = if (canDropMine) {
                                             if (mineFlash > 0.45f) colorScheme.onError else colorScheme.onErrorContainer
                                         } else {
                                             hudMuted
@@ -1530,7 +1535,7 @@ fun RaceScreen(
                             }
                         }
 
-                        val canFirePowerUp = heldPowerUp != null && !stuntControlsLocked
+                        val canFirePowerUp = isRacingPhase && heldPowerUp != null && !stuntControlsLocked
                         val powerUpBg = if (canFirePowerUp) {
                             primaryAccent.copy(alpha = 0.94f)
                         } else {
@@ -1560,14 +1565,14 @@ fun RaceScreen(
                             ) {
                                 Icon(
                                     Icons.Default.Bolt,
-                                    contentDescription = "Power-up",
+                                    contentDescription = if (isCountdownPhase) "Power-up locked during countdown" else "Power-up",
                                     tint = powerUpContent,
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Spacer(modifier = Modifier.width(5.dp))
                                 Text(
                                     text = when {
-                                        stuntControlsLocked -> "LOCKED"
+                                        stuntControlsLocked || isCountdownPhase -> "LOCKED"
                                         heldPowerUp != null -> heldPowerUp.shortName
                                         isDailyChallenge || isDriftMode -> "1/LAP USED"
                                         else -> "EMPTY"

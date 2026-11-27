@@ -960,4 +960,122 @@ class StreakAndStandingsTest {
         composeTestRule.onNodeWithTag("leaderboard_all_tracks_table").assertDoesNotExist()
         composeTestRule.onNodeWithTag("leaderboard_start_solo_button").performScrollTo().assertIsDisplayed()
     }
+
+    @Test
+    fun homeScreen_showsDailyCompletionCheckmarksAndDailySweepGoldCrown() {
+        val today = DailyChallengeCatalog.todayDateKey()
+        val dailyGpBoard = "RACE_daily_${today}_3L"
+        val dailyDriftBoard = "DRIFT_daily_drift_${today}_3L"
+        val friends = listOf(
+            FriendUiModel(
+                friendshipId = "f_rob",
+                friendUid = "uid_rob",
+                displayName = "Rob",
+                friendCode = "RCROB001",
+                carType = RcCarType.VOLT_BUGGY,
+                primaryColorArgb = 0xFF2196F3,
+                accentColorArgb = 0xFFFFFFFF,
+                effectivelyOnline = false,
+                activityStatus = "OFFLINE",
+                activeRoomId = "",
+                activeRoomCode = "",
+                activeRoomName = "",
+                statusLabel = "Offline"
+            )
+        )
+
+        val sweepStandings = FriendStandingsCalculator.compute(
+            myUid = "uid_me",
+            myName = "Acro",
+            friends = friends,
+            cloudEntries = listOf(
+                LeaderboardEntryDoc(
+                    id = "gp_me", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.RACE.name, trackKey = "daily_$today", boardKey = dailyGpBoard,
+                    totalLaps = 3L, bestRaceTimeMs = 29_500L
+                ),
+                LeaderboardEntryDoc(
+                    id = "gp_rob", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.RACE.name, trackKey = "daily_$today", boardKey = dailyGpBoard,
+                    totalLaps = 3L, bestRaceTimeMs = 31_000L
+                ),
+                LeaderboardEntryDoc(
+                    id = "dr_me", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.DRIFT.name, trackKey = "daily_drift_$today", boardKey = dailyDriftBoard,
+                    totalLaps = 3L, bestRaceTimeMs = 38_200L
+                ),
+                LeaderboardEntryDoc(
+                    id = "dr_rob", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.DRIFT.name, trackKey = "daily_drift_$today", boardKey = dailyDriftBoard,
+                    totalLaps = 3L, bestRaceTimeMs = 39_800L
+                )
+            ),
+            localRecords = emptyList(),
+            todayDateKey = today
+        )
+
+        val partialStandings = FriendStandingsCalculator.compute(
+            myUid = "uid_me",
+            myName = "Acro",
+            friends = friends,
+            cloudEntries = listOf(
+                LeaderboardEntryDoc(
+                    id = "gp_me", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.RACE.name, trackKey = "daily_$today", boardKey = dailyGpBoard,
+                    totalLaps = 3L, bestRaceTimeMs = 29_500L
+                ),
+                LeaderboardEntryDoc(
+                    id = "gp_rob", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.RACE.name, trackKey = "daily_$today", boardKey = dailyGpBoard,
+                    totalLaps = 3L, bestRaceTimeMs = 31_000L
+                ),
+                LeaderboardEntryDoc(
+                    id = "dr_rob", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.DRIFT.name, trackKey = "daily_drift_$today", boardKey = dailyDriftBoard,
+                    totalLaps = 3L, bestRaceTimeMs = 39_800L
+                )
+            ),
+            localRecords = emptyList(),
+            todayDateKey = today
+        )
+
+        val standingsState = androidx.compose.runtime.mutableStateOf(sweepStandings)
+        val gpBestState = androidx.compose.runtime.mutableStateOf<Long?>(29_500L)
+        val driftBestState = androidx.compose.runtime.mutableStateOf<Long?>(38_200L)
+
+        composeTestRule.setContent {
+            MicroRCTheme {
+                HomeScreen(
+                    profile = PlayerProfile(playerId = "uid_me", name = "Acro"),
+                    onHostRace = {},
+                    onJoinRace = {},
+                    onSoloRace = {},
+                    onOpenGarage = {},
+                    onUpdateDriverName = {},
+                    playStreak = PlayStreakState(currentStreakDays = 5, bestStreakDays = 5, activeToday = true),
+                    dailyBestTimeMs = gpBestState.value,
+                    dailyDriftBestTimeMs = driftBestState.value,
+                    isSignedIn = true,
+                    friendsCount = 1,
+                    friendStandings = standingsState.value
+                )
+            }
+        }
+
+        // Daily Sweep (#1 in BOTH Daily GP & Daily Drift among friends) shows gold crown & both checkmarks
+        composeTestRule.onNodeWithTag("home_streak_badge").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_daily_sweep_crown").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("daily_gp_completed_badge", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("daily_drift_completed_badge", useUnmergedTree = true).assertIsDisplayed()
+
+        // When only Daily GP is completed & led (Drift not played), crown hides and only GP checkmark remains
+        composeTestRule.runOnIdle {
+            standingsState.value = partialStandings
+            driftBestState.value = null
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("home_daily_sweep_crown").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("daily_gp_completed_badge", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("daily_drift_completed_badge", useUnmergedTree = true).assertDoesNotExist()
+    }
 }

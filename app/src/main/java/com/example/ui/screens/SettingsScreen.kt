@@ -110,6 +110,7 @@ import com.example.model.ThemeSettings
 import com.example.model.WinCondition
 import com.example.sensors.TiltSteeringController
 import com.example.util.AppUpdateUiState
+import com.example.util.GitHubReleaseInfo
 import com.example.util.SessionNotificationHelper
 import java.util.Locale
 
@@ -139,6 +140,7 @@ fun SettingsScreen(
     isPlayStoreInstall: Boolean = false,
     onCheckForUpdates: () -> Unit = {},
     onOpenUpdateUrl: (String) -> Unit = {},
+    onStartInAppUpdate: ((GitHubReleaseInfo) -> Unit)? = null,
     onBack: () -> Unit
 ) {
     BackHandler { onBack() }
@@ -492,7 +494,8 @@ fun SettingsScreen(
                         updateState = updateState,
                         isPlayStoreInstall = isPlayStoreInstall,
                         onCheckForUpdates = onCheckForUpdates,
-                        onOpenUpdateUrl = onOpenUpdateUrl
+                        onOpenUpdateUrl = onOpenUpdateUrl,
+                        onStartInAppUpdate = onStartInAppUpdate
                     )
                 } else {
                     // In-session Match Rules & Local Audio (accessible from Lobby)
@@ -1287,7 +1290,8 @@ private fun AboutAndVersionSection(
     updateState: AppUpdateUiState,
     isPlayStoreInstall: Boolean,
     onCheckForUpdates: () -> Unit,
-    onOpenUpdateUrl: (String) -> Unit
+    onOpenUpdateUrl: (String) -> Unit,
+    onStartInAppUpdate: ((GitHubReleaseInfo) -> Unit)? = null
 ) {
     val hasUpdate = updateState is AppUpdateUiState.UpdateAvailable
     val dynamicThemeLabel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && dynamicAccentEnabled) {
@@ -1452,7 +1456,13 @@ private fun AboutAndVersionSection(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 Button(
-                                    onClick = { onOpenUpdateUrl(updateState.release.preferredUpdateUrl) },
+                                    onClick = {
+                                        if (onStartInAppUpdate != null) {
+                                            onStartInAppUpdate(updateState.release)
+                                        } else {
+                                            onOpenUpdateUrl(updateState.release.preferredUpdateUrl)
+                                        }
+                                    },
                                     shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier
                                         .weight(1f)
@@ -1461,7 +1471,10 @@ private fun AboutAndVersionSection(
                                 ) {
                                     Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Download APK", style = MaterialTheme.typography.labelLarge)
+                                    Text(
+                                        text = if (onStartInAppUpdate != null) "Update Now" else "Download APK",
+                                        style = MaterialTheme.typography.labelLarge
+                                    )
                                 }
                                 if (updateState.release.apkDownloadUrl != null) {
                                     OutlinedButton(

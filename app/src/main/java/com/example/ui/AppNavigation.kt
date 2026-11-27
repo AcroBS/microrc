@@ -79,6 +79,7 @@ import com.example.model.TrackId
 import com.example.network.RaceNavEvent
 import com.example.network.SessionRole
 import com.example.ui.auth.GoogleAuthManager
+import com.example.ui.components.InAppUpdateDialog
 import com.example.ui.components.LiveFriendOnlineBanner
 import com.example.ui.components.LiveLeaderboardNotificationBanner
 import com.example.ui.components.LivePendingChallengeBanner
@@ -191,7 +192,18 @@ fun MicroRCApp(
     val lastRunRecordEvaluated by viewModel.lastRunRecordEvaluated.collectAsState()
     val overviewCamera by viewModel.overviewCamera.collectAsState()
     val appUpdateState by viewModel.appUpdateState.collectAsState()
+    val inAppUpdateDialogState by viewModel.inAppUpdateDialogState.collectAsState()
     val dismissedUpdateTag by viewModel.dismissedUpdateTag.collectAsState()
+    val appLifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(appLifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.onResumeCheckPendingApkInstall()
+            }
+        }
+        appLifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { appLifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     var studioTestDriveDraft by remember { mutableStateOf<CustomTrackData?>(null) }
     var isStudioTestDrive by remember { mutableStateOf(false) }
 
@@ -858,7 +870,7 @@ fun MicroRCApp(
                         !viewModel.isPlayStoreInstall && it.release.tagName != dismissedUpdateTag
                     },
                     onDownloadUpdate = { release ->
-                        GitHubUpdateChecker.openUpdateUrl(context, release.preferredUpdateUrl)
+                        viewModel.openUpdateDialog(release)
                     },
                     onDismissUpdate = viewModel::dismissUpdateHint
                 )
@@ -1183,6 +1195,7 @@ fun MicroRCApp(
                     isPlayStoreInstall = viewModel.isPlayStoreInstall,
                     onCheckForUpdates = { viewModel.checkForAppUpdate(manual = true) },
                     onOpenUpdateUrl = { url -> GitHubUpdateChecker.openUpdateUrl(context, url) },
+                    onStartInAppUpdate = { release -> viewModel.openUpdateDialog(release) },
                     onBack = {
                         if (showBottomNav) {
                             navController.navigate(Routes.HOME) {
@@ -1767,4 +1780,20 @@ fun MicroRCApp(
             }
         )
     }
+
+    InAppUpdateDialog(
+        state = inAppUpdateDialogState,
+        onConfirmUpdate = { release -> viewModel.startInAppApkUpdate(release) },
+        onDismissLater = { tag -> viewModel.dismissUpdateDialog(dismissTag = tag) },
+        onCancelDownload = { viewModel.cancelInAppApkDownload() },
+        onOpenUnknownSourcesSettings = {
+            runCatching {
+                context.startActivity(GitHubUpdateChecker.buildUnknownSourcesSettingsIntent(context))
+            }
+        },
+        onOpenReleasePageFallback = { url ->
+            GitHubUpdateChecker.openUpdateUrl(context, url)
+            viewModel.dismissUpdateDialog(dismissTag = null)
+        }
+    )
 }

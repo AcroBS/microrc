@@ -1877,6 +1877,7 @@ class OnlineRaceSessionManager(
     }
 
     fun triggerLocalPowerUp() {
+        if (_raceSnapshot.value?.phase != RacePhase.RACING.name) return
         val isOnlineClientInRace: Boolean
         synchronized(this) {
             pendingLocalPowerUp = true
@@ -1893,6 +1894,7 @@ class OnlineRaceSessionManager(
     }
 
     fun triggerLocalMineDrop() {
+        if (_raceSnapshot.value?.phase != RacePhase.RACING.name) return
         val isOnlineClientInRace: Boolean
         synchronized(this) {
             pendingLocalMineDrop = true
