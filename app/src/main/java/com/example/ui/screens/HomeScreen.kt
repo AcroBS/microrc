@@ -573,18 +573,6 @@ fun HomeScreen(
                                 goldAccent = goldAccent
                             )
 
-                            HomeCompactRivalryRow(
-                                isSignedIn = isSignedIn,
-                                friendsCount = friendsCount,
-                                onlineFriendsCount = onlineFriendsCount,
-                                pendingRequestsCount = pendingRequestsCount,
-                                localRecordsCount = localRecordsCount,
-                                standings = friendStandings,
-                                onlineAccent = onlineAccent,
-                                goldAccent = goldAccent,
-                                onOpenFriendStandings = onOpenFriendStandings
-                            )
-
                             val recentRivalryItems = remember(isSignedIn, friendStandings) {
                                 if (isSignedIn && friendStandings != null) {
                                     FriendStandingsCalculator.selectRecentRivalryPreview(
@@ -595,14 +583,16 @@ fun HomeScreen(
                                     emptyList()
                                 }
                             }
-                            if (recentRivalryItems.isNotEmpty()) {
-                                HomeRecentRivalryPreviewCard(
-                                    items = recentRivalryItems,
-                                    goldAccent = goldAccent,
-                                    onViewAll = onOpenFriendStandings,
-                                    onLaunchGhostRace = onLaunchRivalryGhostRace
-                                )
-                            }
+                            HomeUnifiedRivalryCard(
+                                isSignedIn = isSignedIn,
+                                friendsCount = friendsCount,
+                                localRecordsCount = localRecordsCount,
+                                standings = friendStandings,
+                                previewItems = recentRivalryItems,
+                                goldAccent = goldAccent,
+                                onOpenFriendStandings = onOpenFriendStandings,
+                                onLaunchGhostRace = onLaunchRivalryGhostRace
+                            )
                         }
 
                         HomeModeScope.OFFLINE -> {
@@ -1109,20 +1099,21 @@ private fun HomeFiveDayMilestoneBanner(
 }
 
 @Composable
-private fun HomeCompactRivalryRow(
+private fun HomeUnifiedRivalryCard(
     isSignedIn: Boolean,
     friendsCount: Int,
-    onlineFriendsCount: Int,
-    pendingRequestsCount: Int,
     localRecordsCount: Int,
     standings: FriendStandingsSummary?,
-    onlineAccent: Color,
+    previewItems: List<FriendBoardStandingItem>,
     goldAccent: Color,
-    onOpenFriendStandings: () -> Unit
+    onOpenFriendStandings: () -> Unit,
+    onLaunchGhostRace: (FriendBoardStandingItem) -> Unit
 ) {
     val summary = standings ?: FriendStandingsSummary(totalFriendsCount = friendsCount)
     val totalRoster = maxOf(summary.totalCrewCount, friendsCount + 1)
     val isLeadingCrew = isSignedIn && friendsCount > 0 && summary.myCrewRank == 1 && summary.leadingBoardsCount > 0
+    val cappedItems = remember(previewItems) { previewItems.take(3) }
+    val ghostAccent = adaptiveGhostAccentColor()
 
     val summaryText = when {
         !isSignedIn -> if (localRecordsCount > 0) {
@@ -1152,146 +1143,88 @@ private fun HomeCompactRivalryRow(
         shape = RoundedCornerShape(18.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .clickable(onClick = onOpenFriendStandings)
-            .testTag("home_streak_standings_card")
+            .testTag("home_rivalry_preview_card")
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .defaultMinSize(minHeight = 56.dp)
-                .padding(horizontal = 14.dp, vertical = 11.dp)
-                .testTag("home_friends_button"),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            Surface(
-                color = if (isLeadingCrew) {
-                    goldAccent.copy(alpha = 0.18f)
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerHigh
-                },
-                shape = CircleShape,
-                modifier = Modifier.size(32.dp)
+        Column(modifier = Modifier.fillMaxWidth()) {
+            // Unified Card Header: dynamic crew rank summary on left + single "View All >" button on right
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .defaultMinSize(minHeight = 52.dp)
+                    .clickable(onClick = onOpenFriendStandings)
+                    .padding(start = 14.dp, end = 6.dp, top = 4.dp, bottom = 4.dp)
+                    .testTag("home_streak_standings_card"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Box(contentAlignment = Alignment.Center) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("home_friends_button"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Icon(
                         imageVector = if (isLeadingCrew) Icons.Default.EmojiEvents else Icons.Default.Leaderboard,
                         contentDescription = "Friend Standings",
                         tint = if (isLeadingCrew) goldAccent else MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp)
                     )
-                }
-            }
-
-            Text(
-                text = summaryText,
-                style = MaterialTheme.typography.titleSmall.copy(
-                    fontFamily = PlusJakartaFontFamily,
-                    fontWeight = FontWeight.SemiBold
-                ),
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("home_standings_rank_badge")
-            )
-
-            if (onlineFriendsCount > 0 || pendingRequestsCount > 0) {
-                Surface(
-                    color = if (onlineFriendsCount > 0) {
-                        onlineAccent.copy(alpha = 0.16f)
-                    } else {
-                        MaterialTheme.colorScheme.tertiaryContainer
-                    },
-                    shape = CircleShape
-                ) {
                     Text(
-                        text = if (onlineFriendsCount > 0) {
-                            "$onlineFriendsCount online"
-                        } else {
-                            "$pendingRequestsCount req"
-                        },
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontFamily = JetBrainsMonoFontFamily
-                        ),
-                        color = if (onlineFriendsCount > 0) {
-                            onlineAccent
-                        } else {
-                            MaterialTheme.colorScheme.onTertiaryContainer
-                        },
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                    )
-                }
-            }
-
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = "Open Friend Standings",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun HomeRecentRivalryPreviewCard(
-    items: List<FriendBoardStandingItem>,
-    goldAccent: Color,
-    onViewAll: () -> Unit,
-    onLaunchGhostRace: (FriendBoardStandingItem) -> Unit
-) {
-    val cappedItems = remember(items) { items.take(3) }
-    val ghostAccent = adaptiveGhostAccentColor()
-
-    Card(
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-        shape = RoundedCornerShape(18.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag("home_rivalry_preview_card")
-    ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 14.dp, end = 6.dp, top = 4.dp, bottom = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    text = "RECENT RIVALRY",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                TextButton(
-                    onClick = onViewAll,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                    modifier = Modifier
-                        .defaultMinSize(minHeight = 48.dp)
-                        .testTag("home_rivalry_view_all_button")
-                ) {
-                    Text(
-                        text = "View All",
-                        style = MaterialTheme.typography.labelMedium.copy(
+                        text = summaryText,
+                        style = MaterialTheme.typography.bodyMedium.copy(
                             fontFamily = PlusJakartaFontFamily,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.testTag("home_standings_rank_badge")
+                    )
+                }
+
+                if (isSignedIn && friendsCount > 0) {
+                    TextButton(
+                        onClick = onOpenFriendStandings,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                        modifier = Modifier
+                            .defaultMinSize(minHeight = 48.dp)
+                            .testTag("home_rivalry_view_all_button")
+                    ) {
+                        Text(
+                            text = "View All",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontFamily = PlusJakartaFontFamily,
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            maxLines = 1
                         )
-                    )
-                    Spacer(modifier = Modifier.width(2.dp))
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = "Open Friend Standings",
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .padding(end = 8.dp)
+                            .size(24.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = "Open Friend Standings",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
 
+            // Up to 3 prioritized rivalry/chase track rows inside the same unified card
             cappedItems.forEachIndexed { idx, item ->
                 HorizontalDivider(
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),

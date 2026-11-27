@@ -811,12 +811,26 @@ class StreakAndStandingsTest {
             }
         }
 
-        // Tapping summary card routes to Friend Standings, not directly to Friends & Crew
+        // Unified card header has rank summary on left + "View All" on right, and no separate "RECENT RIVALRY" label
+        composeTestRule.onNodeWithText("RECENT RIVALRY").assertDoesNotExist()
+        composeTestRule.onNodeWithText("#1 of 2 Friends • Lead 2 • Chase 2").performScrollTo().assertIsDisplayed()
+        val headerRankY = composeTestRule.onNodeWithTag("home_standings_rank_badge", useUnmergedTree = true)
+            .fetchSemanticsNode().positionInRoot.y
+        val viewAllY = composeTestRule.onNodeWithTag("home_rivalry_view_all_button")
+            .performScrollTo()
+            .assertIsDisplayed()
+            .fetchSemanticsNode().positionInRoot.y
+        assertTrue(
+            "Rank summary ($headerRankY) and View All ($viewAllY) must share the unified card header",
+            kotlin.math.abs(headerRankY - viewAllY) < 40f
+        )
+
+        // Tapping header routes to Friend Standings, not directly to Friends & Crew
         composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().performClick()
         assertEquals(1, standingsOpens)
         assertEquals(0, friendsOpens)
 
-        // Compact 3-row preview card is capped strictly at 3 rows
+        // Unified card holds strictly 3 capped track rows below the header
         composeTestRule.onNodeWithTag("home_rivalry_preview_card").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_rivalry_preview_row_0").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_rivalry_preview_row_1").performScrollTo().assertIsDisplayed()
