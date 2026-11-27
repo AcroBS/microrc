@@ -317,6 +317,7 @@ data class RacerState(
     val isBraking: Boolean = false,
     val equippedUpgradesMask: Int = 0,
     val isCountdownRevving: Boolean = false,
+    val isLaunchHoldActive: Boolean = false,
     val launchBoostMs: Long = 0L,
     val perfectLaunchBannerMs: Long = 0L,
     val wheelspinSmokeMs: Long = 0L
@@ -355,7 +356,23 @@ data class RaceSnapshot(
     val isHybridTour: Boolean = false,
     val hybridStageNumber: Int = 1,
     val nextHybridMode: String? = null
-)
+) {
+    /** True during the ~0.6s bold "GO!" callout right when the race timer begins and cars unlock. */
+    val isGoFlashActive: Boolean
+        get() = phase == RacePhase.RACING.name && raceTimeMs in 0L..GO_FLASH_DURATION_MS
+
+    /** Synchronized start sequence label: "3" -> "2" -> "1" -> "GO!" -> null. */
+    val countdownCalloutLabel: String?
+        get() = when {
+            phase == RacePhase.COUNTDOWN.name && countdownSec in 1..3 -> countdownSec.toString()
+            isGoFlashActive -> "GO!"
+            else -> null
+        }
+
+    companion object {
+        const val GO_FLASH_DURATION_MS: Long = 600L
+    }
+}
 
 @JsonClass(generateAdapter = true)
 data class RematchVoteOption(

@@ -82,6 +82,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
@@ -92,6 +93,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
@@ -121,6 +123,8 @@ import com.example.ui.components.drawTrackMiniMap
 import com.example.ui.components.drawTrackWorld
 import com.example.ui.components.drawWeatherScreenOverlay
 import com.example.ui.theme.adaptiveGoldColor
+import com.example.ui.theme.adaptiveOnlineColor
+import com.example.ui.theme.isMicroRCDarkSurface
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
@@ -276,6 +280,25 @@ fun RaceScreen(
             hapticController?.onPortalWarp()
         }
         lastPortalWarpSeq = seq
+    }
+
+    // Crisp 3-2-1 pips + bright GO! start chime & haptic pulse synchronized to the exact callout frame
+    var lastPlayedCallout by remember { mutableStateOf<String?>(null) }
+    val activeCountdownCallout = snapshot?.countdownCalloutLabel
+    LaunchedEffect(activeCountdownCallout) {
+        val label = activeCountdownCallout
+        if (label == null) {
+            lastPlayedCallout = null
+            return@LaunchedEffect
+        }
+        if (label != lastPlayedCallout) {
+            lastPlayedCallout = label
+            val isGo = label == "GO!"
+            audioEngine?.playCountdownCue(isGo = isGo)
+            if (isGo) {
+                hapticController?.onPowerUpUsed()
+            }
+        }
     }
 
     LaunchedEffect(snapshot) {
@@ -1016,24 +1039,91 @@ fun RaceScreen(
             }
         }
 
-        // Countdown Ring (only before GO)
-        if (snapshot?.phase == RacePhase.COUNTDOWN.name) {
+        // Synchronized 3 - 2 - 1 - GO! Start Sequence Callout Overlay
+        if (activeCountdownCallout != null) {
+            val isGoCallout = activeCountdownCallout == "GO!"
+            val goAccent = adaptiveOnlineColor()
+            val goTextColor = if (isMicroRCDarkSurface()) Color(0xFF04140A) else Color.White
+            val goProgress = if (isGoCallout) {
+                ((snapshot?.raceTimeMs ?: 0L).toFloat() / RaceSnapshot.GO_FLASH_DURATION_MS.toFloat())
+                    .coerceIn(0f, 1f)
+            } else {
+                0f
+            }
+            val goAlpha = if (isGoCallout) {
+                // Full solid visibility through the entire +0.25s launch window, crisp exit fade at 460..600ms
+                (1f - ((goProgress - 0.74f) / 0.26f).coerceIn(0f, 1f))
+            } else {
+                1f
+            }
+            val goPopScale = if (isGoCallout) {
+                // Crisp spring-like punch from 1.22x -> 1.0f in the first 160ms
+                1f + 0.22f * (1f - (goProgress / 0.27f).coerceIn(0f, 1f))
+            } else {
+                1f
+            }
+
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Surface(
-                    color = colorScheme.primaryContainer.copy(alpha = 0.94f),
-                    shape = CircleShape,
-                    border = BorderStroke(3.dp, primaryAccent),
-                    modifier = Modifier.size(120.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            text = "${snapshot.countdownSec}",
-                            style = MaterialTheme.typography.displayLarge,
-                            color = colorScheme.onPrimaryContainer
-                        )
+                if (isGoCallout) {
+                    // Expanding green/accent pulse ring on GO!
+                    val pulseScale = 1.0f + goProgress * 0.78f
+                    val pulseAlpha = (1f - goProgress).coerceIn(0f, 1f) * 0.78f
+                    Box(
+                        modifier = Modifier
+                            .size(134.dp)
+                            .graphicsLayer {
+                                scaleX = pulseScale
+                                scaleY = pulseScale
+                                alpha = pulseAlpha
+                            }
+                            .border(
+                                width = 4.dp,
+                                color = goAccent,
+                                shape = CircleShape
+                            )
+                    )
+                    Surface(
+                        color = goAccent,
+                        shape = RoundedCornerShape(62.dp),
+                        border = BorderStroke(3.5.dp, Color.White.copy(alpha = 0.92f)),
+                        shadowElevation = 12.dp,
+                        modifier = Modifier
+                            .size(width = 160.dp, height = 116.dp)
+                            .graphicsLayer {
+                                scaleX = goPopScale
+                                scaleY = goPopScale
+                                alpha = goAlpha
+                            }
+                            .testTag("countdown_go_callout")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "GO!",
+                                style = MaterialTheme.typography.displayLarge.copy(fontWeight = FontWeight.Black),
+                                color = goTextColor
+                            )
+                        }
+                    }
+                } else {
+                    Surface(
+                        color = colorScheme.primaryContainer.copy(alpha = 0.94f),
+                        shape = CircleShape,
+                        border = BorderStroke(3.dp, primaryAccent),
+                        shadowElevation = 8.dp,
+                        modifier = Modifier
+                            .size(120.dp)
+                            .testTag("countdown_callout_badge")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = activeCountdownCallout,
+                                style = MaterialTheme.typography.displayLarge.copy(fontWeight = FontWeight.ExtraBold),
+                                color = colorScheme.onPrimaryContainer
+                            )
+                        }
                     }
                 }
             }
@@ -1201,7 +1291,11 @@ fun RaceScreen(
                         )
                     }
                 }
-            } else if (!snapshot?.eventBanner.isNullOrBlank() && snapshot?.phase != RacePhase.COUNTDOWN.name) {
+            } else if (
+                !snapshot?.eventBanner.isNullOrBlank() &&
+                snapshot?.phase != RacePhase.COUNTDOWN.name &&
+                snapshot?.isGoFlashActive != true
+            ) {
                 Surface(
                     color = hudSurface,
                     shape = RoundedCornerShape(50),

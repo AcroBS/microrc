@@ -114,6 +114,7 @@ class RacePhysicsEngine(
         var puddleSkidDir: Float = 1f,
         var puddleSkidCooldownMs: Long = 0L,
         var countdownBrakeHeld: Boolean = false,
+        var isLaunchHoldActive: Boolean = false,
         var isCountdownRevving: Boolean = false,
         var countdownEarlyReleasePending: Boolean = false,
         var countdownPerfectReleasePending: Boolean = false,
@@ -947,24 +948,30 @@ class RacePhysicsEngine(
                             val holdingBrakeNow = rawInput != null && rawInput.throttle < -0.05f
                             if (r.countdownBrakeHeld && !holdingBrakeNow) {
                                 r.countdownBrakeHeld = false
+                                r.isLaunchHoldActive = false
                                 r.countdownPerfectReleasePending = true
                             }
                             when {
                                 r.countdownPerfectReleasePending -> {
                                     r.countdownPerfectReleasePending = false
+                                    r.isLaunchHoldActive = false
                                     r.launchEvaluated = true
                                     r.launchBoostMs = LAUNCH_BOOST_DURATION_MS
                                     r.perfectLaunchBannerMs = LAUNCH_BANNER_DURATION_MS
                                 }
                                 r.countdownEarlyReleasePending -> {
                                     r.countdownEarlyReleasePending = false
+                                    r.isLaunchHoldActive = false
                                     r.launchEvaluated = true
                                     r.wheelspinSmokeMs = LAUNCH_WHEELSPIN_DURATION_MS
                                 }
                                 r.countdownBrakeHeld -> {
+                                    // Keep staging brake engaged past GO so car stays at speed = 0f instead of reversing
+                                    r.isLaunchHoldActive = true
                                     r.launchEvaluated = false
                                 }
                                 else -> {
+                                    r.isLaunchHoldActive = false
                                     r.launchEvaluated = true
                                 }
                             }
@@ -989,12 +996,14 @@ class RacePhysicsEngine(
                         val holdingBrake = rawInput != null && rawInput.throttle < -0.05f
                         if (holdingBrake) {
                             r.countdownBrakeHeld = true
+                            r.isLaunchHoldActive = true
                             r.isCountdownRevving = true
                             r.isBraking = true
                             r.countdownEarlyReleasePending = false
                             r.countdownPerfectReleasePending = false
-                        } else if (r.countdownBrakeHeld) {
+                        } else if (r.countdownBrakeHeld || r.isLaunchHoldActive) {
                             r.countdownBrakeHeld = false
+                            r.isLaunchHoldActive = false
                             r.isCountdownRevving = false
                             r.isBraking = false
                             if (timeToGoMs <= LAUNCH_PERFECT_WINDOW_MS) {
@@ -1162,16 +1171,21 @@ class RacePhysicsEngine(
                 pendingMineDropTrigger.remove(racer.playerId)
             }
 
-            if (phase == RacePhase.RACING && !racer.isBot && !racer.launchEvaluated && racer.countdownBrakeHeld) {
+            if (phase == RacePhase.RACING && !racer.isBot && racer.isLaunchHoldActive) {
                 val holdingBrake = input.throttle < -0.05f
                 if (!holdingBrake) {
+                    // Release staging hold immediately so forward auto-acceleration starts on this frame
+                    racer.isLaunchHoldActive = false
                     racer.countdownBrakeHeld = false
-                    racer.launchEvaluated = true
-                    if (raceTimeMs <= LAUNCH_PERFECT_WINDOW_MS) {
-                        racer.launchBoostMs = LAUNCH_BOOST_DURATION_MS
-                        racer.perfectLaunchBannerMs = LAUNCH_BANNER_DURATION_MS
+                    if (!racer.launchEvaluated) {
+                        racer.launchEvaluated = true
+                        if (raceTimeMs <= LAUNCH_PERFECT_WINDOW_MS) {
+                            racer.launchBoostMs = LAUNCH_BOOST_DURATION_MS
+                            racer.perfectLaunchBannerMs = LAUNCH_BANNER_DURATION_MS
+                        }
                     }
-                } else if (raceTimeMs > LAUNCH_PERFECT_WINDOW_MS) {
+                } else if (!racer.launchEvaluated && raceTimeMs > LAUNCH_PERFECT_WINDOW_MS) {
+                    // Past the +250ms perfect window, keep staging hold active until release (no boost)
                     racer.launchEvaluated = true
                 }
             }
@@ -1665,6 +1679,15 @@ class RacePhysicsEngine(
             racer.vx = 0f
             racer.vy = 0f
             racer.steerVisual = 0f
+            return
+        }
+        // Staging brake hold from 3-2-1 countdown: keep car stationary at speed = 0f (never reverse)
+        // until the player releases BRAKE.
+        if (racer.isLaunchHoldActive) {
+            racer.isBraking = phase == RacePhase.RACING && racer.stunnedMs == 0L && input.throttle < -0.05f
+            racer.vx = 0f
+            racer.vy = 0f
+            racer.steerVisual = if (racer.stunnedMs > 0L) 0f else input.steer.coerceIn(-1f, 1f)
             return
         }
         val isAirborne = racer.jumpZ > 0.08f
@@ -3488,6 +3511,7 @@ class RacePhysicsEngine(
                     isBraking = r.isBraking,
                     equippedUpgradesMask = r.equippedUpgradesMask,
                     isCountdownRevving = r.isCountdownRevving,
+                    isLaunchHoldActive = r.isLaunchHoldActive,
                     launchBoostMs = r.launchBoostMs,
                     perfectLaunchBannerMs = r.perfectLaunchBannerMs,
                     wheelspinSmokeMs = r.wheelspinSmokeMs
@@ -3559,6 +3583,7 @@ class RacePhysicsEngine(
         val GLOBAL_STEERING_BEHAVIOR: SteeringBehaviorMode = SteeringBehaviorMode.SPEED_SCALED_RADIUS
 
         const val COUNTDOWN_DURATION_MS = 3200L
+        const val GO_FLASH_DURATION_MS = RaceSnapshot.GO_FLASH_DURATION_MS
         const val LAUNCH_PERFECT_WINDOW_MS = 250L
         const val LAUNCH_BOOST_DURATION_MS = 400L
         const val LAUNCH_WHEELSPIN_DURATION_MS = 250L

@@ -66,6 +66,8 @@ class RaceAudioEngine(
     @Volatile private var currentRunTheme: RaceTrackTheme = THEMES[0]
     @Volatile private var runChangeCounter: Int = 0
     @Volatile private var lastSnapshotFinished: Boolean = false
+    @Volatile private var cueTriggerSeq: Int = 0
+    @Volatile private var cueIsGoChime: Boolean = false
     private var lastThemeIndex: Int = -1
 
     val activeThemeIndex: Int
@@ -117,6 +119,14 @@ class RaceAudioEngine(
             lastSnapshotFinished = isFinished
             syncRaceMediaPlayer()
         }
+    }
+
+    /**
+     * Triggers a crisp synthesized countdown pip (3, 2, 1) or bright dual-harmonic start chime ("GO!").
+     */
+    fun playCountdownCue(isGo: Boolean) {
+        cueIsGoChime = isGo
+        cueTriggerSeq += 1
     }
 
     fun updateAudioSettings(audioSettings: AudioSettings) {
@@ -395,6 +405,16 @@ class RaceAudioEngine(
             var stepIndex = -1
             var observedMode = mode
 
+            // One-shot countdown pip & GO! start chime synthesizer state
+            var lastCueSeq = cueTriggerSeq
+            var cueRemainingSamples = 0
+            var cueTotalSamples = 1
+            var cueBaseFreq = 523.25
+            var cueHarmonicFreq = 1046.5
+            var cuePhase1 = 0.0
+            var cuePhase2 = 0.0
+            var cueDualChord = false
+
             // Menu sequencer patterns (calm semi-electronic: Cmaj9 -> Am9 -> Fmaj9 -> G6sus4)
             val menuChords = arrayOf(
                 intArrayOf(60, 64, 67, 74), // Cmaj9
@@ -430,6 +450,19 @@ class RaceAudioEngine(
                         snap.phase != RacePhase.FINISHED.name
 
                     refreshCarVoices(if (inActiveRace) snap else null)
+
+                    val curCueSeq = cueTriggerSeq
+                    if (curCueSeq != lastCueSeq) {
+                        lastCueSeq = curCueSeq
+                        val goChime = cueIsGoChime
+                        cueDualChord = goChime
+                        cueBaseFreq = if (goChime) 880.0 else 523.25
+                        cueHarmonicFreq = if (goChime) 1318.51 else 1046.5
+                        cueTotalSamples = if (goChime) (sampleRate * 0.34).toInt() else (sampleRate * 0.12).toInt()
+                        cueRemainingSamples = cueTotalSamples
+                        cuePhase1 = 0.0
+                        cuePhase2 = 0.0
+                    }
 
                     val bpm = 88
                     val baseStepSamples = (sampleRate * 60.0) / (bpm * 4.0)
@@ -551,6 +584,28 @@ class RaceAudioEngine(
                             }
                         }
 
+                        // Crisp 3-2-1 pip and bright GO! start chime
+                        if (cueRemainingSamples > 0) {
+                            if (sfxGain > 0.0001 && activeMode == AudioMode.RACE) {
+                                val elapsed = cueTotalSamples - cueRemainingSamples
+                                val progress = elapsed.toDouble() / cueTotalSamples.coerceAtLeast(1)
+                                val attack = (elapsed / (sampleRate * 0.006)).coerceIn(0.0, 1.0)
+                                val decay = (1.0 - progress).pow(if (cueDualChord) 1.65 else 2.1)
+                                cuePhase1 = (cuePhase1 + cueBaseFreq / sampleRate) % 1.0
+                                cuePhase2 = (cuePhase2 + cueHarmonicFreq / sampleRate) % 1.0
+                                val tone = if (cueDualChord) {
+                                    sin(2.0 * PI * cuePhase1) * 0.62 +
+                                        sin(2.0 * PI * cuePhase2) * 0.38
+                                } else {
+                                    sin(2.0 * PI * cuePhase1) * 0.82 +
+                                        sin(2.0 * PI * cuePhase2) * 0.18
+                                }
+                                val chimeAmp = if (cueDualChord) 0.30 else 0.20
+                                mix += tone * attack * decay * chimeAmp * sfxGain
+                            }
+                            cueRemainingSamples--
+                        }
+
                         // Gentle studio soft-saturation limiter so peaks never clip harshly
                         val softLimited = tanh(mix * 0.95) * 0.86
                         pcm[i] = (softLimited * 30000.0).toInt().coerceIn(-32760, 32760).toShort()
@@ -595,8 +650,9 @@ class RaceAudioEngine(
             val speedNorm = (r.speed / 580.0).coerceIn(0.0, 1.35)
             val airBoost = if (r.jumpZ > 0.05f) 42.0 else 0.0
             val nitroBoost = if (r.boostMs > 0L) 58.0 else 0.0
+            val revBoost = if (r.isCountdownRevving) 48.0 else 0.0
             val carOffsetHz = i * 9.0
-            v.targetFreq = 96.0 + carOffsetHz + speedNorm * 230.0 + airBoost + nitroBoost
+            v.targetFreq = 96.0 + carOffsetHz + speedNorm * 230.0 + airBoost + nitroBoost + revBoost
 
             val isLocal = r.playerId == localPlayerId
             val dist = if (localRacer != null) {

@@ -2692,15 +2692,18 @@ class RaceEngineUnitTest {
             paSnap = perfectAfterEngine.step(0.02f)
         }
         assertEquals(RacePhase.RACING.name, paSnap.phase)
-        // Still holding brake for 120ms after GO -> brakes stay applied, no boost yet
+        // Still holding brake for 120ms after GO -> staging brake keeps speed at 0f, no boost yet
         repeat(6) {
             perfectAfterEngine.submitInput("p1", ControlInput(throttle = -1f, steer = 0f))
             paSnap = perfectAfterEngine.step(0.02f)
+            assertTrue("Staging launch hold must stay active while brake held", paSnap.racers.first().isLaunchHoldActive)
+            assertEquals("Holding brake past GO must keep speed at 0f (no reversing)", 0f, paSnap.racers.first().speed, 0.001f)
         }
         assertEquals("Boost must not trigger while brake is still held", 0L, paSnap.racers.first().launchBoostMs)
         // Release brake at ~140ms after GO (inside +250ms window) -> triggers Perfect Launch!
         perfectAfterEngine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
         paSnap = perfectAfterEngine.step(0.02f)
+        assertFalse("Releasing brake must clear isLaunchHoldActive", paSnap.racers.first().isLaunchHoldActive)
         assertTrue("Post-GO release within +0.25s must trigger 0.4s launch boost (${paSnap.racers.first().launchBoostMs})", paSnap.racers.first().launchBoostMs in 350L..400L)
         assertTrue("Post-GO perfect release must show PERFECT LAUNCH pill", paSnap.racers.first().perfectLaunchBannerMs > 0L)
 
@@ -2715,13 +2718,160 @@ class RaceEngineUnitTest {
             lateEngine.submitInput("p1", ControlInput(throttle = -1f, steer = 0f))
             lateSnap = lateEngine.step(0.02f)
             assertTrue("Holding brake past GO must keep brakes applied", lateSnap.racers.first().isBraking)
+            assertTrue("Holding brake past GO must keep staging launch hold active", lateSnap.racers.first().isLaunchHoldActive)
+            assertEquals("Holding brake past GO must keep speed at 0f (never reverse)", 0f, lateSnap.racers.first().speed, 0.001f)
         }
         // Now release brake at ~420ms after GO (outside +250ms window) -> no boost, no wheelspin
         lateEngine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
         lateSnap = lateEngine.step(0.02f)
         val lateAfterRelease = lateSnap.racers.first()
+        assertFalse("Releasing brake must clear isLaunchHoldActive", lateAfterRelease.isLaunchHoldActive)
         assertEquals("Late release must NOT trigger launch boost", 0L, lateAfterRelease.launchBoostMs)
         assertEquals("Late release must NOT show PERFECT LAUNCH pill", 0L, lateAfterRelease.perfectLaunchBannerMs)
         assertEquals("Late release must NOT trigger early wheelspin penalty", 0L, lateAfterRelease.wheelspinSmokeMs)
+    }
+
+    @Test
+    fun countdown_transitionsCleanlyThrough3_2_1_Go_andUnlocksControlsAndNitroOnGo() {
+        val players = listOf(
+            LobbyPlayer("p1", "Acro", isHost = true, isBot = false, carType = RcCarType.VOLT_BUGGY.name)
+        )
+        val track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP)
+        val engine = RacePhysicsEngine(
+            track = track,
+            totalLaps = 3,
+            players = players,
+            rules = RaceRulesSettings(autoAccelerate = true, randomConditionsEnabled = false),
+            random = Random(42L),
+            isDailyChallenge = true
+        )
+
+        val observedLabels = mutableListOf<String>()
+        var snap = engine.step(0.02f)
+        val startX = snap.racers.first().x
+        val startY = snap.racers.first().y
+        snap.countdownCalloutLabel?.let { observedLabels.add(it) }
+
+        // Walk through the entire 3 -> 2 -> 1 countdown trying to tap Nitro and move
+        while (snap.phase == RacePhase.COUNTDOWN.name) {
+            val r = snap.racers.first()
+            assertFalse("GO! flash must not be active during 3-2-1", snap.isGoFlashActive)
+            assertEquals("Car must stay locked at 0 speed during countdown", 0f, r.speed, 0.001f)
+            assertEquals("Car X must stay on start line during countdown", startX, r.x, 0.001f)
+            assertEquals("Car Y must stay on start line during countdown", startY, r.y, 0.001f)
+            assertEquals("Nitro must stay locked during countdown", PowerUpType.TURBO_NITRO.name, r.heldPowerUp)
+            assertEquals("Nitro boost must stay 0 during countdown", 0L, r.boostMs)
+
+            engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f, usePowerUp = true))
+            snap = engine.step(0.02f)
+            snap.countdownCalloutLabel?.let { label ->
+                if (observedLabels.lastOrNull() != label) {
+                    observedLabels.add(label)
+                }
+            }
+        }
+
+        // Exact frame GO! triggers: phase == RACING, GO! callout active, controls unlocked, buffered countdown Nitro ignored
+        assertEquals(RacePhase.RACING.name, snap.phase)
+        assertEquals(0, snap.countdownSec)
+        assertTrue("GO! flash must activate on the exact transition frame", snap.isGoFlashActive)
+        assertEquals("GO!", snap.countdownCalloutLabel)
+        assertEquals(listOf("3", "2", "1", "GO!"), observedLabels)
+        assertTrue("Car must immediately unlock and start moving forward on GO!", snap.racers.first().speed > 0f)
+        assertEquals("Buffered countdown Nitro taps must not auto-fire on GO!", PowerUpType.TURBO_NITRO.name, snap.racers.first().heldPowerUp)
+
+        // Tapping Nitro immediately after GO! (while GO! flash is still visible) unlocks and activates Nitro
+        engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f, usePowerUp = true))
+        snap = engine.step(0.02f)
+        assertTrue("GO! flash should still be visible right after start", snap.isGoFlashActive)
+        assertEquals("Nitro must unlock and consume immediately on GO!", null, snap.racers.first().heldPowerUp)
+        assertTrue("Nitro boost must activate immediately on GO!", snap.racers.first().boostMs > 1000L)
+
+        // Advance past ~0.6s GO! callout duration and verify GO! clears cleanly
+        repeat(35) {
+            engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+            snap = engine.step(0.02f)
+        }
+        assertFalse("GO! flash must end after ~0.6s (${snap.raceTimeMs}ms)", snap.isGoFlashActive)
+        assertEquals(null, snap.countdownCalloutLabel)
+    }
+
+    @Test
+    fun launchHold_holdingBrakeThroughGo_keepsSpeedZeroWithoutReversingUntilReleased() {
+        val players = listOf(
+            LobbyPlayer("p1", "Acro", isHost = true, isBot = false, carType = RcCarType.VOLT_BUGGY.name)
+        )
+        val track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP)
+        val engine = RacePhysicsEngine(
+            track = track,
+            totalLaps = 3,
+            players = players,
+            rules = RaceRulesSettings(autoAccelerate = true, randomConditionsEnabled = false),
+            random = Random(53L),
+            isDailyChallenge = true
+        )
+
+        var snap = engine.step(0.02f)
+        val startX = snap.racers.first().x
+        val startY = snap.racers.first().y
+
+        // Press and hold BRAKE throughout the 3-2-1 countdown
+        while (snap.phase == RacePhase.COUNTDOWN.name) {
+            engine.submitInput("p1", ControlInput(throttle = -1f, steer = 0f))
+            snap = engine.step(0.02f)
+            if (snap.phase == RacePhase.COUNTDOWN.name) {
+                val r = snap.racers.first()
+                assertTrue("Holding BRAKE during countdown must set isLaunchHoldActive", r.isLaunchHoldActive)
+                assertTrue("Holding BRAKE during countdown must set isCountdownRevving", r.isCountdownRevving)
+                assertEquals(0f, r.speed, 0.001f)
+            }
+        }
+
+        // Exact GO! frame while BRAKE is still held: car remains held at speed = 0f (never reverses!)
+        assertEquals(RacePhase.RACING.name, snap.phase)
+        assertTrue(snap.isGoFlashActive)
+        assertTrue("isLaunchHoldActive must remain true when holding BRAKE at GO!", snap.racers.first().isLaunchHoldActive)
+        assertEquals("Car must stay stationary at GO! while BRAKE held", 0f, snap.racers.first().speed, 0.001f)
+
+        // Keep holding BRAKE for 600ms past GO! (30 ticks x 20ms) — must NEVER reverse or creep
+        repeat(30) {
+            engine.submitInput("p1", ControlInput(throttle = -1f, steer = 0f))
+            snap = engine.step(0.02f)
+            val r = snap.racers.first()
+            val forwardVel = r.vx * kotlin.math.cos(r.angleRad) + r.vy * kotlin.math.sin(r.angleRad)
+            assertTrue("isLaunchHoldActive must stay true while BRAKE remains held", r.isLaunchHoldActive)
+            assertEquals("Speed must stay exactly 0f during launch hold", 0f, r.speed, 0.001f)
+            assertTrue("Forward velocity must never go negative (reverse) during launch hold ($forwardVel)", forwardVel >= 0f)
+            assertEquals("Car X must stay on start line during launch hold", startX, r.x, 0.001f)
+            assertEquals("Car Y must stay on start line during launch hold", startY, r.y, 0.001f)
+        }
+
+        // Release BRAKE -> isLaunchHoldActive clears immediately and forward auto-acceleration begins
+        engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+        snap = engine.step(0.02f)
+        assertFalse("isLaunchHoldActive must clear immediately when BRAKE is released", snap.racers.first().isLaunchHoldActive)
+        val releasedForwardVel = snap.racers.first().let { it.vx * kotlin.math.cos(it.angleRad) + it.vy * kotlin.math.sin(it.angleRad) }
+        assertTrue("Forward auto-acceleration must begin immediately on BRAKE release ($releasedForwardVel)", releasedForwardVel > 0f)
+
+        // Accelerate briefly forward, then press & hold BRAKE again -> normal brake/reverse must work!
+        repeat(10) {
+            engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+            snap = engine.step(0.02f)
+        }
+        assertTrue("Car should accelerate forward normally", snap.racers.first().speed > 30f)
+
+        // Subsequent BRAKE press during race brakes to 0 and engages reverse normally
+        repeat(45) {
+            engine.submitInput("p1", ControlInput(throttle = -1f, steer = 0f))
+            snap = engine.step(0.02f)
+            assertFalse("Subsequent mid-race BRAKE presses must NOT re-enable isLaunchHoldActive", snap.racers.first().isLaunchHoldActive)
+        }
+        val afterMidRaceBrake = snap.racers.first()
+        val reverseForwardVel = afterMidRaceBrake.vx * kotlin.math.cos(afterMidRaceBrake.angleRad) +
+            afterMidRaceBrake.vy * kotlin.math.sin(afterMidRaceBrake.angleRad)
+        assertTrue(
+            "Subsequent BRAKE press during the race must still engage reverse normally ($reverseForwardVel)",
+            reverseForwardVel < -15f
+        )
     }
 }
