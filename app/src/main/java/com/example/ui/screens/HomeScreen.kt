@@ -52,7 +52,6 @@ import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.LocalFireDepartment
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SmartToy
@@ -109,7 +108,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.FriendBoardStandingItem
-import com.example.data.FriendStandingsCalculator
 import com.example.data.FriendStandingsSummary
 import com.example.data.PlayStreakState
 import com.example.model.GameMode
@@ -117,7 +115,6 @@ import com.example.model.PlayerProfile
 import com.example.ui.components.drawRcCar
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.PlusJakartaFontFamily
-import com.example.ui.theme.adaptiveGhostAccentColor
 import com.example.ui.theme.adaptiveGoldColor
 import com.example.ui.theme.adaptiveOnlineColor
 import com.example.util.AppUpdateUiState
@@ -573,25 +570,13 @@ fun HomeScreen(
                                 goldAccent = goldAccent
                             )
 
-                            val recentRivalryItems = remember(isSignedIn, friendStandings) {
-                                if (isSignedIn && friendStandings != null) {
-                                    FriendStandingsCalculator.selectRecentRivalryPreview(
-                                        summary = friendStandings,
-                                        limit = 3
-                                    )
-                                } else {
-                                    emptyList()
-                                }
-                            }
-                            HomeUnifiedRivalryCard(
+                            HomeCrewRankingCard(
                                 isSignedIn = isSignedIn,
                                 friendsCount = friendsCount,
                                 localRecordsCount = localRecordsCount,
                                 standings = friendStandings,
-                                previewItems = recentRivalryItems,
                                 goldAccent = goldAccent,
-                                onOpenFriendStandings = onOpenFriendStandings,
-                                onLaunchGhostRace = onLaunchRivalryGhostRace
+                                onOpenFriendStandings = onOpenFriendStandings
                             )
                         }
 
@@ -1099,32 +1084,21 @@ private fun HomeFiveDayMilestoneBanner(
 }
 
 @Composable
-private fun HomeUnifiedRivalryCard(
+private fun HomeCrewRankingCard(
     isSignedIn: Boolean,
     friendsCount: Int,
     localRecordsCount: Int,
     standings: FriendStandingsSummary?,
-    previewItems: List<FriendBoardStandingItem>,
     goldAccent: Color,
-    onOpenFriendStandings: () -> Unit,
-    onLaunchGhostRace: (FriendBoardStandingItem) -> Unit
+    onOpenFriendStandings: () -> Unit
 ) {
     val summary = standings ?: FriendStandingsSummary(totalFriendsCount = friendsCount)
-    val totalRoster = maxOf(summary.totalCrewCount, friendsCount + 1)
     val isLeadingCrew = isSignedIn && friendsCount > 0 && summary.myCrewRank == 1 && summary.leadingBoardsCount > 0
-    val cappedItems = remember(previewItems) { previewItems.take(3) }
-    val ghostAccent = adaptiveGhostAccentColor()
-
-    val summaryText = when {
-        !isSignedIn -> if (localRecordsCount > 0) {
-            "Friends & Crew • Sign in to compare ($localRecordsCount times)"
+    val topCrewMembers = remember(isSignedIn, friendsCount, summary.crewLeaderboard) {
+        if (isSignedIn && friendsCount > 0) {
+            summary.crewLeaderboard.take(4)
         } else {
-            "Friends & Crew • Sign in to rank vs friends"
-        }
-        friendsCount == 0 -> "Friends & Crew • Add friends to compete"
-        else -> {
-            val rank = summary.myCrewRank.coerceAtLeast(1)
-            "#$rank of $totalRoster Friends • Lead ${summary.leadingBoardsCount} • Chase ${summary.trailingBoardsCount}"
+            emptyList()
         }
     }
 
@@ -1143,141 +1117,190 @@ private fun HomeUnifiedRivalryCard(
         shape = RoundedCornerShape(18.dp),
         modifier = Modifier
             .fillMaxWidth()
-            .testTag("home_rivalry_preview_card")
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(onClick = onOpenFriendStandings)
+            .testTag("home_streak_standings_card")
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            // Unified Card Header: dynamic crew rank summary on left + single "View All >" button on right
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("home_rivalry_preview_card")
+        ) {
+            // Compact Card Header: "CREW RANKING" on left + "Track Breakdown >" on right
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .defaultMinSize(minHeight = 52.dp)
-                    .clickable(onClick = onOpenFriendStandings)
-                    .padding(start = 14.dp, end = 6.dp, top = 4.dp, bottom = 4.dp)
-                    .testTag("home_streak_standings_card"),
+                    .defaultMinSize(minHeight = 48.dp)
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                    .testTag("home_friends_button"),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("home_friends_button"),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.testTag("home_standings_rank_badge")
                 ) {
                     Icon(
                         imageVector = if (isLeadingCrew) Icons.Default.EmojiEvents else Icons.Default.Leaderboard,
-                        contentDescription = "Friend Standings",
+                        contentDescription = "Crew Ranking",
                         tint = if (isLeadingCrew) goldAccent else MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
-                        text = summaryText,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontFamily = PlusJakartaFontFamily,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.testTag("home_standings_rank_badge")
+                        text = "CREW RANKING",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
                     )
                 }
 
-                if (isSignedIn && friendsCount > 0) {
-                    TextButton(
-                        onClick = onOpenFriendStandings,
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                        modifier = Modifier
-                            .defaultMinSize(minHeight = 48.dp)
-                            .testTag("home_rivalry_view_all_button")
-                    ) {
-                        Text(
-                            text = "View All",
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontFamily = PlusJakartaFontFamily,
-                                fontWeight = FontWeight.SemiBold
-                            ),
-                            maxLines = 1
-                        )
-                        Spacer(modifier = Modifier.width(2.dp))
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = "Open Friend Standings",
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .padding(end = 8.dp)
-                            .size(24.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                            contentDescription = "Open Friend Standings",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier.testTag("home_rivalry_view_all_button")
+                ) {
+                    Text(
+                        text = if (isSignedIn && friendsCount > 0) "Track Breakdown" else "Open",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontFamily = PlusJakartaFontFamily,
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1
+                    )
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Open Friend Standings",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
+                    )
                 }
             }
 
-            // Up to 3 prioritized rivalry/chase track rows inside the same unified card
-            cappedItems.forEachIndexed { idx, item ->
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
-                    modifier = Modifier.padding(horizontal = 14.dp)
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                modifier = Modifier.padding(horizontal = 14.dp)
+            )
+
+            if (!isSignedIn) {
+                val signedOutCopy = if (localRecordsCount > 0) {
+                    "Sign in to compare ($localRecordsCount times)"
+                } else {
+                    "Sign in to rank vs friends"
+                }
+                Text(
+                    text = signedOutCopy,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontFamily = PlusJakartaFontFamily,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
                 )
-                val isLeading = item.myRank == 1
-                val deltaText = FriendStandingsCalculator.formatRivalryDeltaLine(item)
-                Row(
+            } else if (friendsCount == 0) {
+                Text(
+                    text = "Add friends to compete on the crew leaderboard",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontFamily = PlusJakartaFontFamily,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
+                )
+            } else if (topCrewMembers.isEmpty()) {
+                val totalRoster = maxOf(summary.totalCrewCount, friendsCount + 1)
+                val rank = summary.myCrewRank.coerceAtLeast(1)
+                Text(
+                    text = "#$rank of $totalRoster Friends • Lead ${summary.leadingBoardsCount} • Chase ${summary.trailingBoardsCount}",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontFamily = PlusJakartaFontFamily,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)
+                )
+            } else {
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .defaultMinSize(minHeight = 52.dp)
-                        .clickable { onLaunchGhostRace(item) }
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
-                        .testTag("home_rivalry_preview_row_$idx"),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        Text(
-                            text = item.trackName,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                fontFamily = PlusJakartaFontFamily,
-                                fontWeight = FontWeight.SemiBold
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = deltaText,
-                            style = MaterialTheme.typography.labelSmall.copy(
-                                fontFamily = PlusJakartaFontFamily,
-                                fontWeight = FontWeight.SemiBold
-                            ),
-                            color = if (isLeading) goldAccent else MaterialTheme.colorScheme.secondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
+                    topCrewMembers.forEachIndexed { idx, member ->
+                        val rankColor = when (member.rank) {
+                            1 -> goldAccent
+                            2 -> MaterialTheme.colorScheme.secondary
+                            3 -> MaterialTheme.colorScheme.tertiary
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (member.isSelf) {
+                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+                                    } else {
+                                        Color.Transparent
+                                    }
+                                )
+                                .padding(horizontal = 8.dp, vertical = 7.dp)
+                                .testTag("home_crew_ranking_row_$idx"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = formatHomeOrdinalRank(member.rank),
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    fontFamily = JetBrainsMonoFontFamily,
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = rankColor,
+                                modifier = Modifier.width(34.dp)
+                            )
 
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Race ghost on ${item.trackName}",
-                        tint = if (isLeading) goldAccent else ghostAccent,
-                        modifier = Modifier.size(18.dp)
-                    )
+                            Text(
+                                text = if (member.isSelf) "${member.displayName} (You)" else member.displayName,
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontFamily = PlusJakartaFontFamily,
+                                    fontWeight = if (member.isSelf || member.rank == 1) FontWeight.Bold else FontWeight.SemiBold
+                                ),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            Text(
+                                text = "Lead ${member.contestedWins} • Chase ${member.trailingBoardsCount}",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontFamily = JetBrainsMonoFontFamily
+                                ),
+                                color = if (member.rank == 1) goldAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        }
+                    }
                 }
             }
         }
     }
+}
+
+private fun formatHomeOrdinalRank(rank: Int): String {
+    val mod100 = rank % 100
+    val suffix = if (mod100 in 11..13) {
+        "th"
+    } else {
+        when (rank % 10) {
+            1 -> "st"
+            2 -> "nd"
+            3 -> "rd"
+            else -> "th"
+        }
+    }
+    return "$rank$suffix"
 }
 
 @Composable

@@ -27,11 +27,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -435,7 +435,7 @@ private fun RivalryBoardSection(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Icon(
-                    imageVector = if (isLeadingSection) Icons.Default.EmojiEvents else Icons.Default.TrendingUp,
+                    imageVector = if (isLeadingSection) Icons.Default.EmojiEvents else Icons.AutoMirrored.Filled.TrendingUp,
                     contentDescription = null,
                     tint = accentColor,
                     modifier = Modifier.size(16.dp)

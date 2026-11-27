@@ -193,10 +193,12 @@ class StreakAndStandingsTest {
         composeTestRule.onNodeWithText("4 Day Streak").assertDoesNotExist()
         composeTestRule.onNodeWithTag("home_streak_milestone_banner").assertDoesNotExist()
 
-        // Compact single-row rivalry footer opens Friends & Crew on tap
+        // Bottom Crew Ranking card displays ranked drivers and opens Standings on tap
         composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_standings_rank_badge", useUnmergedTree = true).assertIsDisplayed()
-        composeTestRule.onNodeWithText("#1 of 2 Friends • Lead 1 • Chase 0").assertIsDisplayed()
+        composeTestRule.onNodeWithText("CREW RANKING").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Alex (You)").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Lead 1 • Chase 0").assertIsDisplayed()
 
         composeTestRule.onNodeWithTag("home_challenges_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
@@ -281,7 +283,8 @@ class StreakAndStandingsTest {
         composeTestRule.onNodeWithTag("home_streak_badge").assertIsDisplayed()
         composeTestRule.onNodeWithText("2d").assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithText("Friends & Crew • Sign in to compare (3 times)").assertIsDisplayed()
+        composeTestRule.onNodeWithText("CREW RANKING").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Sign in to compare (3 times)").assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().performClick()
         assertTrue(openedFriends)
     }
@@ -720,7 +723,7 @@ class StreakAndStandingsTest {
     }
 
     @Test
-    fun homeScreen_showsCappedThreeRowRivalryPreviewAndRoutesToFriendStandings() {
+    fun homeScreen_showsCappedCrewRankingLeaderboardAndRoutesToFriendStandings() {
         val summary = FriendStandingsCalculator.compute(
             myUid = "uid_me",
             myName = "Acro",
@@ -739,49 +742,84 @@ class StreakAndStandingsTest {
                     activeRoomCode = "",
                     activeRoomName = "",
                     statusLabel = "Online"
+                ),
+                FriendUiModel(
+                    friendshipId = "f_frisoer",
+                    friendUid = "uid_frisoer",
+                    displayName = "Frisoer",
+                    friendCode = "RCFRIS02",
+                    carType = RcCarType.APEX_FORMULA,
+                    primaryColorArgb = 0xFFFF5722,
+                    accentColorArgb = 0xFFFFD54F,
+                    effectivelyOnline = false,
+                    activityStatus = "OFFLINE",
+                    activeRoomId = "",
+                    activeRoomCode = "",
+                    activeRoomName = "",
+                    statusLabel = "Offline"
+                ),
+                FriendUiModel(
+                    friendshipId = "f_sam",
+                    friendUid = "uid_sam",
+                    displayName = "Sam",
+                    friendCode = "RCSAM003",
+                    carType = RcCarType.VOLT_BUGGY,
+                    primaryColorArgb = 0xFF4CAF50,
+                    accentColorArgb = 0xFFFFFFFF,
+                    effectivelyOnline = false,
+                    activityStatus = "OFFLINE",
+                    activeRoomId = "",
+                    activeRoomCode = "",
+                    activeRoomName = "",
+                    statusLabel = "Offline"
+                ),
+                FriendUiModel(
+                    friendshipId = "f_nova",
+                    friendUid = "uid_nova",
+                    displayName = "Nova",
+                    friendCode = "RCNOV004",
+                    carType = RcCarType.VOLT_BUGGY,
+                    primaryColorArgb = 0xFF9C27B0,
+                    accentColorArgb = 0xFFFFFFFF,
+                    effectivelyOnline = false,
+                    activityStatus = "OFFLINE",
+                    activeRoomId = "",
+                    activeRoomCode = "",
+                    activeRoomName = "",
+                    statusLabel = "Offline"
                 )
             ),
             cloudEntries = listOf(
-                // 2 chasing tracks + 2 leading tracks = 4 active boards -> preview must strictly cap at 3
+                // Acro leads 2 boards (0 chases), Rob chases 2 boards (0 leads), Frisoer chases 1 board
                 LeaderboardEntryDoc(
                     id = "m1", userId = "uid_me", driverName = "Acro",
-                    gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_3L",
-                    totalLaps = 3L, bestRaceTimeMs = 30_350L
-                ),
-                LeaderboardEntryDoc(
-                    id = "r1", userId = "uid_rob", driverName = "Rob",
                     gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_3L",
                     totalLaps = 3L, bestRaceTimeMs = 30_000L
                 ),
                 LeaderboardEntryDoc(
+                    id = "r1", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 30_400L
+                ),
+                LeaderboardEntryDoc(
                     id = "m2", userId = "uid_me", driverName = "Acro",
-                    gameMode = GameMode.RACE.name, trackKey = "GP_APEX", boardKey = "RACE_GP_APEX_3L",
-                    totalLaps = 3L, bestRaceTimeMs = 41_200L
-                ),
-                LeaderboardEntryDoc(
-                    id = "r2", userId = "uid_rob", driverName = "Rob",
-                    gameMode = GameMode.RACE.name, trackKey = "GP_APEX", boardKey = "RACE_GP_APEX_3L",
-                    totalLaps = 3L, bestRaceTimeMs = 40_000L
-                ),
-                LeaderboardEntryDoc(
-                    id = "m3", userId = "uid_me", driverName = "Acro",
                     gameMode = GameMode.RACE.name, trackKey = "BACKYARD_DIRT", boardKey = "RACE_BACKYARD_DIRT_3L",
                     totalLaps = 3L, bestRaceTimeMs = 35_000L
                 ),
                 LeaderboardEntryDoc(
-                    id = "r3", userId = "uid_rob", driverName = "Rob",
+                    id = "f2", userId = "uid_frisoer", driverName = "Frisoer",
                     gameMode = GameMode.RACE.name, trackKey = "BACKYARD_DIRT", boardKey = "RACE_BACKYARD_DIRT_3L",
                     totalLaps = 3L, bestRaceTimeMs = 35_670L
                 ),
                 LeaderboardEntryDoc(
-                    id = "m4", userId = "uid_me", driverName = "Acro",
-                    gameMode = GameMode.RACE.name, trackKey = "GARAGE_DRIFT", boardKey = "RACE_GARAGE_DRIFT_3L",
-                    totalLaps = 3L, bestRaceTimeMs = 31_000L
+                    id = "r2", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.RACE.name, trackKey = "BACKYARD_DIRT", boardKey = "RACE_BACKYARD_DIRT_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 36_100L
                 ),
                 LeaderboardEntryDoc(
-                    id = "r4", userId = "uid_rob", driverName = "Rob",
-                    gameMode = GameMode.RACE.name, trackKey = "GARAGE_DRIFT", boardKey = "RACE_GARAGE_DRIFT_3L",
-                    totalLaps = 3L, bestRaceTimeMs = 34_000L
+                    id = "s2", userId = "uid_sam", driverName = "Sam",
+                    gameMode = GameMode.RACE.name, trackKey = "BACKYARD_DIRT", boardKey = "RACE_BACKYARD_DIRT_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 37_000L
                 )
             ),
             localRecords = emptyList(),
@@ -790,7 +828,6 @@ class StreakAndStandingsTest {
 
         var standingsOpens = 0
         var friendsOpens = 0
-        var launchedTrackKey: String? = null
 
         composeTestRule.setContent {
             MicroRCTheme {
@@ -801,51 +838,44 @@ class StreakAndStandingsTest {
                     onSoloRace = {},
                     onOpenFriends = { friendsOpens++ },
                     onOpenFriendStandings = { standingsOpens++ },
-                    onLaunchRivalryGhostRace = { launchedTrackKey = it.trackKey },
                     onOpenGarage = {},
                     onUpdateDriverName = {},
                     isSignedIn = true,
-                    friendsCount = 1,
+                    friendsCount = 4,
                     friendStandings = summary
                 )
             }
         }
 
-        // Unified card header has rank summary on left + "View All" on right, and no separate "RECENT RIVALRY" label
+        // Card header displays "CREW RANKING" on left + "Track Breakdown" on right
         composeTestRule.onNodeWithText("RECENT RIVALRY").assertDoesNotExist()
-        composeTestRule.onNodeWithText("#1 of 2 Friends • Lead 2 • Chase 2").performScrollTo().assertIsDisplayed()
-        val headerRankY = composeTestRule.onNodeWithTag("home_standings_rank_badge", useUnmergedTree = true)
-            .fetchSemanticsNode().positionInRoot.y
-        val viewAllY = composeTestRule.onNodeWithTag("home_rivalry_view_all_button")
-            .performScrollTo()
-            .assertIsDisplayed()
-            .fetchSemanticsNode().positionInRoot.y
-        assertTrue(
-            "Rank summary ($headerRankY) and View All ($viewAllY) must share the unified card header",
-            kotlin.math.abs(headerRankY - viewAllY) < 40f
-        )
+        composeTestRule.onNodeWithText("CREW RANKING").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Track Breakdown").assertIsDisplayed()
 
-        // Tapping header routes to Friend Standings, not directly to Friends & Crew
-        composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().performClick()
+        // Displays Crew Leaderboard capped at top 4 drivers, with ordinal rank & Lead / Chase counts
+        composeTestRule.onNodeWithTag("home_crew_ranking_row_0", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_crew_ranking_row_1", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_crew_ranking_row_2", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_crew_ranking_row_3", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_crew_ranking_row_4", useUnmergedTree = true).assertDoesNotExist()
+
+        composeTestRule.onNodeWithText("Acro (You)").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Lead 2 • Chase 0").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Frisoer").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Lead 0 • Chase 1").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Rob").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Lead 0 • Chase 2").assertIsDisplayed()
+
+        // Individual track delta rows are moved out of HomeScreen into Friend Standings
+        composeTestRule.onNodeWithText("You lead by +0.67s").assertDoesNotExist()
+
+        // Tapping anywhere on the card or Track Breakdown opens Friend Standings
+        composeTestRule.onNodeWithTag("home_crew_ranking_row_1", useUnmergedTree = true).performClick()
         assertEquals(1, standingsOpens)
         assertEquals(0, friendsOpens)
 
-        // Unified card holds strictly 3 capped track rows below the header
-        composeTestRule.onNodeWithTag("home_rivalry_preview_card").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("home_rivalry_preview_row_0").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("home_rivalry_preview_row_1").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("home_rivalry_preview_row_2").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("home_rivalry_preview_row_3").assertDoesNotExist()
-        composeTestRule.onNodeWithText("Rob leads by -0.35s").assertIsDisplayed()
-        composeTestRule.onNodeWithText("You lead by +0.67s").assertIsDisplayed()
-
-        // Tapping "View All" opens Friend Standings
-        composeTestRule.onNodeWithTag("home_rivalry_view_all_button").performScrollTo().performClick()
+        composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().performClick()
         assertEquals(2, standingsOpens)
-
-        // Tapping a preview row launches ghost race directly
-        composeTestRule.onNodeWithTag("home_rivalry_preview_row_0").performScrollTo().performClick()
-        assertEquals("LIVING_ROOM_GP", launchedTrackKey)
     }
 
     @Test
