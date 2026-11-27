@@ -147,7 +147,17 @@ android {
     buildConfig = true
     resValues = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  val robolectricRepoUrl =
+    providers.systemProperty("robolectric.dependency.repo.url").orNull
+      ?: "https://maven-central.storage-download.googleapis.com/maven2"
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      all {
+        it.systemProperty("robolectric.dependency.repo.url", robolectricRepoUrl)
+      }
+    }
+  }
   dependenciesInfo {
     includeInApk = false
     includeInBundle = true

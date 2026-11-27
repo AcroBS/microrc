@@ -306,6 +306,14 @@ jobs:
         with:
           gradle-version: "9.3.1"
 
+      - name: Cache Robolectric Android runtime JARs
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: ${{ runner.os }}-robolectric-${{ hashFiles('gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-robolectric-
+
       - name: Configure CI build version
         env:
           RUN_NUMBER: ${{ github.run_number }}
@@ -342,7 +350,18 @@ jobs:
           fi
 
       - name: Run unit and Robolectric tests
-        run: gradle testDebugUnitTest --no-daemon
+        env:
+          DISABLE_GITHUB_UPDATE_CHECK: "true"
+        run: gradle testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Upload unit test report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MicroRC-test-report
+          path: app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
