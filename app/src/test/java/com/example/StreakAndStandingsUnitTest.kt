@@ -535,4 +535,118 @@ class StreakAndStandingsUnitTest {
         assertEquals(rawId, row!!.trackKey)
         assertEquals("Procedural #2654", row.trackName)
     }
+
+    @Test
+    fun recentRivalryPreview_prioritizesChasingThenClosestLeadsAndCapsAtThree() {
+        val myUid = "uid_me"
+        val robUid = "uid_rob"
+        val frisoerUid = "uid_frisoer"
+        val friends = listOf(
+            FriendUiModel(
+                friendshipId = "f_rob",
+                friendUid = robUid,
+                displayName = "Rob",
+                friendCode = "RCROB001",
+                carType = RcCarType.VOLT_BUGGY,
+                primaryColorArgb = 0xFF00E5FF,
+                accentColorArgb = 0xFFFFFFFF,
+                effectivelyOnline = true,
+                activityStatus = "ONLINE",
+                activeRoomId = "",
+                activeRoomCode = "",
+                activeRoomName = "",
+                statusLabel = "Online"
+            ),
+            FriendUiModel(
+                friendshipId = "f_frisoer",
+                friendUid = frisoerUid,
+                displayName = "Frisoer",
+                friendCode = "RCFRIS02",
+                carType = RcCarType.APEX_FORMULA,
+                primaryColorArgb = 0xFFFF5722,
+                accentColorArgb = 0xFFFFD54F,
+                effectivelyOnline = false,
+                activityStatus = "OFFLINE",
+                activeRoomId = "",
+                activeRoomCode = "",
+                activeRoomName = "",
+                statusLabel = "Offline"
+            )
+        )
+
+        val entries = listOf(
+            // Track 1 (LIVING_ROOM_GP): Rob leads by -0.35s (chasing, closest)
+            LeaderboardEntryDoc(
+                id = "me_1", userId = myUid, driverName = "Acro",
+                gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_3L",
+                totalLaps = 3L, bestRaceTimeMs = 30_350L
+            ),
+            LeaderboardEntryDoc(
+                id = "rob_1", userId = robUid, driverName = "Rob",
+                gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_3L",
+                totalLaps = 3L, bestRaceTimeMs = 30_000L, hasGhost = true, ghostId = "ghost_rob_lr"
+            ),
+            // Track 2 (GP_APEX): Rob leads by -1.20s (chasing, larger deficit)
+            LeaderboardEntryDoc(
+                id = "me_2", userId = myUid, driverName = "Acro",
+                gameMode = GameMode.RACE.name, trackKey = "GP_APEX", boardKey = "RACE_GP_APEX_3L",
+                totalLaps = 3L, bestRaceTimeMs = 41_200L
+            ),
+            LeaderboardEntryDoc(
+                id = "rob_2", userId = robUid, driverName = "Rob",
+                gameMode = GameMode.RACE.name, trackKey = "GP_APEX", boardKey = "RACE_GP_APEX_3L",
+                totalLaps = 3L, bestRaceTimeMs = 40_000L
+            ),
+            // Track 3 (BACKYARD_DIRT): You lead by +0.67s (closest lead)
+            LeaderboardEntryDoc(
+                id = "me_3", userId = myUid, driverName = "Acro",
+                gameMode = GameMode.RACE.name, trackKey = "BACKYARD_DIRT", boardKey = "RACE_BACKYARD_DIRT_3L",
+                totalLaps = 3L, bestRaceTimeMs = 35_000L
+            ),
+            LeaderboardEntryDoc(
+                id = "frisoer_3", userId = frisoerUid, driverName = "Frisoer",
+                gameMode = GameMode.RACE.name, trackKey = "BACKYARD_DIRT", boardKey = "RACE_BACKYARD_DIRT_3L",
+                totalLaps = 3L, bestRaceTimeMs = 35_670L
+            ),
+            // Track 4 (GARAGE_DRIFT): You lead by +2.50s (wider lead, should be excluded by 3-row cap)
+            LeaderboardEntryDoc(
+                id = "me_4", userId = myUid, driverName = "Acro",
+                gameMode = GameMode.RACE.name, trackKey = "GARAGE_DRIFT", boardKey = "RACE_GARAGE_DRIFT_3L",
+                totalLaps = 3L, bestRaceTimeMs = 32_000L
+            ),
+            LeaderboardEntryDoc(
+                id = "rob_4", userId = robUid, driverName = "Rob",
+                gameMode = GameMode.RACE.name, trackKey = "GARAGE_DRIFT", boardKey = "RACE_GARAGE_DRIFT_3L",
+                totalLaps = 3L, bestRaceTimeMs = 34_500L
+            )
+        )
+
+        val summary = FriendStandingsCalculator.compute(
+            myUid = myUid,
+            myName = "Acro",
+            friends = friends,
+            cloudEntries = entries,
+            localRecords = emptyList(),
+            todayDateKey = "20261126"
+        )
+
+        val acroRank = summary.crewLeaderboard.first { it.userId == myUid }
+        val robRank = summary.crewLeaderboard.first { it.userId == robUid }
+        assertEquals(2, acroRank.contestedWins)
+        assertEquals(2, acroRank.trailingBoardsCount)
+        assertEquals(2, robRank.contestedWins)
+        assertEquals(1, robRank.trailingBoardsCount)
+
+        val preview = FriendStandingsCalculator.selectRecentRivalryPreview(summary, limit = 3)
+        assertEquals(3, preview.size)
+        assertEquals("LIVING_ROOM_GP", preview[0].trackKey)
+        assertEquals("ghost_rob_lr", preview[0].topFriendGhostId)
+        assertEquals("Rob leads by -0.35s", FriendStandingsCalculator.formatRivalryDeltaLine(preview[0]))
+
+        assertEquals("GP_APEX", preview[1].trackKey)
+        assertEquals("Rob leads by -1.20s", FriendStandingsCalculator.formatRivalryDeltaLine(preview[1]))
+
+        assertEquals("BACKYARD_DIRT", preview[2].trackKey)
+        assertEquals("You lead by +0.67s", FriendStandingsCalculator.formatRivalryDeltaLine(preview[2]))
+    }
 }

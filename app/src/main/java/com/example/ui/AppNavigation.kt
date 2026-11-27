@@ -63,15 +63,19 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.data.DailyChallengeCatalog
+import com.example.data.FriendBoardStandingItem
 import com.example.data.FriendStandingsCalculator
 import com.example.data.FriendsRepository
 import com.example.data.OnlineRaceRepository
 import com.example.model.CustomTrackData
 import com.example.model.FriendUiModel
 import com.example.model.GameMode
+import com.example.model.GhostCodec
+import com.example.model.GhostRunPlayback
 import com.example.model.OnlineRoomDoc
 import com.example.model.PendingFriendChallengeState
 import com.example.model.RacePhase
+import com.example.model.TrackId
 import com.example.network.RaceNavEvent
 import com.example.network.SessionRole
 import com.example.ui.auth.GoogleAuthManager
@@ -80,6 +84,7 @@ import com.example.ui.components.LiveLeaderboardNotificationBanner
 import com.example.ui.components.LivePendingChallengeBanner
 import com.example.ui.components.LiveSessionInviteBanner
 import com.example.ui.screens.AuthScreen
+import com.example.ui.screens.FriendStandingsScreen
 import com.example.ui.screens.FriendsScreen
 import com.example.ui.screens.GarageScreen
 import com.example.ui.screens.HomeScreen
@@ -109,6 +114,7 @@ import kotlinx.coroutines.launch
 object Routes {
     const val HOME = "home"
     const val ONLINE_HUB = "online_hub"
+    const val FRIEND_STANDINGS = "friend_standings"
     const val FRIENDS = "friends"
     const val LEADERBOARD = "leaderboard"
     const val HOST_SETUP = "host_setup"
@@ -602,6 +608,90 @@ fun MicroRCApp(
         )
     }
 
+    val launchRivalryFallbackSolo: (FriendBoardStandingItem) -> Unit = { item ->
+        activeOnlineVm?.leaveRoom()
+        val localGhost = localLeaderboard.find { it.boardKey == item.boardKey }
+            ?.takeIf { it.ghostFramesData.isNotBlank() }
+            ?.let { rec ->
+                val frames = GhostCodec.decodeFrames(rec.ghostFramesData)
+                if (frames.size >= 2) {
+                    GhostRunPlayback(
+                        ghostId = "local_${rec.boardKey}",
+                        driverName = "${rec.driverName} (PB)",
+                        carType = rec.carType,
+                        primaryColorArgb = rec.primaryColorArgb,
+                        accentColorArgb = rec.accentColorArgb,
+                        equippedUpgradesMask = rec.equippedUpgradesMask,
+                        boardKey = rec.boardKey,
+                        trackId = rec.trackKey,
+                        totalLaps = rec.totalLaps,
+                        finishTimeMs = rec.bestRaceTimeMs,
+                        bestLapMs = rec.bestLapTimeMs,
+                        frames = frames
+                    )
+                } else {
+                    null
+                }
+            }
+        val dailyDriftDate = com.example.drift.DriftDailyChallenge.extractDateKey(item.trackKey)
+        val dailyGpDate = DailyChallengeCatalog.extractDateKey(item.trackKey)
+        val driftTrack = com.example.drift.DriftTrackCatalog.resolveCustomTrackByKey(item.trackKey)
+        val customTrack = allAccessibleCustomTracks.find { it.id == item.trackKey }
+        val builtInTrack = runCatching { TrackId.valueOf(item.trackKey) }.getOrNull()
+        when {
+            dailyDriftDate != null -> {
+                viewModel.startDailyDriftChallenge(dateKey = dailyDriftDate, customGhost = localGhost)
+            }
+            dailyGpDate != null -> {
+                viewModel.startDailyChallenge(dateKey = dailyGpDate, customGhost = localGhost)
+            }
+            driftTrack != null -> {
+                viewModel.startPureSoloForDriftTrack(driftTrack, item.totalLaps, localGhost)
+            }
+            customTrack != null -> {
+                viewModel.startPureSoloForCustomTrack(customTrack, item.totalLaps, localGhost)
+            }
+            builtInTrack != null -> {
+                viewModel.startPureSoloForTrack(item.gameMode, builtInTrack, item.totalLaps, localGhost)
+            }
+            item.gameMode == GameMode.STUNTS -> {
+                viewModel.startPureSoloForTrack(GameMode.STUNTS, TrackId.LIVING_ROOM_GP, item.totalLaps, null)
+            }
+            else -> {
+                leaderboardInitialDaily = item.isDaily
+                leaderboardInitialMode = item.gameMode
+                leaderboardInitialTrackKey = item.trackKey.takeIf { it.isNotBlank() }
+                navController.navigate(Routes.LEADERBOARD)
+            }
+        }
+    }
+
+    val launchRivalryGhostRace: (FriendBoardStandingItem) -> Unit = { item ->
+        val onlineVm = activeOnlineVm
+        val targetGhostId = if (item.gameMode != GameMode.STUNTS) {
+            item.topFriendGhostId?.takeIf { it.isNotBlank() }
+                ?: friendCircleEntries
+                    .filter { it.boardKey == item.boardKey && it.hasGhost && it.ghostId.isNotBlank() }
+                    .sortedBy { if (it.userId != currentUser?.uid) 0 else 1 }
+                    .firstOrNull()
+                    ?.ghostId
+        } else {
+            null
+        }
+        if (onlineVm != null && !targetGhostId.isNullOrBlank()) {
+            onlineVm.loadGhostAndTrackForChallenge(
+                ghostId = targetGhostId,
+                knownCustomTracks = allAccessibleCustomTracks,
+                onFailureFallback = { launchRivalryFallbackSolo(item) }
+            ) { playback, resolvedCustomTrack ->
+                onlineVm.leaveRoom()
+                viewModel.startGhostChallenge(playback, resolvedCustomTrack)
+            }
+        } else {
+            launchRivalryFallbackSolo(item)
+        }
+    }
+
     val showBottomNav = sessionRole == SessionRole.None &&
         (currentRoute == null || currentRoute == Routes.HOME || currentRoute == Routes.TRACK_EDITOR || currentRoute == Routes.SETTINGS)
 
@@ -739,6 +829,8 @@ fun MicroRCApp(
                     dailyDriftBestTimeMs = todayDriftPbTime,
                     onOpenOnlinePlay = { navController.navigate(Routes.ONLINE_HUB) },
                     onOpenFriends = { navController.navigate(Routes.FRIENDS) },
+                    onOpenFriendStandings = { navController.navigate(Routes.FRIEND_STANDINGS) },
+                    onLaunchRivalryGhostRace = launchRivalryGhostRace,
                     onlineFriendsCount = onlineFriendsCount,
                     pendingRequestsCount = incomingFriendRequests.size,
                     onOpenLeaderboards = {
@@ -936,6 +1028,19 @@ fun MicroRCApp(
                 }
             }
 
+            composable(Routes.FRIEND_STANDINGS) {
+                val ghostLoadingId = activeOnlineVm?.let { it.ghostLoadingId.collectAsState().value }
+                FriendStandingsScreen(
+                    standings = friendStandings,
+                    isSignedIn = currentUser != null && activeOnlineVm != null,
+                    friendsCount = friendsList.size,
+                    ghostLoadingId = ghostLoadingId,
+                    onOpenManageFriends = { navController.navigate(Routes.FRIENDS) },
+                    onLaunchGhostRace = launchRivalryGhostRace,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+
             composable(Routes.LEADERBOARD) {
                 val onlineVm = activeOnlineVm
                 val cloudEntries = onlineVm?.let { it.cloudLeaderboard.collectAsState().value }.orEmpty()
@@ -952,6 +1057,7 @@ fun MicroRCApp(
                     ghostLoadingId = ghostLoadingId,
                     cloudStatusMessage = cloudStatus,
                     customTracks = allAccessibleCustomTracks,
+                    friendCircleEntries = friendCircleEntries,
                     initialTabDaily = leaderboardInitialDaily,
                     initialMode = leaderboardInitialMode,
                     initialTrackKey = leaderboardInitialTrackKey,

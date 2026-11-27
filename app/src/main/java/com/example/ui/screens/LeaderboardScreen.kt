@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.EmojiEvents
@@ -48,6 +51,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -110,6 +114,7 @@ fun LeaderboardScreen(
     ghostLoadingId: String?,
     cloudStatusMessage: String?,
     customTracks: List<CustomTrackData> = emptyList(),
+    friendCircleEntries: List<LeaderboardEntryDoc> = emptyList(),
     initialTabDaily: Boolean = false,
     initialMode: GameMode? = null,
     initialTrackKey: String? = null,
@@ -144,6 +149,7 @@ fun LeaderboardScreen(
             }
         )
     }
+    var showAllTracksSummary by remember { mutableStateOf(false) }
     var selectedTrack by remember { mutableStateOf(TrackId.LIVING_ROOM_GP) }
     var selectedDriftTrack by remember(driftTracks) { mutableStateOf(driftTracks.first()) }
     var selectedCustomTrackId by remember { mutableStateOf(initialTrackKey) }
@@ -161,6 +167,9 @@ fun LeaderboardScreen(
     }
 
     LaunchedEffect(initialTabDaily, initialMode, initialTrackKey) {
+        if (!initialTrackKey.isNullOrBlank() || initialTabDaily) {
+            showAllTracksSummary = false
+        }
         when {
             initialTabDaily && initialMode == GameMode.DRIFT && com.example.drift.DriftFeature.ENABLED ->
                 selectedTab = LeaderboardFilterTab.DAILY_DRIFT
@@ -779,10 +788,26 @@ fun LeaderboardScreen(
                             }
                         }
                     } else {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            item(key = "ALL_CUSTOM_TRACKS") {
+                                FilterChip(
+                                    selected = showAllTracksSummary,
+                                    onClick = { showAllTracksSummary = true },
+                                    label = {
+                                        Text(
+                                            text = "All Tracks",
+                                            style = MaterialTheme.typography.labelMedium
+                                        )
+                                    },
+                                    modifier = Modifier.testTag("leaderboard_custom_track_ALL")
+                                )
+                            }
                             items(customTracks, key = { it.id }) { cTrack ->
                                 val previewDef = remember(cTrack) { TrackCatalog.buildCustomTrack(cTrack) }
-                                val active = selectedCustomTrack.id == cTrack.id
+                                val active = !showAllTracksSummary && selectedCustomTrack.id == cTrack.id
                                 val isOwnTrack = cTrack.creatorUid.isBlank() ||
                                     (currentUserId != null && cTrack.creatorUid == currentUserId)
                                 val creatorTag = if (isOwnTrack) {
@@ -801,7 +826,10 @@ fun LeaderboardScreen(
                                         width = if (active) 2.dp else 1.dp,
                                         color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
                                     ),
-                                    onClick = { selectedCustomTrackId = cTrack.id },
+                                    onClick = {
+                                        showAllTracksSummary = false
+                                        selectedCustomTrackId = cTrack.id
+                                    },
                                     modifier = Modifier
                                         .width(152.dp)
                                         .testTag("leaderboard_custom_track_${cTrack.id}")
@@ -883,97 +911,99 @@ fun LeaderboardScreen(
                             }
                         }
 
-                        val selectedPreviewDef = remember(selectedCustomTrack) {
-                            TrackCatalog.buildCustomTrack(selectedCustomTrack)
-                        }
-                        val isOwnSelected = selectedCustomTrack.creatorUid.isBlank() ||
-                            (currentUserId != null && selectedCustomTrack.creatorUid == currentUserId)
-                        Card(
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
-                            shape = RoundedCornerShape(24.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                        if (!showAllTracksSummary) {
+                            val selectedPreviewDef = remember(selectedCustomTrack) {
+                                TrackCatalog.buildCustomTrack(selectedCustomTrack)
+                            }
+                            val isOwnSelected = selectedCustomTrack.creatorUid.isBlank() ||
+                                (currentUserId != null && selectedCustomTrack.creatorUid == currentUserId)
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+                                shape = RoundedCornerShape(24.dp),
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                Column(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = selectedCustomTrack.name.uppercase(),
-                                            style = MaterialTheme.typography.titleMedium,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = if (isOwnSelected) {
-                                                "Designed by You • ${selectedPreviewDef.ramps.size} Jumps • ${selectedPreviewDef.boostPads.size} Boosts"
-                                            } else {
-                                                "Designed by ${selectedCustomTrack.creatorName.ifBlank { "Friend" }} • ${selectedPreviewDef.ramps.size} Jumps • ${selectedPreviewDef.boostPads.size} Boosts"
-                                            },
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.secondary,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                    Surface(
-                                        color = MaterialTheme.colorScheme.secondaryContainer,
-                                        shape = CircleShape
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = selectedCustomTrack.name.uppercase(),
+                                                style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.onSurface,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = if (isOwnSelected) {
+                                                    "Designed by You • ${selectedPreviewDef.ramps.size} Jumps • ${selectedPreviewDef.boostPads.size} Boosts"
+                                                } else {
+                                                    "Designed by ${selectedCustomTrack.creatorName.ifBlank { "Friend" }} • ${selectedPreviewDef.ramps.size} Jumps • ${selectedPreviewDef.boostPads.size} Boosts"
+                                                },
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.secondary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        Surface(
+                                            color = MaterialTheme.colorScheme.secondaryContainer,
+                                            shape = CircleShape
+                                        ) {
+                                            Text(
+                                                text = selectedPreviewDef.id.displayName,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(124.dp)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(Color(selectedPreviewDef.id.baseBgColorHex).copy(alpha = 0.9f))
+                                    ) {
+                                        Canvas(modifier = Modifier.fillMaxSize()) {
+                                            drawTrackMiniMap(selectedPreviewDef)
+                                        }
+                                    }
+
+                                    Button(
+                                        onClick = {
+                                            onStartPureSoloForCustomTrack(selectedCustomTrack, selectedLaps, localGhostPlayback)
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                        ),
+                                        shape = RoundedCornerShape(16.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(54.dp)
+                                            .testTag("leaderboard_start_custom_solo_button")
+                                    ) {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null)
+                                        Spacer(modifier = Modifier.width(8.dp))
                                         Text(
-                                            text = selectedPreviewDef.id.displayName,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                            text = if (localGhostPlayback != null) {
+                                                "DRIVE ${selectedCustomTrack.name.uppercase()} (${selectedLaps}L VS PB GHOST)"
+                                            } else {
+                                                "DRIVE ${selectedCustomTrack.name.uppercase()} (${selectedLaps}L PURE SOLO)"
+                                            },
+                                            style = MaterialTheme.typography.labelLarge,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
-                                }
-
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(124.dp)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(Color(selectedPreviewDef.id.baseBgColorHex).copy(alpha = 0.9f))
-                                ) {
-                                    Canvas(modifier = Modifier.fillMaxSize()) {
-                                        drawTrackMiniMap(selectedPreviewDef)
-                                    }
-                                }
-
-                                Button(
-                                    onClick = {
-                                        onStartPureSoloForCustomTrack(selectedCustomTrack, selectedLaps, localGhostPlayback)
-                                    },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary,
-                                        contentColor = MaterialTheme.colorScheme.onPrimary
-                                    ),
-                                    shape = RoundedCornerShape(16.dp),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(54.dp)
-                                        .testTag("leaderboard_start_custom_solo_button")
-                                ) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = null)
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = if (localGhostPlayback != null) {
-                                            "DRIVE ${selectedCustomTrack.name.uppercase()} (${selectedLaps}L VS PB GHOST)"
-                                        } else {
-                                            "DRIVE ${selectedCustomTrack.name.uppercase()} (${selectedLaps}L PURE SOLO)"
-                                        },
-                                        style = MaterialTheme.typography.labelLarge,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
                                 }
                             }
                         }
@@ -982,10 +1012,21 @@ fun LeaderboardScreen(
                     // Track & Laps Selector for Circuit or Drift Mode
                     if (selectedTab == LeaderboardFilterTab.DRIFT) {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            item(key = "ALL_DRIFT_TRACKS") {
+                                FilterChip(
+                                    selected = showAllTracksSummary,
+                                    onClick = { showAllTracksSummary = true },
+                                    label = { Text("All Tracks", style = MaterialTheme.typography.labelSmall) },
+                                    modifier = Modifier.testTag("leaderboard_drift_track_ALL")
+                                )
+                            }
                             items(driftTracks, key = { it.id }) { dTrack ->
                                 FilterChip(
-                                    selected = selectedDriftTrack.id == dTrack.id,
-                                    onClick = { selectedDriftTrack = dTrack },
+                                    selected = !showAllTracksSummary && selectedDriftTrack.id == dTrack.id,
+                                    onClick = {
+                                        showAllTracksSummary = false
+                                        selectedDriftTrack = dTrack
+                                    },
                                     label = { Text(dTrack.name, style = MaterialTheme.typography.labelSmall) },
                                     modifier = Modifier.testTag("leaderboard_drift_track_${dTrack.id}")
                                 )
@@ -1015,10 +1056,21 @@ fun LeaderboardScreen(
                         }
                     } else if (selectedTab == LeaderboardFilterTab.RACE) {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            item(key = "ALL_RACE_TRACKS") {
+                                FilterChip(
+                                    selected = showAllTracksSummary,
+                                    onClick = { showAllTracksSummary = true },
+                                    label = { Text("All Tracks", style = MaterialTheme.typography.labelSmall) },
+                                    modifier = Modifier.testTag("leaderboard_track_ALL")
+                                )
+                            }
                             items(TrackId.entries) { track ->
                                 FilterChip(
-                                    selected = selectedTrack == track,
-                                    onClick = { selectedTrack = track },
+                                    selected = !showAllTracksSummary && selectedTrack == track,
+                                    onClick = {
+                                        showAllTracksSummary = false
+                                        selectedTrack = track
+                                    },
                                     label = { Text(track.displayName, style = MaterialTheme.typography.labelSmall) },
                                     modifier = Modifier.testTag("leaderboard_track_${track.name}")
                                 )
@@ -1048,49 +1100,145 @@ fun LeaderboardScreen(
                         }
                     }
 
-                    // Quick Launch Pure Solo (0 Bots) Button
-                    Button(
-                        onClick = {
-                            if (selectedTab == LeaderboardFilterTab.DRIFT) {
-                                onStartPureSoloForDriftTrack(selectedDriftTrack, selectedLaps, localGhostPlayback)
-                            } else {
-                                onStartPureSoloForTrack(selectedMode, selectedTrack, selectedLaps, localGhostPlayback)
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary
-                        ),
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(54.dp)
-                            .testTag("leaderboard_start_solo_button")
-                    ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = when {
-                                selectedMode == GameMode.STUNTS ->
-                                    "START SOLO STUNT GAUNTLET (0 BOTS)"
-                                selectedTab == LeaderboardFilterTab.DRIFT && localGhostPlayback != null ->
-                                    "DRIFT ${selectedDriftTrack.name.uppercase()} (${selectedLaps}L VS PB GHOST)"
-                                selectedTab == LeaderboardFilterTab.DRIFT ->
-                                    "DRIFT ${selectedDriftTrack.name.uppercase()} (${selectedLaps}L PURE SOLO)"
-                                localGhostPlayback != null ->
-                                    "DRIVE ${selectedTrack.displayName.uppercase()} (${selectedLaps}L VS PB GHOST)"
-                                else ->
-                                    "DRIVE ${selectedTrack.displayName.uppercase()} (${selectedLaps}L PURE SOLO)"
+                    // Quick Launch Pure Solo (0 Bots) Button (only for single-track view)
+                    val isAllTracksActiveHere = showAllTracksSummary &&
+                        (selectedTab == LeaderboardFilterTab.RACE || selectedTab == LeaderboardFilterTab.DRIFT)
+                    if (!isAllTracksActiveHere) {
+                        Button(
+                            onClick = {
+                                if (selectedTab == LeaderboardFilterTab.DRIFT) {
+                                    onStartPureSoloForDriftTrack(selectedDriftTrack, selectedLaps, localGhostPlayback)
+                                } else {
+                                    onStartPureSoloForTrack(selectedMode, selectedTrack, selectedLaps, localGhostPlayback)
+                                }
                             },
-                            style = MaterialTheme.typography.labelLarge,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.primary,
+                                contentColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(54.dp)
+                                .testTag("leaderboard_start_solo_button")
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = when {
+                                    selectedMode == GameMode.STUNTS ->
+                                        "START SOLO STUNT GAUNTLET (0 BOTS)"
+                                    selectedTab == LeaderboardFilterTab.DRIFT && localGhostPlayback != null ->
+                                        "DRIFT ${selectedDriftTrack.name.uppercase()} (${selectedLaps}L VS PB GHOST)"
+                                    selectedTab == LeaderboardFilterTab.DRIFT ->
+                                        "DRIFT ${selectedDriftTrack.name.uppercase()} (${selectedLaps}L PURE SOLO)"
+                                    localGhostPlayback != null ->
+                                        "DRIVE ${selectedTrack.displayName.uppercase()} (${selectedLaps}L VS PB GHOST)"
+                                    else ->
+                                        "DRIVE ${selectedTrack.displayName.uppercase()} (${selectedLaps}L PURE SOLO)"
+                                },
+                                style = MaterialTheme.typography.labelLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
                 }
 
+                val isAllTracksTableVisible = showAllTracksSummary &&
+                    (selectedTab == LeaderboardFilterTab.RACE ||
+                        selectedTab == LeaderboardFilterTab.DRIFT ||
+                        (selectedTab == LeaderboardFilterTab.CUSTOM && customTracks.isNotEmpty()))
+
+                if (isAllTracksTableVisible) {
+                    val allTrackRows = remember(
+                        selectedTab,
+                        selectedLaps,
+                        driftTracks,
+                        customTracks,
+                        localRecords,
+                        friendCircleEntries,
+                        currentUserId
+                    ) {
+                        val targets: List<Triple<String, String, GameMode>> = when (selectedTab) {
+                            LeaderboardFilterTab.RACE -> TrackId.entries.map { Triple(it.name, it.displayName, GameMode.RACE) }
+                            LeaderboardFilterTab.DRIFT -> driftTracks.map { Triple(it.id, it.name, GameMode.DRIFT) }
+                            LeaderboardFilterTab.CUSTOM -> customTracks.map { Triple(it.id, it.name, GameMode.RACE) }
+                            else -> emptyList()
+                        }
+                        targets.map { (trackKey, trackName, mode) ->
+                            val rowBoardKey = LeaderboardBoardKey.build(mode, trackKey, selectedLaps)
+                            val localMs = localRecords.find { it.boardKey == rowBoardKey }
+                                ?.bestRaceTimeMs
+                                ?.takeIf { it > 0L }
+                            val cloudOnBoard = friendCircleEntries.filter {
+                                it.boardKey == rowBoardKey && it.bestRaceTimeMs > 0L
+                            }
+                            val myCloudMs = if (currentUserId != null) {
+                                cloudOnBoard.filter { it.userId == currentUserId }
+                                    .minOfOrNull { it.bestRaceTimeMs }
+                            } else {
+                                null
+                            }
+                            val myBestMs = listOfNotNull(localMs, myCloudMs).minOrNull()
+                            val bestFriend = cloudOnBoard
+                                .filter { currentUserId == null || it.userId != currentUserId }
+                                .minByOrNull { it.bestRaceTimeMs }
+                            val leaderIsYou = when {
+                                myBestMs != null && bestFriend != null -> myBestMs <= bestFriend.bestRaceTimeMs
+                                myBestMs != null -> true
+                                else -> false
+                            }
+                            val leaderName = when {
+                                leaderIsYou -> "You"
+                                bestFriend != null -> bestFriend.driverName.ifBlank { "Friend" }
+                                else -> null
+                            }
+                            val leaderTimeMs = when {
+                                leaderIsYou -> myBestMs
+                                bestFriend != null -> bestFriend.bestRaceTimeMs
+                                else -> null
+                            }
+                            AllTrackSummaryRow(
+                                trackKey = trackKey,
+                                trackName = trackName,
+                                myBestTimeMs = myBestMs,
+                                leaderName = leaderName,
+                                leaderTimeMs = leaderTimeMs,
+                                leaderIsYou = leaderIsYou
+                            )
+                        }
+                    }
+
+                    AllTracksSummaryTable(
+                        rows = allTrackRows,
+                        selectedLaps = selectedLaps,
+                        isSignedIn = isSignedIn,
+                        onSelectTrackRow = { trackKey ->
+                            showAllTracksSummary = false
+                            when (selectedTab) {
+                                LeaderboardFilterTab.RACE -> {
+                                    runCatching { TrackId.valueOf(trackKey) }.getOrNull()?.let {
+                                        selectedTrack = it
+                                    }
+                                }
+                                LeaderboardFilterTab.DRIFT -> {
+                                    driftTracks.find { it.id == trackKey }?.let {
+                                        selectedDriftTrack = it
+                                    }
+                                }
+                                LeaderboardFilterTab.CUSTOM -> {
+                                    selectedCustomTrackId = trackKey
+                                }
+                                else -> Unit
+                            }
+                        },
+                        onRequestSignIn = onRequestSignIn
+                    )
+                }
+
                 // Personal Best Card (Device Local; launch handled by primary CTA & Rival Ghost rows)
-                if (selectedTab != LeaderboardFilterTab.CUSTOM || selectedCustomTrack != null) {
+                if (!isAllTracksTableVisible && (selectedTab != LeaderboardFilterTab.CUSTOM || selectedCustomTrack != null)) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.6f)),
@@ -1176,28 +1324,29 @@ fun LeaderboardScreen(
                     }
                 }
 
-                // Cloud Global / Friends Leaderboard Section
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (selectedTab == LeaderboardFilterTab.DAILY || selectedTab == LeaderboardFilterTab.DAILY_DRIFT) {
-                            "TODAY'S ONLINE LEADERBOARD & GHOSTS"
-                        } else {
-                            "ONLINE LEADERBOARD & RIVAL GHOSTS"
-                        },
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (isLoadingCloud) {
-                        CircularProgressIndicator(
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(16.dp)
+                // Cloud Global / Friends Leaderboard Section (shown for individual track view)
+                if (!isAllTracksTableVisible) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (selectedTab == LeaderboardFilterTab.DAILY || selectedTab == LeaderboardFilterTab.DAILY_DRIFT) {
+                                "TODAY'S ONLINE LEADERBOARD & GHOSTS"
+                            } else {
+                                "ONLINE LEADERBOARD & RIVAL GHOSTS"
+                            },
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        if (isLoadingCloud) {
+                            CircularProgressIndicator(
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
-                }
 
                 if (!isSignedIn) {
                     Card(
@@ -1365,6 +1514,188 @@ fun LeaderboardScreen(
                                 }
                             }
                         }
+                    }
+                }
+                }
+            }
+        }
+    }
+}
+
+private data class AllTrackSummaryRow(
+    val trackKey: String,
+    val trackName: String,
+    val myBestTimeMs: Long?,
+    val leaderName: String?,
+    val leaderTimeMs: Long?,
+    val leaderIsYou: Boolean
+)
+
+@Composable
+private fun AllTracksSummaryTable(
+    rows: List<AllTrackSummaryRow>,
+    selectedLaps: Int,
+    isSignedIn: Boolean,
+    onSelectTrackRow: (String) -> Unit,
+    onRequestSignIn: () -> Unit
+) {
+    val goldAccent = adaptiveGoldColor()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("leaderboard_all_tracks_table"),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)),
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // Table Header
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceContainer)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "TRACK (${selectedLaps}L)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1.25f)
+                    )
+                    Text(
+                        text = "YOUR BEST",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.width(82.dp)
+                    )
+                    Text(
+                        text = "#1 LEADER",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1.05f)
+                    )
+                    Spacer(modifier = Modifier.width(18.dp))
+                }
+
+                rows.forEachIndexed { idx, row ->
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .defaultMinSize(minHeight = 56.dp)
+                            .clickable { onSelectTrackRow(row.trackKey) }
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                            .testTag("leaderboard_all_tracks_row_${row.trackKey}"),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = row.trackName,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = PlusJakartaFontFamily,
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1.25f)
+                                .padding(end = 6.dp)
+                        )
+
+                        Text(
+                            text = row.myBestTimeMs?.let { formatRaceTime(it) } ?: "--",
+                            style = MaterialTheme.typography.labelMedium.copy(
+                                fontFamily = JetBrainsMonoFontFamily
+                            ),
+                            color = if (row.myBestTimeMs != null) {
+                                MaterialTheme.colorScheme.onSurface
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            maxLines = 1,
+                            modifier = Modifier.width(82.dp)
+                        )
+
+                        Column(
+                            modifier = Modifier.weight(1.05f),
+                            verticalArrangement = Arrangement.spacedBy(1.dp)
+                        ) {
+                            if (row.leaderName != null && row.leaderTimeMs != null) {
+                                Text(
+                                    text = if (row.leaderIsYou) "You" else row.leaderName,
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontFamily = PlusJakartaFontFamily,
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    color = if (row.leaderIsYou) goldAccent else MaterialTheme.colorScheme.secondary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = formatRaceTime(row.leaderTimeMs),
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = JetBrainsMonoFontFamily
+                                    ),
+                                    color = if (row.leaderIsYou) goldAccent else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1
+                                )
+                            } else {
+                                Text(
+                                    text = "No times",
+                                    style = MaterialTheme.typography.labelSmall.copy(
+                                        fontFamily = PlusJakartaFontFamily
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = "Inspect ${row.trackName}",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        if (!isSignedIn) {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Sign in with Google to compare #1 friend leaders across all tracks.",
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = PlusJakartaFontFamily),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedButton(
+                        onClick = onRequestSignIn,
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.height(48.dp)
+                    ) {
+                        Text("Sign in", style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }

@@ -604,4 +604,316 @@ class StreakAndStandingsTest {
             kotlin.math.abs(raceY - driftY) < 4f
         )
     }
+
+    @Test
+    fun friendStandingsScreen_displaysCrewRankingChasingLeadingAndLaunchesGhostOnTap() {
+        val summary = FriendStandingsCalculator.compute(
+            myUid = "uid_me",
+            myName = "Acro",
+            friends = listOf(
+                FriendUiModel(
+                    friendshipId = "f_rob",
+                    friendUid = "uid_rob",
+                    displayName = "Rob",
+                    friendCode = "RCROB001",
+                    carType = RcCarType.VOLT_BUGGY,
+                    primaryColorArgb = 0xFF00E5FF,
+                    accentColorArgb = 0xFFFFFFFF,
+                    effectivelyOnline = true,
+                    activityStatus = "ONLINE",
+                    activeRoomId = "",
+                    activeRoomCode = "",
+                    activeRoomName = "",
+                    statusLabel = "Online"
+                ),
+                FriendUiModel(
+                    friendshipId = "f_frisoer",
+                    friendUid = "uid_frisoer",
+                    displayName = "Frisoer",
+                    friendCode = "RCFRIS02",
+                    carType = RcCarType.APEX_FORMULA,
+                    primaryColorArgb = 0xFFFF5722,
+                    accentColorArgb = 0xFFFFD54F,
+                    effectivelyOnline = false,
+                    activityStatus = "OFFLINE",
+                    activeRoomId = "",
+                    activeRoomCode = "",
+                    activeRoomName = "",
+                    statusLabel = "Offline"
+                )
+            ),
+            cloudEntries = listOf(
+                LeaderboardEntryDoc(
+                    id = "me_lr", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 30_350L
+                ),
+                LeaderboardEntryDoc(
+                    id = "rob_lr", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 30_000L, hasGhost = true, ghostId = "ghost_rob_lr"
+                ),
+                LeaderboardEntryDoc(
+                    id = "me_apex", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.RACE.name, trackKey = "GP_APEX", boardKey = "RACE_GP_APEX_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 35_000L
+                ),
+                LeaderboardEntryDoc(
+                    id = "frisoer_apex", userId = "uid_frisoer", driverName = "Frisoer",
+                    gameMode = GameMode.RACE.name, trackKey = "GP_APEX", boardKey = "RACE_GP_APEX_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 35_670L
+                ),
+                LeaderboardEntryDoc(
+                    id = "me_dirt", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.RACE.name, trackKey = "BACKYARD_DIRT", boardKey = "RACE_BACKYARD_DIRT_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 38_000L
+                ),
+                LeaderboardEntryDoc(
+                    id = "rob_dirt", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.RACE.name, trackKey = "BACKYARD_DIRT", boardKey = "RACE_BACKYARD_DIRT_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 39_100L
+                )
+            ),
+            localRecords = emptyList(),
+            todayDateKey = "20261126"
+        )
+
+        var openedManageFriends = false
+        var launchedBoardKey: String? = null
+
+        composeTestRule.setContent {
+            MicroRCTheme {
+                com.example.ui.screens.FriendStandingsScreen(
+                    standings = summary,
+                    isSignedIn = true,
+                    friendsCount = 2,
+                    onOpenManageFriends = { openedManageFriends = true },
+                    onLaunchGhostRace = { launchedBoardKey = it.boardKey },
+                    onBack = {}
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("Friend Standings").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("standings_manage_friends_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("standings_crew_ranking_card").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Acro (You)").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Rob").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Frisoer").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Lead 2 • Chase 1").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("standings_chasing_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Chasing (1)").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Rob leads by -0.35s").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("standings_leading_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Leading (2)").assertIsDisplayed()
+        composeTestRule.onNodeWithText("You lead by +0.67s").assertIsDisplayed()
+
+        // Tapping a chasing row launches a ghost race on that track immediately
+        composeTestRule.onNodeWithTag("standings_chasing_row_0").performScrollTo().performClick()
+        assertEquals("RACE_LIVING_ROOM_GP_3L", launchedBoardKey)
+
+        // Tapping "+ Add / Manage" opens Friends & Crew management
+        composeTestRule.onNodeWithTag("standings_manage_friends_button").performClick()
+        assertTrue(openedManageFriends)
+    }
+
+    @Test
+    fun homeScreen_showsCappedThreeRowRivalryPreviewAndRoutesToFriendStandings() {
+        val summary = FriendStandingsCalculator.compute(
+            myUid = "uid_me",
+            myName = "Acro",
+            friends = listOf(
+                FriendUiModel(
+                    friendshipId = "f_rob",
+                    friendUid = "uid_rob",
+                    displayName = "Rob",
+                    friendCode = "RCROB001",
+                    carType = RcCarType.VOLT_BUGGY,
+                    primaryColorArgb = 0xFF00E5FF,
+                    accentColorArgb = 0xFFFFFFFF,
+                    effectivelyOnline = true,
+                    activityStatus = "ONLINE",
+                    activeRoomId = "",
+                    activeRoomCode = "",
+                    activeRoomName = "",
+                    statusLabel = "Online"
+                )
+            ),
+            cloudEntries = listOf(
+                // 2 chasing tracks + 2 leading tracks = 4 active boards -> preview must strictly cap at 3
+                LeaderboardEntryDoc(
+                    id = "m1", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 30_350L
+                ),
+                LeaderboardEntryDoc(
+                    id = "r1", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 30_000L
+                ),
+                LeaderboardEntryDoc(
+                    id = "m2", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.RACE.name, trackKey = "GP_APEX", boardKey = "RACE_GP_APEX_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 41_200L
+                ),
+                LeaderboardEntryDoc(
+                    id = "r2", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.RACE.name, trackKey = "GP_APEX", boardKey = "RACE_GP_APEX_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 40_000L
+                ),
+                LeaderboardEntryDoc(
+                    id = "m3", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.RACE.name, trackKey = "BACKYARD_DIRT", boardKey = "RACE_BACKYARD_DIRT_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 35_000L
+                ),
+                LeaderboardEntryDoc(
+                    id = "r3", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.RACE.name, trackKey = "BACKYARD_DIRT", boardKey = "RACE_BACKYARD_DIRT_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 35_670L
+                ),
+                LeaderboardEntryDoc(
+                    id = "m4", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.RACE.name, trackKey = "GARAGE_DRIFT", boardKey = "RACE_GARAGE_DRIFT_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 31_000L
+                ),
+                LeaderboardEntryDoc(
+                    id = "r4", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.RACE.name, trackKey = "GARAGE_DRIFT", boardKey = "RACE_GARAGE_DRIFT_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 34_000L
+                )
+            ),
+            localRecords = emptyList(),
+            todayDateKey = "20261126"
+        )
+
+        var standingsOpens = 0
+        var friendsOpens = 0
+        var launchedTrackKey: String? = null
+
+        composeTestRule.setContent {
+            MicroRCTheme {
+                HomeScreen(
+                    profile = PlayerProfile(playerId = "uid_me", name = "Acro"),
+                    onHostRace = {},
+                    onJoinRace = {},
+                    onSoloRace = {},
+                    onOpenFriends = { friendsOpens++ },
+                    onOpenFriendStandings = { standingsOpens++ },
+                    onLaunchRivalryGhostRace = { launchedTrackKey = it.trackKey },
+                    onOpenGarage = {},
+                    onUpdateDriverName = {},
+                    isSignedIn = true,
+                    friendsCount = 1,
+                    friendStandings = summary
+                )
+            }
+        }
+
+        // Tapping summary card routes to Friend Standings, not directly to Friends & Crew
+        composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().performClick()
+        assertEquals(1, standingsOpens)
+        assertEquals(0, friendsOpens)
+
+        // Compact 3-row preview card is capped strictly at 3 rows
+        composeTestRule.onNodeWithTag("home_rivalry_preview_card").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_rivalry_preview_row_0").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_rivalry_preview_row_1").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_rivalry_preview_row_2").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_rivalry_preview_row_3").assertDoesNotExist()
+        composeTestRule.onNodeWithText("Rob leads by -0.35s").assertIsDisplayed()
+        composeTestRule.onNodeWithText("You lead by +0.67s").assertIsDisplayed()
+
+        // Tapping "View All" opens Friend Standings
+        composeTestRule.onNodeWithTag("home_rivalry_view_all_button").performScrollTo().performClick()
+        assertEquals(2, standingsOpens)
+
+        // Tapping a preview row launches ghost race directly
+        composeTestRule.onNodeWithTag("home_rivalry_preview_row_0").performScrollTo().performClick()
+        assertEquals("LIVING_ROOM_GP", launchedTrackKey)
+    }
+
+    @Test
+    fun leaderboardScreen_allTracksPillShowsUnifiedTableAndNavigatesToIndividualTrack() {
+        val localRecords = listOf(
+            com.example.model.LocalLeaderboardRecord(
+                boardKey = "RACE_LIVING_ROOM_GP_3L",
+                gameMode = GameMode.RACE.name,
+                trackKey = "LIVING_ROOM_GP",
+                totalLaps = 3,
+                driverName = "Acro",
+                carType = RcCarType.VOLT_BUGGY.name,
+                primaryColorArgb = 0xFFFF5722,
+                accentColorArgb = 0xFFFFD54F,
+                bestRaceTimeMs = 31_400L
+            ),
+            com.example.model.LocalLeaderboardRecord(
+                boardKey = "RACE_BACKYARD_DIRT_3L",
+                gameMode = GameMode.RACE.name,
+                trackKey = "BACKYARD_DIRT",
+                totalLaps = 3,
+                driverName = "Acro",
+                carType = RcCarType.VOLT_BUGGY.name,
+                primaryColorArgb = 0xFFFF5722,
+                accentColorArgb = 0xFFFFD54F,
+                bestRaceTimeMs = 42_000L
+            )
+        )
+        val friendEntries = listOf(
+            LeaderboardEntryDoc(
+                id = "rob_dirt",
+                userId = "uid_rob",
+                driverName = "Rob",
+                gameMode = GameMode.RACE.name,
+                trackKey = "BACKYARD_DIRT",
+                boardKey = "RACE_BACKYARD_DIRT_3L",
+                totalLaps = 3L,
+                bestRaceTimeMs = 40_500L
+            )
+        )
+
+        composeTestRule.setContent {
+            MicroRCTheme {
+                com.example.ui.screens.LeaderboardScreen(
+                    localRecords = localRecords,
+                    isSignedIn = true,
+                    currentUserId = "uid_me",
+                    cloudEntries = emptyList(),
+                    isLoadingCloud = false,
+                    ghostLoadingId = null,
+                    cloudStatusMessage = null,
+                    friendCircleEntries = friendEntries,
+                    onSelectBoardKey = {},
+                    onStartPureSoloForTrack = { _, _, _, _ -> },
+                    onChallengeCloudGhost = {},
+                    onRequestSignIn = {},
+                    onBack = {}
+                )
+            }
+        }
+
+        // "All Tracks" pill is the first chip in the horizontal track selector (left of Living Room GP)
+        val allChip = composeTestRule.onNodeWithTag("leaderboard_track_ALL").performScrollTo().assertIsDisplayed()
+        val firstTrackChip = composeTestRule.onNodeWithTag("leaderboard_track_LIVING_ROOM_GP").assertIsDisplayed()
+        assertTrue(
+            "All Tracks pill must be positioned first (to the left of Living Room GP)",
+            allChip.fetchSemanticsNode().positionInRoot.x < firstTrackChip.fetchSemanticsNode().positionInRoot.x
+        )
+
+        // Switching to All Tracks shows unified table with best times & #1 leaders
+        allChip.performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("leaderboard_all_tracks_table").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("leaderboard_all_tracks_row_LIVING_ROOM_GP").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("leaderboard_all_tracks_row_BACKYARD_DIRT").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Rob").assertIsDisplayed()
+        composeTestRule.onNodeWithText("You").assertIsDisplayed()
+
+        // Tapping an individual track row selects that track for detailed ghost selection
+        composeTestRule.onNodeWithTag("leaderboard_all_tracks_row_BACKYARD_DIRT").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("leaderboard_all_tracks_table").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("leaderboard_start_solo_button").performScrollTo().assertIsDisplayed()
+    }
 }

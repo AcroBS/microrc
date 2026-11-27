@@ -52,6 +52,7 @@ import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SmartToy
@@ -69,6 +70,7 @@ import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -107,6 +109,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
 import com.example.data.FriendBoardStandingItem
+import com.example.data.FriendStandingsCalculator
 import com.example.data.FriendStandingsSummary
 import com.example.data.PlayStreakState
 import com.example.model.GameMode
@@ -114,6 +117,7 @@ import com.example.model.PlayerProfile
 import com.example.ui.components.drawRcCar
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.PlusJakartaFontFamily
+import com.example.ui.theme.adaptiveGhostAccentColor
 import com.example.ui.theme.adaptiveGoldColor
 import com.example.ui.theme.adaptiveOnlineColor
 import com.example.util.AppUpdateUiState
@@ -171,6 +175,8 @@ fun HomeScreen(
     dailyDriftBestTimeMs: Long? = null,
     onOpenOnlinePlay: () -> Unit = {},
     onOpenFriends: () -> Unit = {},
+    onOpenFriendStandings: () -> Unit = onOpenFriends,
+    onLaunchRivalryGhostRace: (FriendBoardStandingItem) -> Unit = {},
     onlineFriendsCount: Int = 0,
     pendingRequestsCount: Int = 0,
     onOpenLeaderboards: () -> Unit = {},
@@ -576,8 +582,27 @@ fun HomeScreen(
                                 standings = friendStandings,
                                 onlineAccent = onlineAccent,
                                 goldAccent = goldAccent,
-                                onOpenFriends = onOpenFriends
+                                onOpenFriendStandings = onOpenFriendStandings
                             )
+
+                            val recentRivalryItems = remember(isSignedIn, friendStandings) {
+                                if (isSignedIn && friendStandings != null) {
+                                    FriendStandingsCalculator.selectRecentRivalryPreview(
+                                        summary = friendStandings,
+                                        limit = 3
+                                    )
+                                } else {
+                                    emptyList()
+                                }
+                            }
+                            if (recentRivalryItems.isNotEmpty()) {
+                                HomeRecentRivalryPreviewCard(
+                                    items = recentRivalryItems,
+                                    goldAccent = goldAccent,
+                                    onViewAll = onOpenFriendStandings,
+                                    onLaunchGhostRace = onLaunchRivalryGhostRace
+                                )
+                            }
                         }
 
                         HomeModeScope.OFFLINE -> {
@@ -1093,7 +1118,7 @@ private fun HomeCompactRivalryRow(
     standings: FriendStandingsSummary?,
     onlineAccent: Color,
     goldAccent: Color,
-    onOpenFriends: () -> Unit
+    onOpenFriendStandings: () -> Unit
 ) {
     val summary = standings ?: FriendStandingsSummary(totalFriendsCount = friendsCount)
     val totalRoster = maxOf(summary.totalCrewCount, friendsCount + 1)
@@ -1128,7 +1153,7 @@ private fun HomeCompactRivalryRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
-            .clickable(onClick = onOpenFriends)
+            .clickable(onClick = onOpenFriendStandings)
             .testTag("home_streak_standings_card")
     ) {
         Row(
@@ -1152,7 +1177,7 @@ private fun HomeCompactRivalryRow(
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = if (isLeadingCrew) Icons.Default.EmojiEvents else Icons.Default.Leaderboard,
-                        contentDescription = "Friends & Crew Standings",
+                        contentDescription = "Friend Standings",
                         tint = if (isLeadingCrew) goldAccent else MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(18.dp)
                     )
@@ -1203,10 +1228,121 @@ private fun HomeCompactRivalryRow(
 
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = "Open Friends and Crew",
+                contentDescription = "Open Friend Standings",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(20.dp)
             )
+        }
+    }
+}
+
+@Composable
+private fun HomeRecentRivalryPreviewCard(
+    items: List<FriendBoardStandingItem>,
+    goldAccent: Color,
+    onViewAll: () -> Unit,
+    onLaunchGhostRace: (FriendBoardStandingItem) -> Unit
+) {
+    val cappedItems = remember(items) { items.take(3) }
+    val ghostAccent = adaptiveGhostAccentColor()
+
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        shape = RoundedCornerShape(18.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("home_rivalry_preview_card")
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 14.dp, end = 6.dp, top = 4.dp, bottom = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "RECENT RIVALRY",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                TextButton(
+                    onClick = onViewAll,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = 48.dp)
+                        .testTag("home_rivalry_view_all_button")
+                ) {
+                    Text(
+                        text = "View All",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontFamily = PlusJakartaFontFamily,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    )
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+
+            cappedItems.forEachIndexed { idx, item ->
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                    modifier = Modifier.padding(horizontal = 14.dp)
+                )
+                val isLeading = item.myRank == 1
+                val deltaText = FriendStandingsCalculator.formatRivalryDeltaLine(item)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 52.dp)
+                        .clickable { onLaunchGhostRace(item) }
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                        .testTag("home_rivalry_preview_row_$idx"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Text(
+                            text = item.trackName,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = PlusJakartaFontFamily,
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = deltaText,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = PlusJakartaFontFamily,
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            color = if (isLeading) goldAccent else MaterialTheme.colorScheme.secondary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Race ghost on ${item.trackName}",
+                        tint = if (isLeading) goldAccent else ghostAccent,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
         }
     }
 }

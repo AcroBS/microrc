@@ -1052,9 +1052,13 @@ class OnlineViewModel(
     fun loadGhostAndTrackForChallenge(
         ghostId: String,
         knownCustomTracks: List<CustomTrackData>,
+        onFailureFallback: (() -> Unit)? = null,
         onLoaded: (GhostRunPlayback, CustomTrackData?) -> Unit
     ) {
-        if (ghostId.isBlank() || _ghostLoadingId.value != null) return
+        if (ghostId.isBlank() || _ghostLoadingId.value != null) {
+            if (ghostId.isBlank()) onFailureFallback?.invoke()
+            return
+        }
         _ghostLoadingId.value = ghostId
         viewModelScope.launch {
             val res = repository.fetchGhostRunPlayback(ghostId)
@@ -1073,14 +1077,22 @@ class OnlineViewModel(
                 }
                 _ghostLoadingId.value = null
                 if (!isBuiltInTrack && !isDailyTrack && !isDriftTrack && resolvedCustomTrack == null) {
-                    _cloudStatusMessage.value = "Custom track layout is no longer available on cloud."
+                    if (onFailureFallback != null) {
+                        onFailureFallback()
+                    } else {
+                        _cloudStatusMessage.value = "Custom track layout is no longer available on cloud."
+                    }
                 } else {
                     onLoaded(playback, resolvedCustomTrack)
                 }
             }.onFailure { err ->
                 _ghostLoadingId.value = null
-                formatUserFacingOnlineErrorOrNull(err, "Could not load ghost run.")?.let {
-                    _cloudStatusMessage.value = it
+                if (onFailureFallback != null) {
+                    onFailureFallback()
+                } else {
+                    formatUserFacingOnlineErrorOrNull(err, "Could not load ghost run.")?.let {
+                        _cloudStatusMessage.value = it
+                    }
                 }
             }
         }

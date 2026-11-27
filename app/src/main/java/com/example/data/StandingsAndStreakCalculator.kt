@@ -166,7 +166,8 @@ data class FriendBoardStandingItem(
     val topFriendTimeMs: Long,
     val topFriendScore: Int,
     val deltaVsTopFriendMs: Long?,
-    val deltaVsTopFriendScore: Int?
+    val deltaVsTopFriendScore: Int?,
+    val topFriendGhostId: String? = null
 )
 
 data class FriendCrewMemberRank(
@@ -178,7 +179,8 @@ data class FriendCrewMemberRank(
     val totalLeads: Int,
     val h2hMatchupsWon: Int,
     val boardsEntered: Int,
-    val overallPoints: Int = 0
+    val overallPoints: Int = 0,
+    val trailingBoardsCount: Int = 0
 )
 
 data class FriendStandingsSummary(
@@ -192,6 +194,7 @@ data class FriendStandingsSummary(
     val unchallengedFriendBoardsCount: Int = 0,
     val crewLeaderboard: List<FriendCrewMemberRank> = emptyList(),
     val highlightBoards: List<FriendBoardStandingItem> = emptyList(),
+    val allBoards: List<FriendBoardStandingItem> = emptyList(),
     val todayDailyGpStanding: FriendBoardStandingItem? = null,
     val todayDailyDriftStanding: FriendBoardStandingItem? = null
 )
@@ -204,7 +207,8 @@ private data class NormalizedStandingEntry(
     val gameMode: GameMode,
     val totalLaps: Int,
     val bestRaceTimeMs: Long,
-    val bestScore: Int
+    val bestScore: Int,
+    val ghostId: String? = null
 )
 
 object FriendStandingsCalculator {
@@ -267,7 +271,8 @@ object FriendStandingsCalculator {
                 gameMode = mode,
                 totalLaps = doc.totalLaps.toInt().coerceIn(1, 9),
                 bestRaceTimeMs = doc.bestRaceTimeMs,
-                bestScore = doc.bestScore.toInt()
+                bestScore = doc.bestScore.toInt(),
+                ghostId = if (doc.hasGhost && doc.ghostId.isNotBlank()) doc.ghostId else null
             )
             val key = candidate.userId to candidate.boardKey
             mergedByUserAndBoard[key] = pickBetter(mergedByUserAndBoard[key], candidate, isStunts)
@@ -291,7 +296,8 @@ object FriendStandingsCalculator {
                 gameMode = mode,
                 totalLaps = rec.totalLaps.coerceIn(1, 9),
                 bestRaceTimeMs = rec.bestRaceTimeMs,
-                bestScore = rec.bestScore
+                bestScore = rec.bestScore,
+                ghostId = null
             )
             val key = cleanMyUid to rec.boardKey
             mergedByUserAndBoard[key] = pickBetter(mergedByUserAndBoard[key], candidate, isStunts)
@@ -300,6 +306,7 @@ object FriendStandingsCalculator {
         // 3. Group by boardKey and rank drivers on every board
         val byBoard = mergedByUserAndBoard.values.groupBy { it.boardKey }
         val contestedWins = mutableMapOf<String, Int>()
+        val contestedTrails = mutableMapOf<String, Int>()
         val totalLeads = mutableMapOf<String, Int>()
         val h2hWins = mutableMapOf<String, Int>()
         val boardsEntered = mutableMapOf<String, Int>()
@@ -344,6 +351,8 @@ object FriendStandingsCalculator {
                     if (sorted.size >= 2) {
                         contestedWins[entry.userId] = (contestedWins[entry.userId] ?: 0) + 1
                     }
+                } else if (sorted.size >= 2) {
+                    contestedTrails[entry.userId] = (contestedTrails[entry.userId] ?: 0) + 1
                 }
                 if (sorted.size >= 2) {
                     val beatenCount = sorted.size - 1 - idx
@@ -395,6 +404,8 @@ object FriendStandingsCalculator {
                         fallback
                     }
                 }
+            val topFriendGhostId = topFriend?.ghostId
+                ?: friendEntries.firstNotNullOfOrNull { it.ghostId }
             boardItems.add(
                 FriendBoardStandingItem(
                     boardKey = boardKey,
@@ -414,7 +425,8 @@ object FriendStandingsCalculator {
                     topFriendTimeMs = topFriend?.bestRaceTimeMs ?: 0L,
                     topFriendScore = topFriend?.bestScore ?: 0,
                     deltaVsTopFriendMs = deltaMs,
-                    deltaVsTopFriendScore = deltaScore
+                    deltaVsTopFriendScore = deltaScore,
+                    topFriendGhostId = topFriendGhostId
                 )
             )
         }
@@ -434,6 +446,7 @@ object FriendStandingsCalculator {
         )
         val crewLeaderboard = sortedCrew.mapIndexed { index, uid ->
             val wins = contestedWins[uid] ?: 0
+            val trails = contestedTrails[uid] ?: 0
             val h2h = h2hWins[uid] ?: 0
             val leads = totalLeads[uid] ?: 0
             val boards = boardsEntered[uid] ?: 0
@@ -447,7 +460,8 @@ object FriendStandingsCalculator {
                 totalLeads = leads,
                 h2hMatchupsWon = h2h,
                 boardsEntered = boards,
-                overallPoints = points
+                overallPoints = points,
+                trailingBoardsCount = trails
             )
         }
         val myCrewRank = crewLeaderboard.firstOrNull { it.isSelf }?.rank ?: 1
@@ -504,9 +518,147 @@ object FriendStandingsCalculator {
             unchallengedFriendBoardsCount = unchallengedFriendBoardsCount,
             crewLeaderboard = crewLeaderboard,
             highlightBoards = highlighted,
+            allBoards = sortedBoards,
             todayDailyGpStanding = todayDailyGpStanding,
             todayDailyDriftStanding = todayDailyDriftStanding
         )
+    }
+
+    /**
+     * All contested boards where a friend is ahead of you, sorted by closest deficit first.
+     */
+    fun chasingBoards(summary: FriendStandingsSummary): List<FriendBoardStandingItem> {
+        val source = summary.allBoards.ifEmpty { summary.highlightBoards }
+        return source
+            .filter { it.myRank != null && it.myRank > 1 && it.topFriendName != null }
+            .sortedWith(
+                compareBy<FriendBoardStandingItem> { deltaMagnitudeForSort(it) }
+                    .thenByDescending { it.isDaily }
+                    .thenBy { it.trackName }
+            )
+    }
+
+    /**
+     * All contested boards where you currently hold #1 over at least one friend,
+     * sorted by narrowest margin first (closest leads at top).
+     */
+    fun leadingBoards(summary: FriendStandingsSummary): List<FriendBoardStandingItem> {
+        val source = summary.allBoards.ifEmpty { summary.highlightBoards }
+        return source
+            .filter { it.myRank == 1 && it.topFriendName != null }
+            .sortedWith(
+                compareBy<FriendBoardStandingItem> { deltaMagnitudeForSort(it) }
+                    .thenByDescending { it.isDaily }
+                    .thenBy { it.trackName }
+            )
+    }
+
+    /**
+     * Boards where a friend has posted a benchmark time but you haven't set one yet.
+     */
+    fun unchallengedFriendBoards(summary: FriendStandingsSummary): List<FriendBoardStandingItem> {
+        val source = summary.allBoards.ifEmpty { summary.highlightBoards }
+        return source
+            .filter { it.myRank == null && it.topFriendName != null }
+            .sortedWith(
+                compareByDescending<FriendBoardStandingItem> { it.isDaily }
+                    .thenByDescending { it.totalDriversOnBoard }
+                    .thenBy { it.trackName }
+            )
+    }
+
+    /**
+     * Selects up to [limit] active rivalry tracks for the compact Play screen preview:
+     * 1. Tracks where a friend is currently ahead of you (Chasing, closest deficits first)
+     * 2. Your closest contested leads (narrowest positive margins first)
+     * 3. Unchallenged friend benchmarks if fewer than [limit] contested tracks exist
+     */
+    fun selectRecentRivalryPreview(
+        summary: FriendStandingsSummary,
+        limit: Int = 3
+    ): List<FriendBoardStandingItem> {
+        if (limit <= 0) return emptyList()
+        val combined = ArrayList<FriendBoardStandingItem>(limit)
+        for (item in chasingBoards(summary)) {
+            if (combined.size >= limit) return combined
+            combined.add(item)
+        }
+        for (item in leadingBoards(summary)) {
+            if (combined.size >= limit) return combined
+            combined.add(item)
+        }
+        for (item in unchallengedFriendBoards(summary)) {
+            if (combined.size >= limit) return combined
+            combined.add(item)
+        }
+        return combined
+    }
+
+    /**
+     * Plain-language rivalry delta label, e.g.:
+     * - "Rob leads by -0.35s"
+     * - "You lead by +0.67s"
+     * - "Rob leads • 0:41.20"
+     */
+    fun formatRivalryDeltaLine(item: FriendBoardStandingItem): String {
+        val isStunts = item.gameMode == GameMode.STUNTS
+        return if (isStunts) {
+            when {
+                item.myRank == 1 && item.deltaVsTopFriendScore != null -> {
+                    val margin = kotlin.math.abs(item.deltaVsTopFriendScore)
+                    "You lead by +$margin pts"
+                }
+                item.myRank != null && item.myRank > 1 && item.deltaVsTopFriendScore != null -> {
+                    val gap = kotlin.math.abs(item.deltaVsTopFriendScore)
+                    "${item.leaderName} leads by -$gap pts"
+                }
+                item.myRank == null && item.topFriendName != null -> {
+                    "${item.leaderName} leads • ${item.topFriendScore} pts"
+                }
+                else -> "Your best • ${item.myScore} pts"
+            }
+        } else {
+            when {
+                item.myRank == 1 && item.deltaVsTopFriendMs != null -> {
+                    val sec = formatDeltaSeconds(item.deltaVsTopFriendMs)
+                    "You lead by +$sec"
+                }
+                item.myRank != null && item.myRank > 1 && item.deltaVsTopFriendMs != null -> {
+                    val sec = formatDeltaSeconds(item.deltaVsTopFriendMs)
+                    "${item.leaderName} leads by -$sec"
+                }
+                item.myRank == null && item.topFriendName != null -> {
+                    "${item.leaderName} leads • ${formatCompactTime(item.topFriendTimeMs)}"
+                }
+                else -> "Your best • ${formatCompactTime(item.myTimeMs)}"
+            }
+        }
+    }
+
+    fun formatCompactTime(ms: Long): String {
+        if (ms <= 0L) return "--"
+        val totalHundredths = ms / 10L
+        val hundredths = totalHundredths % 100L
+        val totalSeconds = totalHundredths / 100L
+        val seconds = totalSeconds % 60L
+        val minutes = totalSeconds / 60L
+        return if (minutes > 0L) {
+            String.format(Locale.US, "%d:%02d.%02d", minutes, seconds, hundredths)
+        } else {
+            String.format(Locale.US, "%d.%02ds", seconds, hundredths)
+        }
+    }
+
+    private fun formatDeltaSeconds(deltaMs: Long): String {
+        return String.format(Locale.US, "%.2fs", kotlin.math.abs(deltaMs) / 1000.0)
+    }
+
+    private fun deltaMagnitudeForSort(item: FriendBoardStandingItem): Long {
+        return when {
+            item.deltaVsTopFriendMs != null -> kotlin.math.abs(item.deltaVsTopFriendMs)
+            item.deltaVsTopFriendScore != null -> kotlin.math.abs(item.deltaVsTopFriendScore.toLong())
+            else -> Long.MAX_VALUE
+        }
     }
 
     private fun pickBetter(
@@ -516,11 +668,19 @@ object FriendStandingsCalculator {
     ): NormalizedStandingEntry {
         if (current == null) return candidate
         return if (isStunts) {
-            if (candidate.bestScore > current.bestScore) candidate else current
+            if (candidate.bestScore > current.bestScore) {
+                candidate.copy(ghostId = candidate.ghostId ?: current.ghostId)
+            } else {
+                current.copy(ghostId = current.ghostId ?: candidate.ghostId)
+            }
         } else {
             val candMs = candidate.bestRaceTimeMs
             val curMs = current.bestRaceTimeMs
-            if (candMs > 0L && (curMs <= 0L || candMs < curMs)) candidate else current
+            if (candMs > 0L && (curMs <= 0L || candMs < curMs)) {
+                candidate.copy(ghostId = candidate.ghostId ?: current.ghostId)
+            } else {
+                current.copy(ghostId = current.ghostId ?: candidate.ghostId)
+            }
         }
     }
 }
