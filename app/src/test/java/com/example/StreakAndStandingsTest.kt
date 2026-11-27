@@ -17,6 +17,7 @@ import androidx.work.NetworkType
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.testing.WorkManagerTestInitHelper
+import com.example.data.DailyChallengeCatalog
 import com.example.data.FriendStandingsCalculator
 import com.example.data.PlayStreakState
 import com.example.model.ChallengedFriendStatus
@@ -161,7 +162,7 @@ class StreakAndStandingsTest {
             customTrackNames = mapOf("custom_neon_1" to "Neon Hairpin")
         )
 
-        var openedBoard: Triple<String, GameMode, Boolean>? = null
+        var openedFriends = false
 
         composeTestRule.setContent {
             MicroRCTheme {
@@ -170,6 +171,7 @@ class StreakAndStandingsTest {
                     onHostRace = {},
                     onJoinRace = {},
                     onSoloRace = {},
+                    onOpenFriends = { openedFriends = true },
                     onOpenGarage = {},
                     onUpdateDriverName = {},
                     playStreak = PlayStreakState(
@@ -180,34 +182,28 @@ class StreakAndStandingsTest {
                     ),
                     isSignedIn = true,
                     friendsCount = 1,
-                    friendStandings = summary,
-                    onOpenStandingsBoard = { trackKey, gameMode, isDaily ->
-                        openedBoard = Triple(trackKey, gameMode, isDaily)
-                    }
+                    friendStandings = summary
                 )
             }
         }
 
-        composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().assertIsDisplayed()
+        // Streak lives in the compact hero banner flame pill (no duplicate 4 Day Streak box at bottom)
         composeTestRule.onNodeWithTag("home_streak_badge").assertIsDisplayed()
-        composeTestRule.onNodeWithText("4 Day Streak").assertIsDisplayed()
+        composeTestRule.onNodeWithText("4d").assertIsDisplayed()
+        composeTestRule.onNodeWithText("4 Day Streak").assertDoesNotExist()
         composeTestRule.onNodeWithTag("home_streak_milestone_banner").assertDoesNotExist()
-        composeTestRule.onNodeWithTag("home_standings_rank_badge").assertIsDisplayed()
-        composeTestRule.onNodeWithText("#1 of 2 Friends").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Lead 1 • Chase 0").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("home_overall_friends_ranking").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("home_overall_friend_rank_0").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("home_standings_board_row_0").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithText("-1.50s").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("home_standings_board_row_1").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithText("Neon Hairpin • Custom • 3L").performScrollTo().assertIsDisplayed()
+
+        // Compact single-row rivalry footer opens Friends & Crew on tap
+        composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_standings_rank_badge", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText("#1 of 2 Friends • Lead 1 • Chase 0").assertIsDisplayed()
 
         composeTestRule.onNodeWithTag("home_challenges_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_offline_section").assertDoesNotExist()
 
-        composeTestRule.onNodeWithTag("home_standings_board_row_0").performScrollTo().performClick()
-        assertEquals(Triple("GP_APEX", GameMode.RACE, false), openedBoard)
+        composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().performClick()
+        assertTrue(openedFriends)
     }
 
     @Test
@@ -282,10 +278,11 @@ class StreakAndStandingsTest {
             }
         }
 
+        composeTestRule.onNodeWithTag("home_streak_badge").assertIsDisplayed()
+        composeTestRule.onNodeWithText("2d").assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithText("2 Day Streak").assertIsDisplayed()
-        composeTestRule.onNodeWithText("3 Local PBs").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("home_standings_cta_button").performScrollTo().performClick()
+        composeTestRule.onNodeWithText("Friends & Crew • Sign in to compare (3 times)").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().performClick()
         assertTrue(openedFriends)
     }
 
@@ -393,16 +390,21 @@ class StreakAndStandingsTest {
     }
 
     @Test
-    fun homeStandings_capsToTopThreeWithViewAllToggleAndCompactFriendsCardPlacesNotifyInline() {
-        val summary = FriendStandingsCalculator.compute(
+    fun homeDailyChallenges_showClearLeadStatusAndFlatLayout() {
+        val dailyGpDate = "20261125"
+        val dailyGpTrack = DailyChallengeCatalog.trackIdForDate(dailyGpDate)
+        val dailyGpBoard = DailyChallengeCatalog.boardKeyForDate(dailyGpDate)
+        val dailyDriftTrack = com.example.drift.DriftDailyChallenge.trackIdForDate(dailyGpDate)
+        val dailyDriftBoard = com.example.drift.DriftDailyChallenge.boardKeyForDate(dailyGpDate)
+        val dailySummary = FriendStandingsCalculator.compute(
             myUid = "uid_me",
             myName = "Alex",
             friends = listOf(
                 FriendUiModel(
                     friendshipId = "f1",
-                    friendUid = "uid_riley",
-                    displayName = "Riley",
-                    friendCode = "RCRILEY9",
+                    friendUid = "uid_rob",
+                    displayName = "Rob",
+                    friendCode = "RCROB001",
                     carType = RcCarType.VOLT_BUGGY,
                     primaryColorArgb = 0xFF00E5FF,
                     accentColorArgb = 0xFFFFD54F,
@@ -416,48 +418,38 @@ class StreakAndStandingsTest {
             ),
             cloudEntries = listOf(
                 LeaderboardEntryDoc(
-                    id = "uid_me_1",
+                    id = "d_gp_me",
                     userId = "uid_me",
                     driverName = "Alex",
                     gameMode = GameMode.RACE.name,
-                    trackKey = "GP_APEX",
-                    boardKey = "RACE_GP_APEX_3L",
+                    trackKey = dailyGpTrack,
+                    boardKey = dailyGpBoard,
                     totalLaps = 3L,
-                    bestRaceTimeMs = 34_100L
+                    bestRaceTimeMs = 38_400L
                 ),
                 LeaderboardEntryDoc(
-                    id = "uid_me_2",
-                    userId = "uid_me",
-                    driverName = "Alex",
+                    id = "d_gp_rob",
+                    userId = "uid_rob",
+                    driverName = "Rob",
                     gameMode = GameMode.RACE.name,
-                    trackKey = "LIVING_ROOM_GP",
-                    boardKey = "RACE_LIVING_ROOM_GP_3L",
+                    trackKey = dailyGpTrack,
+                    boardKey = dailyGpBoard,
                     totalLaps = 3L,
-                    bestRaceTimeMs = 28_500L
+                    bestRaceTimeMs = 39_100L
                 ),
                 LeaderboardEntryDoc(
-                    id = "uid_me_3",
-                    userId = "uid_me",
-                    driverName = "Alex",
-                    gameMode = GameMode.RACE.name,
-                    trackKey = "WORKSHOP_GP",
-                    boardKey = "RACE_WORKSHOP_GP_3L",
+                    id = "d_drift_rob",
+                    userId = "uid_rob",
+                    driverName = "Rob",
+                    gameMode = GameMode.DRIFT.name,
+                    trackKey = dailyDriftTrack,
+                    boardKey = dailyDriftBoard,
                     totalLaps = 3L,
-                    bestRaceTimeMs = 30_200L
-                ),
-                LeaderboardEntryDoc(
-                    id = "uid_me_4",
-                    userId = "uid_me",
-                    driverName = "Alex",
-                    gameMode = GameMode.RACE.name,
-                    trackKey = "BACKYARD_GP",
-                    boardKey = "RACE_BACKYARD_GP_3L",
-                    totalLaps = 3L,
-                    bestRaceTimeMs = 33_800L
+                    bestRaceTimeMs = 41_200L
                 )
             ),
             localRecords = emptyList(),
-            todayDateKey = "20261125"
+            todayDateKey = dailyGpDate
         )
 
         composeTestRule.setContent {
@@ -469,19 +461,23 @@ class StreakAndStandingsTest {
                     onSoloRace = {},
                     onOpenGarage = {},
                     onUpdateDriverName = {},
+                    dailyChallengeResetLabel = "Resets in 5h 27m",
                     isSignedIn = true,
                     friendsCount = 1,
-                    friendStandings = summary
+                    friendStandings = dailySummary
                 )
             }
         }
 
-        composeTestRule.onNodeWithTag("home_standings_board_row_0").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("home_standings_board_row_2").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("home_standings_board_row_3").assertDoesNotExist()
-        composeTestRule.onNodeWithTag("home_standings_view_all_toggle").performScrollTo().performClick()
-        composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("home_standings_board_row_3").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("DAILY CHALLENGES").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Resets in 5h 27m").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Daily GP").assertIsDisplayed()
+        composeTestRule.onNodeWithText("You lead").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Daily Drift").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Rob leads").assertIsDisplayed()
+        composeTestRule.onNodeWithText("No PB yet").assertDoesNotExist()
+        composeTestRule.onNodeWithText("LIVE ONLINE MULTIPLAYER").assertDoesNotExist()
+        composeTestRule.onNodeWithText("DAILY CHALLENGES & GHOSTS").assertDoesNotExist()
     }
 
     @Test

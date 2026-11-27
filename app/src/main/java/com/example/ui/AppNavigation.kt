@@ -1011,9 +1011,11 @@ fun MicroRCApp(
 
             composable(Routes.HYBRID_SETUP) {
                 val inActiveLobby = sessionRole.isHostLike
+                val isSoloHybrid = sessionRole == SessionRole.Solo
                 HybridSetupScreen(
                     initialRules = effectiveRules,
                     inActiveLobby = inActiveLobby,
+                    isSoloMode = isSoloHybrid,
                     onHostHybridWifi = { hybridRules ->
                         activeOnlineVm?.leaveRoom()
                         viewModel.startHosting(hybridRules)
@@ -1331,6 +1333,7 @@ fun MicroRCApp(
                     canRestart = !isOnlineSession && (offlineRole == SessionRole.Host || offlineRole == SessionRole.Solo),
                     isDailyChallenge = !isOnlineSession && isDailyChallengeSession,
                     isOnlineSession = isOnlineSession,
+                    isMultiplayerSession = isOnlineSession || offlineRole == SessionRole.Host || offlineRole == SessionRole.Client,
                     onlinePingMs = if (isOnlineSession) onlinePingMs else null,
                     isOnlineFallback = isOnlineSession && isOnlineFallback,
                     personalBestLapMs = pbLapMs,

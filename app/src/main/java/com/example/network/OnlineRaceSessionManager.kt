@@ -1665,7 +1665,8 @@ class OnlineRaceSessionManager(
             stuntSequenceOverride = stuntSequence,
             isHybridTour = isHybrid,
             hybridStageNumber = hybridStageNumber,
-            nextHybridModeName = upcomingHybridMode?.name
+            nextHybridModeName = upcomingHybridMode?.name,
+            isMultiplayerSession = true
         )
         physicsEngine = engine
 

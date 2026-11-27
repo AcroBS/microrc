@@ -728,7 +728,11 @@ fun ResultsScreen(
                             Icon(Icons.Default.Replay, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = if (isHostOrSolo) "Back to Lobby (Edit Rules)" else "Back to Lobby",
+                                text = when {
+                                    role == SessionRole.Solo -> "Back to Race Setup"
+                                    isHostOrSolo -> "Back to Lobby (Edit Rules)"
+                                    else -> "Back to Lobby"
+                                },
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.secondary
                             )

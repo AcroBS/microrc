@@ -1569,7 +1569,8 @@ class WifiP2pRaceManager(
             isHybridTour = isHybrid,
             hybridStageNumber = hybridStageNumber,
             nextHybridModeName = upcomingHybridMode?.name,
-            isDailyChallenge = dailyChallengeRun
+            isDailyChallenge = dailyChallengeRun,
+            isMultiplayerSession = (_role.value == SessionRole.Host || _role.value == SessionRole.Client)
         )
         physicsEngine = engine
 

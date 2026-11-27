@@ -90,8 +90,11 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.audio.RaceAudioEngine
@@ -144,6 +147,7 @@ fun RaceScreen(
     canRestart: Boolean = false,
     isDailyChallenge: Boolean = false,
     isOnlineSession: Boolean = false,
+    isMultiplayerSession: Boolean = false,
     onlinePingMs: Int? = null,
     isOnlineFallback: Boolean = false,
     personalBestLapMs: Long? = null,
@@ -735,7 +739,7 @@ fun RaceScreen(
                             modifier = Modifier.testTag("live_lap_delta_badge")
                         ) {
                             Text(
-                                text = "LAP DELTA ${formatLapDeltaSeconds(deltaMs)} vs PB",
+                                text = "LAP DELTA ${formatLapDeltaSeconds(deltaMs)} vs BEST",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = deltaColor,
                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
@@ -748,8 +752,9 @@ fun RaceScreen(
                 if (ghostCar != null && snapshot?.phase != RacePhase.FINISHED.name) {
                     val delta = ghostCar.splitDeltaMs
                     val ahead = delta != null && delta <= 0L
+                    val ghostPrefix = formatGhostHudPrefix(ghostCar.driverName)
                     val deltaText = when {
-                        delta == null -> "TARGET ${formatRaceTime(ghostCar.finishTimeMs)}"
+                        delta == null -> formatRaceTime(ghostCar.finishTimeMs)
                         delta <= 0L -> String.format(java.util.Locale.US, "%.2fs", delta / 1000f)
                         else -> String.format(java.util.Locale.US, "+%.2fs", delta / 1000f)
                     }
@@ -764,24 +769,21 @@ fun RaceScreen(
                         border = BorderStroke(1.2.dp, badgeColor.copy(alpha = 0.88f)),
                         modifier = Modifier.testTag("ghost_delta_badge")
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = "GHOST • ${ghostCar.driverName.take(10).uppercase()}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = secondaryAccent,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = deltaText,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = badgeColor
-                            )
-                        }
+                        Text(
+                            text = buildAnnotatedString {
+                                withStyle(SpanStyle(color = secondaryAccent)) {
+                                    append(ghostPrefix)
+                                }
+                                append(" ")
+                                withStyle(SpanStyle(color = badgeColor)) {
+                                    append(deltaText)
+                                }
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        )
                     }
                 }
 
@@ -1453,11 +1455,17 @@ fun RaceScreen(
                     horizontalAlignment = if (profile.swapControls) Alignment.Start else Alignment.End,
                     verticalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
+                    val hasOpponentsOrBots = (snapshot?.racers?.size ?: 0) > 1
+                    val minesAllowed = !isArenaMode &&
+                        !isStuntsMode &&
+                        !isDailyChallenge &&
+                        !isDriftMode &&
+                        (isMultiplayerSession || isOnlineSession || hasOpponentsOrBots)
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(actionRowSpacing),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        if (!isArenaMode && !isStuntsMode && !isDailyChallenge && !isDriftMode) {
+                        if (minesAllowed) {
                             val currentLap = localRacer?.lap ?: 1
                             val mineFlash = 0.5f + 0.5f * sin(animTimeSec * 14f)
                             val mineActiveBg = if (mineFlash > 0.45f) {
@@ -2239,4 +2247,23 @@ fun ordinal(rank: Int): String = when (rank) {
     2 -> "2nd"
     3 -> "3rd"
     else -> "${rank}th"
+}
+
+internal fun formatGhostHudPrefix(driverName: String): String {
+    val trimmed = driverName.trim()
+    if (trimmed.isEmpty()) return "VS BEST"
+    if (trimmed.contains("(PB)", ignoreCase = true) ||
+        trimmed.equals("PB", ignoreCase = true) ||
+        trimmed.equals("Personal Best", ignoreCase = true)
+    ) {
+        return "VS BEST"
+    }
+    val cleaned = trimmed
+        .replace(Regex("""\s*\(PB\)\s*""", RegexOption.IGNORE_CASE), "")
+        .trim()
+    return if (cleaned.isEmpty()) {
+        "VS BEST"
+    } else {
+        "VS ${cleaned.take(10).uppercase(java.util.Locale.US)}"
+    }
 }

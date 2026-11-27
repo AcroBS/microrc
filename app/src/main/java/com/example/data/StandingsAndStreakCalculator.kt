@@ -191,7 +191,9 @@ data class FriendStandingsSummary(
     val soloOnlyBoardsCount: Int = 0,
     val unchallengedFriendBoardsCount: Int = 0,
     val crewLeaderboard: List<FriendCrewMemberRank> = emptyList(),
-    val highlightBoards: List<FriendBoardStandingItem> = emptyList()
+    val highlightBoards: List<FriendBoardStandingItem> = emptyList(),
+    val todayDailyGpStanding: FriendBoardStandingItem? = null,
+    val todayDailyDriftStanding: FriendBoardStandingItem? = null
 )
 
 private data class NormalizedStandingEntry(
@@ -484,6 +486,13 @@ object FriendStandingsCalculator {
             initial
         }
 
+        val todayDailyGpStanding = boardItems.firstOrNull { it.boardKey == todayDailyBoardKey }
+        val todayDailyDriftStanding = if (todayDailyDriftBoardKey.isNotEmpty()) {
+            boardItems.firstOrNull { it.boardKey == todayDailyDriftBoardKey }
+        } else {
+            null
+        }
+
         return FriendStandingsSummary(
             myCrewRank = myCrewRank,
             totalCrewCount = crewLeaderboard.size,
@@ -494,7 +503,9 @@ object FriendStandingsCalculator {
             soloOnlyBoardsCount = soloOnlyBoardsCount,
             unchallengedFriendBoardsCount = unchallengedFriendBoardsCount,
             crewLeaderboard = crewLeaderboard,
-            highlightBoards = highlighted
+            highlightBoards = highlighted,
+            todayDailyGpStanding = todayDailyGpStanding,
+            todayDailyDriftStanding = todayDailyDriftStanding
         )
     }
 

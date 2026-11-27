@@ -414,11 +414,31 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun hybridSetupScreen_configuresGameTypesAndOpensHybridLobby() {
+    fun hybridSetupScreen_configuresGameTypesInsideSoloRaceSetupWithoutMultiplayerOptions() {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("home_scope_solo").performScrollTo().performClick()
         composeTestRule.waitForIdle()
-        composeTestRule.onNodeWithTag("solo_hybrid_tour_button").performScrollTo().performClick()
+        // Hybrid Tour is part of Solo Race Setup, not a separate main menu item
+        composeTestRule.onNodeWithTag("solo_hybrid_tour_button").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("pure_solo_button").performScrollTo().performClick()
+
+        composeTestRule.waitUntil(timeoutMillis = 5_000L) {
+            runCatching {
+                composeTestRule.onNodeWithTag("lobby_game_mode_RACE").assertIsDisplayed()
+                true
+            }.getOrDefault(false)
+        }
+        // Solo race setup has no Paddock Chat
+        composeTestRule.onNodeWithText("PADDOCK CHAT").assertDoesNotExist()
+
+        composeTestRule.onNodeWithTag("lobby_game_mode_HYBRID").performScrollTo().performClick()
+        composeTestRule.waitUntil(timeoutMillis = 5_000L) {
+            runCatching {
+                composeTestRule.onNodeWithTag("lobby_configure_hybrid_button").performScrollTo().assertIsDisplayed()
+                true
+            }.getOrDefault(false)
+        }
+        composeTestRule.onNodeWithTag("lobby_configure_hybrid_button").performScrollTo().performClick()
         composeTestRule.waitForIdle()
 
         // Verify Hybrid Event Setup screen game type switches & play order controls
@@ -429,9 +449,10 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("hybrid_order_random").performScrollTo().performClick()
         composeTestRule.waitForIdle()
 
-        // Launch Hybrid Tour Lobby via fixed bottom bar button (no performScrollTo on fixed bar!)
-        composeTestRule.onNodeWithTag("start_hybrid_wifi_button").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("start_hybrid_wifi_button").performClick()
+        // Solo Hybrid Setup must NOT show "Host Wi-Fi Tour"
+        composeTestRule.onNodeWithTag("start_hybrid_wifi_button").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("apply_hybrid_lobby_button").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("apply_hybrid_lobby_button").performClick()
 
         composeTestRule.waitUntil(timeoutMillis = 5_000L) {
             runCatching {
@@ -798,7 +819,9 @@ class ExampleRobolectricTest {
             challengesBottom <= standingsTop + 2f
         )
 
-        // 2. Online tab is default (Action First, Stats Second) with header friends icon
+        // 2. Online tab is default (Action First, Stats Second) with flat layout (no outer wrapper headers)
+        composeTestRule.onNodeWithTag("home_car_telemetry_text").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_streak_badge").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("online_play_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_challenges_section").performScrollTo().assertIsDisplayed()
@@ -806,7 +829,7 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("leaderboards_button").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("pure_solo_button").assertDoesNotExist()
         composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("home_friends_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_friends_button", useUnmergedTree = true).assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_offline_section").assertDoesNotExist()
         composeTestRule.onNodeWithTag("home_solo_section").assertDoesNotExist()
 
@@ -822,13 +845,13 @@ class ExampleRobolectricTest {
         composeTestRule.onNodeWithTag("home_challenges_section").assertDoesNotExist()
         composeTestRule.onNodeWithTag("home_solo_section").assertDoesNotExist()
 
-        // 4. Selecting Solo Play shows AI Bots toggle + Solo Time Trial/Quick Race + Hybrid Tour (no Tracks & Ghosts)
+        // 4. Selecting Solo Play shows AI Bots toggle + Solo Time Trial/Quick Race (Hybrid Tour is inside Solo setup, not a separate menu item)
         composeTestRule.onNodeWithTag("home_scope_solo").performScrollTo().performClick()
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("home_solo_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("solo_bots_switch").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("pure_solo_button").performScrollTo().assertIsDisplayed()
-        composeTestRule.onNodeWithTag("solo_hybrid_tour_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("solo_hybrid_tour_button").assertDoesNotExist()
         composeTestRule.onNodeWithTag("solo_tracks_ghosts_button").assertDoesNotExist()
         composeTestRule.onNodeWithTag("solo_bots_switch").performClick()
         composeTestRule.waitForIdle()

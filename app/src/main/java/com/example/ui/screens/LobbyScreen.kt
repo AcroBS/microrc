@@ -196,13 +196,17 @@ fun LobbyScreen(
                 ) {
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Leave Lobby",
+                        contentDescription = if (role == SessionRole.Solo) "Back" else "Leave Lobby",
                         tint = MaterialTheme.colorScheme.onBackground
                     )
                 }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = lobby?.lobbyName ?: "Race Paddock",
+                        text = if (role == SessionRole.Solo) {
+                            "Solo Race Setup"
+                        } else {
+                            lobby?.lobbyName ?: "Race Paddock"
+                        },
                         style = MaterialTheme.typography.titleLarge,
                         color = MaterialTheme.colorScheme.onBackground,
                         maxLines = 1,
@@ -1393,7 +1397,7 @@ fun LobbyScreen(
                                             color = MaterialTheme.colorScheme.onSurface,
                                             maxLines = 1
                                         )
-                                        if (player.isHost) {
+                                        if (player.isHost && role != SessionRole.Solo) {
                                             Icon(Icons.Default.Star, contentDescription = "Host", tint = adaptiveGoldColor(), modifier = Modifier.size(15.dp))
                                         }
                                         if (player.isBot) {
@@ -1421,7 +1425,13 @@ fun LobbyScreen(
                                     }
                                 }
                                 Surface(
-                                    color = if (player.isReady) {
+                                    color = if (role == SessionRole.Solo) {
+                                        if (player.isBot) {
+                                            MaterialTheme.colorScheme.surfaceContainerHigh
+                                        } else {
+                                            MaterialTheme.colorScheme.secondaryContainer
+                                        }
+                                    } else if (player.isReady) {
                                         MaterialTheme.colorScheme.tertiaryContainer
                                     } else {
                                         MaterialTheme.colorScheme.surfaceContainerHigh
@@ -1433,7 +1443,7 @@ fun LobbyScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
-                                        if (player.isReady) {
+                                        if (role != SessionRole.Solo && player.isReady) {
                                             Icon(
                                                 Icons.Default.CheckCircle,
                                                 contentDescription = null,
@@ -1442,9 +1452,23 @@ fun LobbyScreen(
                                             )
                                         }
                                         Text(
-                                            text = if (player.isHost) "HOST" else if (player.isReady) "READY" else "WAITING",
+                                            text = if (role == SessionRole.Solo) {
+                                                if (player.isBot) "AI BOT" else "YOU"
+                                            } else if (player.isHost) {
+                                                "HOST"
+                                            } else if (player.isReady) {
+                                                "READY"
+                                            } else {
+                                                "WAITING"
+                                            },
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = if (player.isReady) {
+                                            color = if (role == SessionRole.Solo) {
+                                                if (player.isBot) {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSecondaryContainer
+                                                }
+                                            } else if (player.isReady) {
                                                 MaterialTheme.colorScheme.onTertiaryContainer
                                             } else {
                                                 MaterialTheme.colorScheme.onSurfaceVariant
@@ -1457,7 +1481,8 @@ fun LobbyScreen(
                     }
                 }
 
-                // Lobby Chat Card
+                // Lobby Chat Card (Multiplayer only — hidden in Solo mode)
+                if (role != SessionRole.Solo) {
                 Card(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -1561,6 +1586,7 @@ fun LobbyScreen(
                             }
                         }
                     }
+                }
                 }
             }
 

@@ -62,6 +62,7 @@ import com.example.model.RaceRulesSettings
 fun HybridSetupScreen(
     initialRules: RaceRulesSettings,
     inActiveLobby: Boolean = false,
+    isSoloMode: Boolean = false,
     onHostHybridWifi: (RaceRulesSettings) -> Unit,
     onStartHybridSolo: (RaceRulesSettings) -> Unit,
     onApplyToLobby: (RaceRulesSettings) -> Unit = {},
@@ -150,7 +151,7 @@ fun HybridSetupScreen(
                         HybridTypeToggleRow(
                             icon = Icons.Default.SportsScore,
                             title = "Circuit Race",
-                            subtitle = "Closed RC circuits with power-ups, electro shock & Lap 2+ mines",
+                            subtitle = "Closed RC circuits with power-ups, electro shock & Lap 2+ mines (multiplayer or bots)",
                             checked = draft.hybridIncludeCircuit,
                             testTag = "hybrid_toggle_circuit",
                             onToggle = { next ->
@@ -380,7 +381,31 @@ fun HybridSetupScreen(
                                 .height(54.dp)
                                 .testTag("apply_hybrid_lobby_button")
                         ) {
-                            Text("Apply Hybrid Setup to Lobby", style = MaterialTheme.typography.labelLarge)
+                            Text(
+                                text = if (isSoloMode) "Apply Hybrid Setup" else "Apply Hybrid Setup to Lobby",
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                        }
+                    }
+                } else if (isSoloMode) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Button(
+                            onClick = { onStartHybridSolo(draft.copy(gameMode = GameMode.HYBRID.name)) },
+                            shape = RoundedCornerShape(16.dp),
+                            modifier = Modifier
+                                .widthIn(max = 640.dp)
+                                .fillMaxWidth()
+                                .height(54.dp)
+                                .testTag("start_hybrid_solo_button")
+                        ) {
+                            Icon(Icons.Default.SmartToy, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Start Solo Hybrid Tour", style = MaterialTheme.typography.labelLarge)
                         }
                     }
                 } else {

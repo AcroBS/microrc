@@ -49,7 +49,8 @@ class RacePhysicsEngine(
     private val isHybridTour: Boolean = false,
     private val hybridStageNumber: Int = 1,
     private val nextHybridModeName: String? = null,
-    private val isDailyChallenge: Boolean = false
+    private val isDailyChallenge: Boolean = false,
+    private val isMultiplayerSession: Boolean = false
 ) {
     private data class MutableRacer(
         val playerId: String,
@@ -130,6 +131,11 @@ class RacePhysicsEngine(
     private val isStuntMode: Boolean = track.isStunt || rules.gameModeEnum == GameMode.STUNTS
     private val isArenaMode: Boolean = !isStuntMode && (track.isArena || rules.gameModeEnum == GameMode.ARENA)
     private val isDriftMode: Boolean = !isStuntMode && !isArenaMode && com.example.drift.DriftFeature.isDriftMode(rules.gameModeEnum)
+    private val minesAllowed: Boolean = !isDailyChallenge &&
+        !isDriftMode &&
+        !isArenaMode &&
+        !isStuntMode &&
+        (isMultiplayerSession || players.any { it.isBot } || players.size >= 2)
     private val winCondition: WinCondition = if (isDriftMode) WinCondition.FIRST_TO_FINISH else rules.winConditionEnum
     private val speedPreset: CarSpeedPreset = rules.carSpeedEnum
     private val effectiveLaps: Int = totalLaps.coerceIn(1, 9)
@@ -494,7 +500,7 @@ class RacePhysicsEngine(
     }
 
     fun grantMineForTest(playerId: String, count: Int = 1) {
-        if (isDailyChallenge || isDriftMode || isArenaMode || isStuntMode) return
+        if (!minesAllowed) return
         val racer = racers.find { it.playerId == playerId } ?: return
         racer.minesAvailable = count.coerceIn(0, 1)
     }
@@ -2173,7 +2179,7 @@ class RacePhysicsEngine(
     }
 
     private fun grantLapMineIfEligible(racer: MutableRacer): Boolean {
-        if (isDailyChallenge || isDriftMode || isArenaMode || racer.finished) return false
+        if (!minesAllowed || racer.finished) return false
         if (racer.lap >= 2 && racer.lap > racer.lastMineGrantedLap) {
             racer.lastMineGrantedLap = racer.lap
             racer.minesAvailable = 1
@@ -2196,7 +2202,7 @@ class RacePhysicsEngine(
     }
 
     private fun dropMine(racer: MutableRacer) {
-        if (isDailyChallenge || isDriftMode || isArenaMode || racer.minesAvailable <= 0) return
+        if (!minesAllowed || racer.minesAvailable <= 0) return
         racer.minesAvailable = 0
         val dropX = racer.x - cos(racer.angleRad) * 54f
         val dropY = racer.y - sin(racer.angleRad) * 54f
