@@ -8,14 +8,14 @@ enum class ControlMode(val label: String, val shortLabel: String, val subtitle: 
     TILT_SENSOR("Phone Tilt", "Tilt", "Tilt device to steer + touch throttle")
 }
 
-enum class ControlVerticalOffset(
+enum class ControlButtonSize(
+    val shortLabel: String,
     val label: String,
-    val portraitLiftDp: Int,
-    val landscapeLiftDp: Int
+    val heightDp: Int
 ) {
-    BOTTOM("Bottom", 0, 0),
-    RAISED("Raised", 56, 20),
-    HIGH("High", 96, 40)
+    COMPACT("Compact", "Compact 88dp", 88),
+    TALL("Tall", "Tall 116dp", 116),
+    EXTRA_TALL("Extra Tall", "Extra Tall 140dp", 140)
 }
 
 /**
@@ -373,7 +373,7 @@ data class PlayerProfile(
     val autoGasInTilt: Boolean = false,
     val sliderSensitivity: Float = 1.45f,
     val swapControls: Boolean = false,
-    val controlVerticalOffset: ControlVerticalOffset = ControlVerticalOffset.RAISED,
+    val controlButtonSize: ControlButtonSize = ControlButtonSize.TALL,
     val showLiveLapDelta: Boolean = true,
     val showTrackMiniMap: Boolean = true,
     val carUpgradesByCarId: Map<String, CarVisualUpgrades> = emptyMap(),

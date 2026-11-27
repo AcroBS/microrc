@@ -15,8 +15,8 @@ import com.example.model.AudioSettings
 import com.example.model.CarSpeedPreset
 import com.example.model.CarVisualCodec
 import com.example.model.CarVisualUpgrades
+import com.example.model.ControlButtonSize
 import com.example.model.ControlMode
-import com.example.model.ControlVerticalOffset
 import com.example.model.CosmeticUpgradeSlot
 import com.example.model.CustomTrackData
 import com.example.model.GameMode
@@ -96,7 +96,7 @@ class PreferencesRepository(context: Context) {
         val AUDIO_MUSIC_VOLUME = floatPreferencesKey("audio_music_volume")
         val AUDIO_SFX_VOLUME = floatPreferencesKey("audio_sfx_volume")
         val SWAP_CONTROLS = booleanPreferencesKey("swap_controls")
-        val CONTROL_VERTICAL_OFFSET = stringPreferencesKey("control_vertical_offset")
+        val CONTROL_BUTTON_SIZE = stringPreferencesKey("control_button_size")
         val SHOW_LIVE_LAP_DELTA = booleanPreferencesKey("show_live_lap_delta")
         val SHOW_TRACK_MINI_MAP = booleanPreferencesKey("show_track_mini_map")
         val THEME_MODE = stringPreferencesKey("theme_mode")
@@ -148,11 +148,11 @@ class PreferencesRepository(context: Context) {
             autoGasInTilt = true,
             sliderSensitivity = sliderSensitivity,
             swapControls = prefs[Keys.SWAP_CONTROLS] ?: false,
-            controlVerticalOffset = runCatching {
-                ControlVerticalOffset.valueOf(
-                    prefs[Keys.CONTROL_VERTICAL_OFFSET] ?: ControlVerticalOffset.RAISED.name
+            controlButtonSize = runCatching {
+                ControlButtonSize.valueOf(
+                    prefs[Keys.CONTROL_BUTTON_SIZE] ?: ControlButtonSize.TALL.name
                 )
-            }.getOrDefault(ControlVerticalOffset.RAISED),
+            }.getOrDefault(ControlButtonSize.TALL),
             showLiveLapDelta = prefs[Keys.SHOW_LIVE_LAP_DELTA] ?: true,
             showTrackMiniMap = prefs[Keys.SHOW_TRACK_MINI_MAP] ?: true,
             carUpgradesByCarId = normalizedUpgrades,
@@ -479,8 +479,8 @@ class PreferencesRepository(context: Context) {
         dataStore.edit { it[Keys.SWAP_CONTROLS] = enabled }
     }
 
-    suspend fun updateControlVerticalOffset(offset: ControlVerticalOffset) {
-        dataStore.edit { it[Keys.CONTROL_VERTICAL_OFFSET] = offset.name }
+    suspend fun updateControlButtonSize(size: ControlButtonSize) {
+        dataStore.edit { it[Keys.CONTROL_BUTTON_SIZE] = size.name }
     }
 
     suspend fun updateShowLiveLapDelta(enabled: Boolean) {

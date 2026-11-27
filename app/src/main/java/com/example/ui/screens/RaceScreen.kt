@@ -1364,50 +1364,35 @@ fun RaceScreen(
         val minesAvailable = localRacer?.minesAvailable ?: 0
         val hasMine = minesAvailable > 0
 
-        val verticalOffsetDp = if (isWideHud) {
-            profile.controlVerticalOffset.landscapeLiftDp.dp
-        } else {
-            profile.controlVerticalOffset.portraitLiftDp.dp
-        }
         BoxWithConstraints(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 12.dp + verticalOffsetDp)
+                .padding(start = 10.dp, end = 10.dp, top = 8.dp, bottom = 16.dp)
         ) {
-            val steerWidth = when {
-                maxWidth >= 520.dp -> 116.dp
-                maxWidth >= 360.dp -> 100.dp
-                else -> 88.dp
-            }
+            val steerWidth = 88.dp
+            val steerGap = 10.dp
+            val brakeWidth = 112.dp
+            val controlCornerRadius = 20.dp
+            val buttonHeight = profile.controlButtonSize.heightDp.dp
             val sliderWidth = when {
                 maxWidth >= 560.dp -> 260.dp
                 maxWidth >= 440.dp -> 216.dp
-                maxWidth >= 330.dp -> 164.dp
-                else -> 146.dp
+                maxWidth >= 330.dp -> 176.dp
+                else -> 160.dp
             }
             val mineBtnWidth = when {
                 maxWidth >= 440.dp -> 96.dp
-                maxWidth >= 330.dp -> 78.dp
-                else -> 68.dp
+                maxWidth >= 330.dp -> 80.dp
+                else -> 72.dp
             }
-            val powerBtnWidth = when {
-                maxWidth >= 440.dp -> 116.dp
-                maxWidth >= 330.dp -> 86.dp
-                else -> 74.dp
-            }
-            val actionRowSpacing = if (maxWidth >= 440.dp) 8.dp else 5.dp
-            val controlHeight = when {
-                maxWidth >= 520.dp -> 100.dp
-                maxWidth >= 360.dp -> 94.dp
-                else -> 86.dp
-            }
-            val brakeHeight = controlHeight + 14.dp
-            val brakeWidth = if (maxWidth >= 520.dp) 124.dp else 118.dp
+            val powerBtnWidth = brakeWidth
+            val powerBtnHeight = 52.dp
+            val actionRowSpacing = if (maxWidth >= 440.dp) 8.dp else 6.dp
             val steerIconSize = when {
-                maxWidth >= 520.dp -> 52.dp
-                maxWidth >= 360.dp -> 48.dp
+                buttonHeight >= 140.dp -> 56.dp
+                buttonHeight >= 116.dp -> 50.dp
                 else -> 44.dp
             }
 
@@ -1473,32 +1458,19 @@ fun RaceScreen(
             val steeringControlsContent: @Composable () -> Unit = {
                 when (profile.controlMode) {
                     ControlMode.TOUCH_OVERLAY -> {
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            HoldControlPad(
-                                label = null,
-                                icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                                contentDesc = "Steer Left",
-                                activeColor = primaryAccent,
-                                onActiveColor = colorScheme.onPrimary,
-                                iconSize = steerIconSize,
-                                modifier = Modifier
-                                    .size(width = steerWidth, height = controlHeight)
-                                    .testTag("steer_left_button"),
-                                onPressedChange = { steerLeftPressed = it }
-                            )
-                            HoldControlPad(
-                                label = null,
-                                icon = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                                contentDesc = "Steer Right",
-                                activeColor = primaryAccent,
-                                onActiveColor = colorScheme.onPrimary,
-                                iconSize = steerIconSize,
-                                modifier = Modifier
-                                    .size(width = steerWidth, height = controlHeight)
-                                    .testTag("steer_right_button"),
-                                onPressedChange = { steerRightPressed = it }
-                            )
-                        }
+                        TouchOverlaySteeringPair(
+                            steerWidth = steerWidth,
+                            buttonHeight = buttonHeight,
+                            buttonGap = steerGap,
+                            cornerRadius = controlCornerRadius,
+                            iconSize = steerIconSize,
+                            activeColor = primaryAccent,
+                            onActiveColor = colorScheme.onPrimary,
+                            onSteerStateChange = { leftDown, rightDown ->
+                                steerLeftPressed = leftDown
+                                steerRightPressed = rightDown
+                            }
+                        )
                     }
                     ControlMode.SPRING_SLIDER -> {
                         SpringSteeringSlider(
@@ -1506,7 +1478,7 @@ fun RaceScreen(
                             sensitivity = profile.sliderSensitivity,
                             iconSize = steerIconSize,
                             modifier = Modifier
-                                .size(width = sliderWidth, height = controlHeight)
+                                .size(width = sliderWidth, height = buttonHeight)
                                 .testTag("spring_steering_slider")
                         )
                     }
@@ -1564,7 +1536,7 @@ fun RaceScreen(
             val actionAndBrakeControlsContent: @Composable () -> Unit = {
                 Column(
                     horizontalAlignment = if (profile.swapControls) Alignment.Start else Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(24.dp)
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     val isRacingPhase = snapshot?.phase == RacePhase.RACING.name
                     val isCountdownPhase = snapshot?.phase == RacePhase.COUNTDOWN.name
@@ -1574,77 +1546,75 @@ fun RaceScreen(
                         !isDailyChallenge &&
                         !isDriftMode &&
                         (isMultiplayerSession || isOnlineSession || hasOpponentsOrBots)
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(actionRowSpacing),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (minesAllowed) {
-                            val currentLap = localRacer?.lap ?: 1
-                            val canDropMine = hasMine && isRacingPhase
-                            val mineFlash = 0.5f + 0.5f * sin(animTimeSec * 14f)
-                            val mineActiveBg = if (mineFlash > 0.45f) {
-                                errorAccent.copy(alpha = 0.94f)
-                            } else {
-                                colorScheme.errorContainer.copy(alpha = 0.94f)
-                            }
-                            val mineBorder = if (canDropMine) {
-                                if (mineFlash > 0.45f) colorScheme.onError else errorAccent
-                            } else {
-                                hudBorder
-                            }
-                            val mineLabel = when {
-                                hasMine && isCountdownPhase -> "LOCKED"
-                                hasMine -> "MINE"
-                                currentLap <= 1 -> "LAP 2"
-                                else -> "USED"
-                            }
-                            Surface(
-                                color = if (canDropMine) mineActiveBg else hudSurface.copy(alpha = 0.72f),
-                                shape = RoundedCornerShape(18.dp),
-                                border = BorderStroke(2.dp, mineBorder),
-                                modifier = Modifier
-                                    .size(width = mineBtnWidth, height = 56.dp)
-                                    .clip(RoundedCornerShape(18.dp))
-                                    .clickable(enabled = canDropMine) {
-                                        hapticController?.onMineDropped()
-                                        onDropMine()
-                                    }
-                                    .testTag("drop_mine_button")
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .padding(horizontal = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.Center
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(10.dp)
-                                            .clip(CircleShape)
-                                            .background(
-                                                if (canDropMine) {
-                                                    if (mineFlash > 0.45f) colorScheme.onError else errorAccent
-                                                } else {
-                                                    hudMuted.copy(alpha = 0.5f)
-                                                }
-                                            )
-                                    )
-                                    Spacer(modifier = Modifier.width(5.dp))
-                                    Text(
-                                        text = mineLabel,
-                                        maxLines = 1,
-                                        style = MaterialTheme.typography.labelLarge,
-                                        color = if (canDropMine) {
-                                            if (mineFlash > 0.45f) colorScheme.onError else colorScheme.onErrorContainer
-                                        } else {
-                                            hudMuted
-                                        }
-                                    )
+
+                    val mineButtonContent: @Composable () -> Unit = {
+                        val currentLap = localRacer?.lap ?: 1
+                        val canDropMine = hasMine && isRacingPhase
+                        val mineFlash = 0.5f + 0.5f * sin(animTimeSec * 14f)
+                        val mineActiveBg = if (mineFlash > 0.45f) {
+                            errorAccent.copy(alpha = 0.94f)
+                        } else {
+                            colorScheme.errorContainer.copy(alpha = 0.94f)
+                        }
+                        val mineBorder = if (canDropMine) {
+                            if (mineFlash > 0.45f) colorScheme.onError else errorAccent
+                        } else {
+                            hudBorder
+                        }
+                        val mineLabel = when {
+                            hasMine && isCountdownPhase -> "LOCKED"
+                            hasMine -> "MINE"
+                            currentLap <= 1 -> "LAP 2"
+                            else -> "USED"
+                        }
+                        Surface(
+                            color = if (canDropMine) mineActiveBg else hudSurface.copy(alpha = 0.72f),
+                            shape = RoundedCornerShape(18.dp),
+                            border = BorderStroke(2.dp, mineBorder),
+                            modifier = Modifier
+                                .size(width = mineBtnWidth, height = powerBtnHeight)
+                                .clip(RoundedCornerShape(18.dp))
+                                .clickable(enabled = canDropMine) {
+                                    hapticController?.onMineDropped()
+                                    onDropMine()
                                 }
+                                .testTag("drop_mine_button")
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (canDropMine) {
+                                                if (mineFlash > 0.45f) colorScheme.onError else errorAccent
+                                            } else {
+                                                hudMuted.copy(alpha = 0.5f)
+                                            }
+                                        )
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text(
+                                    text = mineLabel,
+                                    maxLines = 1,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = if (canDropMine) {
+                                        if (mineFlash > 0.45f) colorScheme.onError else colorScheme.onErrorContainer
+                                    } else {
+                                        hudMuted
+                                    }
+                                )
                             }
                         }
+                    }
 
+                    val powerUpButtonContent: @Composable () -> Unit = {
                         val canFirePowerUp = isRacingPhase && heldPowerUp != null && !stuntControlsLocked
                         val powerUpBg = if (canFirePowerUp) {
                             primaryAccent.copy(alpha = 0.94f)
@@ -1658,7 +1628,7 @@ fun RaceScreen(
                             shape = RoundedCornerShape(18.dp),
                             border = BorderStroke(2.dp, powerUpBorder),
                             modifier = Modifier
-                                .size(width = powerBtnWidth, height = 56.dp)
+                                .size(width = powerBtnWidth, height = powerBtnHeight)
                                 .clip(RoundedCornerShape(18.dp))
                                 .clickable(enabled = canFirePowerUp) {
                                     hapticController?.onPowerUpUsed()
@@ -1687,10 +1657,24 @@ fun RaceScreen(
                                         isDailyChallenge || isDriftMode -> "1/LAP USED"
                                         else -> "EMPTY"
                                     },
+                                    maxLines = 1,
                                     style = MaterialTheme.typography.labelLarge,
                                     color = powerUpContent
                                 )
                             }
+                        }
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(actionRowSpacing),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (profile.swapControls) {
+                            powerUpButtonContent()
+                            if (minesAllowed) mineButtonContent()
+                        } else {
+                            if (minesAllowed) mineButtonContent()
+                            powerUpButtonContent()
                         }
                     }
 
@@ -1700,26 +1684,32 @@ fun RaceScreen(
                         contentDesc = "Brake or Reverse",
                         activeColor = errorAccent,
                         onActiveColor = colorScheme.onError,
+                        cornerRadius = controlCornerRadius,
                         modifier = Modifier
-                            .size(width = brakeWidth, height = brakeHeight)
+                            .size(width = brakeWidth, height = buttonHeight)
                             .testTag("brake_button"),
                         onPressedChange = { brakePressed = it }
                     )
                 }
             }
 
-            Row(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("race_controls_row"),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Bottom
+                    .testTag("race_controls_row")
             ) {
-                if (profile.swapControls) {
-                    actionAndBrakeControlsContent()
+                Box(
+                    modifier = Modifier.align(
+                        if (profile.swapControls) Alignment.BottomEnd else Alignment.BottomStart
+                    )
+                ) {
                     steeringControlsContent()
-                } else {
-                    steeringControlsContent()
+                }
+                Box(
+                    modifier = Modifier.align(
+                        if (profile.swapControls) Alignment.BottomStart else Alignment.BottomEnd
+                    )
+                ) {
                     actionAndBrakeControlsContent()
                 }
             }
@@ -1926,24 +1916,26 @@ private fun HoldControlPad(
     activeColor: Color,
     onActiveColor: Color = MaterialTheme.colorScheme.onPrimary,
     iconSize: Dp = 44.dp,
+    cornerRadius: Dp = 20.dp,
     modifier: Modifier = Modifier,
     onPressedChange: (Boolean) -> Unit
 ) {
     val scheme = MaterialTheme.colorScheme
     var pressed by remember { mutableStateOf(false) }
+    val latestOnPressedChange by androidx.compose.runtime.rememberUpdatedState(onPressedChange)
 
     DisposableEffect(Unit) {
         onDispose {
             if (pressed) {
                 pressed = false
-                onPressedChange(false)
+                latestOnPressedChange(false)
             }
         }
     }
 
     Surface(
         color = if (pressed) activeColor.copy(alpha = 0.90f) else scheme.surfaceContainer.copy(alpha = 0.84f),
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(cornerRadius),
         border = BorderStroke(2.2.dp, if (pressed) scheme.onSurface else activeColor.copy(alpha = 0.82f)),
         modifier = modifier.pointerInput(Unit) {
             awaitPointerEventScope {
@@ -1952,7 +1944,7 @@ private fun HoldControlPad(
                     val isDown = event.changes.any { it.pressed }
                     if (isDown != pressed) {
                         pressed = isDown
-                        onPressedChange(isDown)
+                        latestOnPressedChange(isDown)
                     }
                     event.changes.forEach { it.consume() }
                 }
@@ -1972,6 +1964,97 @@ private fun HoldControlPad(
                     text = label,
                     style = MaterialTheme.typography.titleLarge,
                     color = if (pressed) onActiveColor else activeColor
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TouchOverlaySteeringPair(
+    steerWidth: Dp,
+    buttonHeight: Dp,
+    buttonGap: Dp = 10.dp,
+    cornerRadius: Dp = 20.dp,
+    iconSize: Dp = 50.dp,
+    activeColor: Color,
+    onActiveColor: Color,
+    onSteerStateChange: (leftPressed: Boolean, rightPressed: Boolean) -> Unit
+) {
+    val scheme = MaterialTheme.colorScheme
+    var leftPressed by remember { mutableStateOf(false) }
+    var rightPressed by remember { mutableStateOf(false) }
+    val latestOnSteerStateChange by androidx.compose.runtime.rememberUpdatedState(onSteerStateChange)
+
+    DisposableEffect(Unit) {
+        onDispose {
+            if (leftPressed || rightPressed) {
+                leftPressed = false
+                rightPressed = false
+                latestOnSteerStateChange(false, false)
+            }
+        }
+    }
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(buttonGap),
+        modifier = Modifier.pointerInput(Unit) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val midX = size.width / 2f
+                    var nextLeft = false
+                    var nextRight = false
+                    for (change in event.changes) {
+                        if (change.pressed) {
+                            if (change.position.x < midX) {
+                                nextLeft = true
+                            } else {
+                                nextRight = true
+                            }
+                        }
+                        change.consume()
+                    }
+                    if (nextLeft != leftPressed || nextRight != rightPressed) {
+                        leftPressed = nextLeft
+                        rightPressed = nextRight
+                        latestOnSteerStateChange(nextLeft, nextRight)
+                    }
+                }
+            }
+        }
+    ) {
+        Surface(
+            color = if (leftPressed) activeColor.copy(alpha = 0.90f) else scheme.surfaceContainer.copy(alpha = 0.84f),
+            shape = RoundedCornerShape(cornerRadius),
+            border = BorderStroke(2.2.dp, if (leftPressed) scheme.onSurface else activeColor.copy(alpha = 0.82f)),
+            modifier = Modifier
+                .size(width = steerWidth, height = buttonHeight)
+                .testTag("steer_left_button")
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                    contentDescription = "Steer Left",
+                    tint = if (leftPressed) onActiveColor else activeColor,
+                    modifier = Modifier.size(iconSize)
+                )
+            }
+        }
+        Surface(
+            color = if (rightPressed) activeColor.copy(alpha = 0.90f) else scheme.surfaceContainer.copy(alpha = 0.84f),
+            shape = RoundedCornerShape(cornerRadius),
+            border = BorderStroke(2.2.dp, if (rightPressed) scheme.onSurface else activeColor.copy(alpha = 0.82f)),
+            modifier = Modifier
+                .size(width = steerWidth, height = buttonHeight)
+                .testTag("steer_right_button")
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = "Steer Right",
+                    tint = if (rightPressed) onActiveColor else activeColor,
+                    modifier = Modifier.size(iconSize)
                 )
             }
         }
@@ -2026,7 +2109,7 @@ fun SpringSteeringSlider(
 
     Surface(
         color = sliderBg.copy(alpha = 0.86f),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(20.dp),
         border = BorderStroke(
             2.2.dp,
             if (isInteracting) sliderOnSurface else sliderAccent.copy(alpha = 0.82f)

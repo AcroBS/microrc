@@ -627,7 +627,7 @@ class JumpGravelAndPolishTest {
         val powerBounds = composeRule.onNodeWithTag("use_powerup_button").getUnclippedBoundsInRoot()
         val brakeBounds = composeRule.onNodeWithTag("brake_button").getUnclippedBoundsInRoot()
         val gap = brakeBounds.top - powerBounds.bottom
-        assertTrue("Spacing between Power-Up slot and Brake pedal should be >= 20.dp (actual=$gap)", gap >= 20.dp)
+        assertTrue("Spacing between Power-Up slot and Brake pedal should be ~12.dp (actual=$gap)", gap in 11.dp..13.dp)
 
         composeRule.onNodeWithTag("return_to_studio_button").assertIsDisplayed().performClick()
         composeRule.mainClock.advanceTimeByFrame()

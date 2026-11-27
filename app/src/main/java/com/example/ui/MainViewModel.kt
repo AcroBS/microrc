@@ -13,8 +13,8 @@ import com.example.model.ActiveGhostCarState
 import com.example.model.ArenaShape
 import com.example.model.AudioSettings
 import com.example.model.CarVisualUpgrades
+import com.example.model.ControlButtonSize
 import com.example.model.ControlMode
-import com.example.model.ControlVerticalOffset
 import com.example.model.CosmeticUpgradeSlot
 import com.example.model.CustomTrackData
 import com.example.model.DiscoveredLobby
@@ -461,9 +461,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateControlVerticalOffset(offset: ControlVerticalOffset) {
+    fun updateControlButtonSize(size: ControlButtonSize) {
         viewModelScope.launch {
-            prefsRepo.updateControlVerticalOffset(offset)
+            prefsRepo.updateControlButtonSize(size)
         }
     }
 

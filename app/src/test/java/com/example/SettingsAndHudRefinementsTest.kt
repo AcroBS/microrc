@@ -5,24 +5,26 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.isSelected
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.isSelected
-import androidx.compose.ui.test.assert
-import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import com.example.audio.RaceAudioEngine
 import com.example.data.PreferencesRepository
 import com.example.data.TrackCatalog
 import com.example.model.AudioSettings
+import com.example.model.ControlButtonSize
 import com.example.model.ControlMode
-import com.example.model.ControlVerticalOffset
 import com.example.model.GameMode
 import com.example.model.PlayerProfile
 import com.example.model.RacePhase
@@ -65,10 +67,10 @@ class SettingsAndHudRefinementsTest {
 
         val app = ApplicationProvider.getApplicationContext<Application>()
         val repo = PreferencesRepository(app)
-        assertEquals(ControlVerticalOffset.RAISED, repo.profileFlow.first().controlVerticalOffset)
+        assertEquals(ControlButtonSize.TALL, repo.profileFlow.first().controlButtonSize)
         repo.updateAudioSettings(AudioSettings(musicEnabled = true, carSfxEnabled = true, hapticsEnabled = false, musicVolume = 0.35f, sfxVolume = 0.65f))
         repo.updateSwapControls(true)
-        repo.updateControlVerticalOffset(ControlVerticalOffset.HIGH)
+        repo.updateControlButtonSize(ControlButtonSize.EXTRA_TALL)
         repo.updateShowLiveLapDelta(false)
         repo.updateShowTrackMiniMap(false)
 
@@ -77,7 +79,7 @@ class SettingsAndHudRefinementsTest {
         assertEquals(0.35f, audio.musicVolume, 0.001f)
         assertEquals(0.65f, audio.sfxVolume, 0.001f)
         assertTrue(profile.swapControls)
-        assertEquals(ControlVerticalOffset.HIGH, profile.controlVerticalOffset)
+        assertEquals(ControlButtonSize.EXTRA_TALL, profile.controlButtonSize)
         assertFalse(profile.showLiveLapDelta)
         assertFalse(profile.showTrackMiniMap)
     }
@@ -147,8 +149,8 @@ class SettingsAndHudRefinementsTest {
                         profileState = profileState.copy(swapControls = it)
                         latestProfile = profileState
                     },
-                    onUpdateControlVerticalOffset = {
-                        profileState = profileState.copy(controlVerticalOffset = it)
+                    onUpdateControlButtonSize = {
+                        profileState = profileState.copy(controlButtonSize = it)
                         latestProfile = profileState
                     },
                     onUpdateShowLiveLapDelta = {
@@ -169,14 +171,18 @@ class SettingsAndHudRefinementsTest {
         }
         composeTestRule.waitForIdle()
 
-        // Steering HUD toggles + Control Vertical Offset pill present & reactive
-        composeTestRule.onNodeWithTag("setting_control_offset_RAISED").performScrollTo().assertIsDisplayed().assert(isSelected())
-        composeTestRule.onNodeWithTag("setting_control_offset_HIGH").performScrollTo().assertIsDisplayed().performClick()
+        // Steering HUD toggles + Control Button Size pill present & reactive
+        composeTestRule.onNodeWithTag("setting_control_size_TALL").performScrollTo().assertIsDisplayed().assert(isSelected())
+        composeTestRule.onNodeWithText("Compact 88dp").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Tall 116dp").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Extra Tall 140dp").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag("setting_control_size_EXTRA_TALL").performScrollTo().assertIsDisplayed().performClick()
         composeTestRule.waitForIdle()
-        assertEquals(ControlVerticalOffset.HIGH, latestProfile.controlVerticalOffset)
-        composeTestRule.onNodeWithTag("setting_control_offset_BOTTOM").performScrollTo().assertIsDisplayed().performClick()
+        assertEquals(ControlButtonSize.EXTRA_TALL, latestProfile.controlButtonSize)
+        composeTestRule.onNodeWithTag("setting_control_size_COMPACT").performScrollTo().assertIsDisplayed().performClick()
         composeTestRule.waitForIdle()
-        assertEquals(ControlVerticalOffset.BOTTOM, latestProfile.controlVerticalOffset)
+        assertEquals(ControlButtonSize.COMPACT, latestProfile.controlButtonSize)
 
         composeTestRule.onNodeWithTag("setting_swap_controls_switch").performScrollTo().assertIsDisplayed().performClick()
         composeTestRule.onNodeWithTag("setting_live_lap_delta_switch").performScrollTo().assertIsDisplayed().performClick()
@@ -374,7 +380,7 @@ class SettingsAndHudRefinementsTest {
     }
 
     @Test
-    fun raceScreen_appliesControlVerticalOffset_andKeepsPowerUpAboveTallerBrakeButton() {
+    fun raceScreen_rendersHomogeneousControlsAnchored16DpFromBottom_andHonorsControlButtonSize() {
         val app = ApplicationProvider.getApplicationContext<Application>()
         val tiltController = TiltSteeringController(app)
         val track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP)
@@ -403,7 +409,7 @@ class SettingsAndHudRefinementsTest {
                 playerId = "p1",
                 name = "Acro",
                 controlMode = ControlMode.TOUCH_OVERLAY,
-                controlVerticalOffset = ControlVerticalOffset.BOTTOM
+                controlButtonSize = ControlButtonSize.TALL
             )
         )
 
@@ -427,38 +433,134 @@ class SettingsAndHudRefinementsTest {
             }
             repeat(3) { composeTestRule.mainClock.advanceTimeByFrame() }
 
-            val bottomBrake = composeTestRule.onNodeWithTag("brake_button").getUnclippedBoundsInRoot()
-            val bottomPower = composeTestRule.onNodeWithTag("use_powerup_button").getUnclippedBoundsInRoot()
-            val bottomSteer = composeTestRule.onNodeWithTag("steer_left_button").getUnclippedBoundsInRoot()
+            val rootBounds = composeTestRule.onRoot().getUnclippedBoundsInRoot()
+            val leftBounds = composeTestRule.onNodeWithTag("steer_left_button").getUnclippedBoundsInRoot()
+            val rightBounds = composeTestRule.onNodeWithTag("steer_right_button").getUnclippedBoundsInRoot()
+            val brakeBounds = composeTestRule.onNodeWithTag("brake_button").getUnclippedBoundsInRoot()
+            val powerBounds = composeTestRule.onNodeWithTag("use_powerup_button").getUnclippedBoundsInRoot()
 
-            val brakeHeight = bottomBrake.bottom - bottomBrake.top
-            val steerHeight = bottomSteer.bottom - bottomSteer.top
-            assertTrue(
-                "BRAKE button height ($brakeHeight) should be taller than steering height ($steerHeight)",
-                brakeHeight > steerHeight
-            )
+            // Exact uniform 116.dp height & identical bottom baseline 16.dp above screen bottom
+            assertTrue((leftBounds.bottom - leftBounds.top) in 115.dp..117.dp)
+            assertTrue((rightBounds.bottom - rightBounds.top) in 115.dp..117.dp)
+            assertTrue((brakeBounds.bottom - brakeBounds.top) in 115.dp..117.dp)
+            assertTrue((rootBounds.bottom - leftBounds.bottom) in 15.dp..17.dp)
+            assertTrue((rootBounds.bottom - brakeBounds.bottom) in 15.dp..17.dp)
 
-            // Default RAISED offset (~56.dp higher than BOTTOM)
-            profileState = profileState.copy(controlVerticalOffset = ControlVerticalOffset.RAISED)
+            // Equal 88.dp steering widths with 10.dp gap, 112.dp BRAKE & aligned Power-Up 12.dp above
+            assertTrue((leftBounds.right - leftBounds.left) in 87.dp..89.dp)
+            assertTrue((rightBounds.right - rightBounds.left) in 87.dp..89.dp)
+            assertTrue((rightBounds.left - leftBounds.right) in 9.dp..11.dp)
+            assertTrue((brakeBounds.right - brakeBounds.left) in 111.dp..113.dp)
+            assertTrue((powerBounds.right - powerBounds.left) in 111.dp..113.dp)
+            assertTrue(kotlin.math.abs(powerBounds.right.value - brakeBounds.right.value) <= 1f)
+            assertTrue((brakeBounds.top - powerBounds.bottom) in 11.dp..13.dp)
+
+            // COMPACT 88dp preset
+            profileState = profileState.copy(controlButtonSize = ControlButtonSize.COMPACT)
             repeat(3) { composeTestRule.mainClock.advanceTimeByFrame() }
-            val raisedBrake = composeTestRule.onNodeWithTag("brake_button").getUnclippedBoundsInRoot()
-            val raisedPower = composeTestRule.onNodeWithTag("use_powerup_button").getUnclippedBoundsInRoot()
+            val compactLeft = composeTestRule.onNodeWithTag("steer_left_button").getUnclippedBoundsInRoot()
+            val compactBrake = composeTestRule.onNodeWithTag("brake_button").getUnclippedBoundsInRoot()
+            assertTrue((compactLeft.bottom - compactLeft.top) in 87.dp..89.dp)
+            assertTrue((compactBrake.bottom - compactBrake.top) in 87.dp..89.dp)
+            assertTrue((rootBounds.bottom - compactBrake.bottom) in 15.dp..17.dp)
 
-            val brakeLiftDp = bottomBrake.bottom - raisedBrake.bottom
-            val powerLiftDp = bottomPower.bottom - raisedPower.bottom
-            assertTrue("RAISED offset must lift BRAKE by ~56.dp (actual=$brakeLiftDp)", brakeLiftDp in 54.dp..58.dp)
-            assertTrue("RAISED offset must lift Power-Up slot together by ~56.dp (actual=$powerLiftDp)", powerLiftDp in 54.dp..58.dp)
-            assertTrue(
-                "Power-Up slot must stay >= 20.dp above BRAKE without overlap (gap=${raisedBrake.top - raisedPower.bottom})",
-                raisedBrake.top - raisedPower.bottom >= 20.dp
-            )
-
-            // HIGH offset (~96.dp higher than BOTTOM)
-            profileState = profileState.copy(controlVerticalOffset = ControlVerticalOffset.HIGH)
+            // EXTRA_TALL 140dp preset
+            profileState = profileState.copy(controlButtonSize = ControlButtonSize.EXTRA_TALL)
             repeat(3) { composeTestRule.mainClock.advanceTimeByFrame() }
-            val highBrake = composeTestRule.onNodeWithTag("brake_button").getUnclippedBoundsInRoot()
-            val highLiftDp = bottomBrake.bottom - highBrake.bottom
-            assertTrue("HIGH offset must lift BRAKE by ~96.dp (actual=$highLiftDp)", highLiftDp in 94.dp..98.dp)
+            val extraLeft = composeTestRule.onNodeWithTag("steer_left_button").getUnclippedBoundsInRoot()
+            val extraBrake = composeTestRule.onNodeWithTag("brake_button").getUnclippedBoundsInRoot()
+            assertTrue((extraLeft.bottom - extraLeft.top) in 139.dp..141.dp)
+            assertTrue((extraBrake.bottom - extraBrake.top) in 139.dp..141.dp)
+            assertTrue((rootBounds.bottom - extraBrake.bottom) in 15.dp..17.dp)
+        } finally {
+            composeTestRule.mainClock.autoAdvance = true
+        }
+    }
+
+    @Test
+    fun raceScreen_touchControls_supportEdgeToEdgeTapAndSmoothSlideBetweenArrows() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val tiltController = TiltSteeringController(app)
+        val track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP)
+        val snapshot = RaceSnapshot(
+            raceTimeMs = 2_000L,
+            phase = RacePhase.RACING.name,
+            trackId = TrackId.LIVING_ROOM_GP.name,
+            totalLaps = 3,
+            gameMode = GameMode.RACE.name,
+            racers = listOf(
+                RacerState(
+                    playerId = "p1",
+                    name = "Acro",
+                    carType = RcCarType.VOLT_BUGGY.name,
+                    primaryColorArgb = 0xFFFF5722,
+                    accentColorArgb = 0xFFFFD54F,
+                    x = 1200f,
+                    y = 950f,
+                    angleRad = 0f,
+                    lap = 1
+                )
+            )
+        )
+        var latestThrottle = 0f
+        var latestSteer = 0f
+
+        composeTestRule.mainClock.autoAdvance = false
+        try {
+            composeTestRule.setContent {
+                MicroRCTheme {
+                    RaceScreen(
+                        profile = PlayerProfile(
+                            playerId = "p1",
+                            name = "Acro",
+                            controlMode = ControlMode.TOUCH_OVERLAY
+                        ),
+                        snapshot = snapshot,
+                        activeTrack = track,
+                        overviewCamera = false,
+                        tiltController = tiltController,
+                        onToggleOverviewCamera = {},
+                        onUpdateControlInput = { throttle, steer ->
+                            latestThrottle = throttle
+                            latestSteer = steer
+                        },
+                        onTriggerPowerUp = {},
+                        onSwitchControlMode = { _, _, _, _ -> },
+                        onLeaveRace = {}
+                    )
+                }
+            }
+            repeat(3) { composeTestRule.mainClock.advanceTimeByFrame() }
+            composeTestRule.mainClock.advanceTimeBy(40L)
+
+            // Tap low edge of steer_left_button -> full edge-to-edge touch responsiveness
+            composeTestRule.onNodeWithTag("steer_left_button").performTouchInput {
+                down(Offset(4f, height - 4f))
+            }
+            composeTestRule.mainClock.advanceTimeBy(40L)
+            assertEquals(-1f, latestSteer, 0.01f)
+
+            // Smoothly slide across the 10.dp gap into steer_right_button without lifting
+            composeTestRule.onNodeWithTag("steer_left_button").performTouchInput {
+                moveTo(Offset(width * 1.65f, height - 4f))
+            }
+            composeTestRule.mainClock.advanceTimeBy(40L)
+            assertEquals(1f, latestSteer, 0.01f)
+
+            composeTestRule.onNodeWithTag("steer_left_button").performTouchInput { up() }
+            composeTestRule.mainClock.advanceTimeBy(40L)
+            assertEquals(0f, latestSteer, 0.01f)
+
+            // Edge-to-edge BRAKE activation near bottom corner
+            composeTestRule.onNodeWithTag("brake_button").performTouchInput {
+                down(Offset(width - 4f, height - 4f))
+            }
+            composeTestRule.mainClock.advanceTimeBy(40L)
+            assertEquals(-1f, latestThrottle, 0.01f)
+
+            composeTestRule.onNodeWithTag("brake_button").performTouchInput { up() }
+            composeTestRule.mainClock.advanceTimeBy(40L)
+            assertEquals(1f, latestThrottle, 0.01f)
         } finally {
             composeTestRule.mainClock.autoAdvance = true
         }
