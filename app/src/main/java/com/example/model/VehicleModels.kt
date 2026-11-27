@@ -8,6 +8,16 @@ enum class ControlMode(val label: String, val shortLabel: String, val subtitle: 
     TILT_SENSOR("Phone Tilt", "Tilt", "Tilt device to steer + touch throttle")
 }
 
+enum class ControlVerticalOffset(
+    val label: String,
+    val portraitLiftDp: Int,
+    val landscapeLiftDp: Int
+) {
+    BOTTOM("Bottom", 0, 0),
+    RAISED("Raised", 56, 20),
+    HIGH("High", 96, 40)
+}
+
 /**
  * Maps a normalized horizontal slider thumb offset in [-1f, 1f] to proportional steering in [-1f, 1f].
  * Applies an adjustable sensitivity multiplier, a small center deadzone, and a subtle cubic RC expo
@@ -363,6 +373,7 @@ data class PlayerProfile(
     val autoGasInTilt: Boolean = false,
     val sliderSensitivity: Float = 1.45f,
     val swapControls: Boolean = false,
+    val controlVerticalOffset: ControlVerticalOffset = ControlVerticalOffset.RAISED,
     val showLiveLapDelta: Boolean = true,
     val showTrackMiniMap: Boolean = true,
     val carUpgradesByCarId: Map<String, CarVisualUpgrades> = emptyMap(),

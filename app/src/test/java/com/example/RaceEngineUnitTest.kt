@@ -2672,7 +2672,8 @@ class RaceEngineUnitTest {
         pbSnap = perfectBeforeEngine.step(0.02f)
         assertEquals(RacePhase.RACING.name, pbSnap.phase)
         val pbAtGo = pbSnap.racers.first()
-        assertTrue("Perfect pre-GO release must grant ~400ms launch boost (${pbAtGo.launchBoostMs})", pbAtGo.launchBoostMs in 340L..400L)
+        assertTrue("Perfect pre-GO release must grant ~800ms launch boost (${pbAtGo.launchBoostMs})", pbAtGo.launchBoostMs in 740L..800L)
+        assertTrue("Perfect pre-GO release must impart strong standstill launch impulse (${pbAtGo.speed})", pbAtGo.speed > 100f)
         assertTrue("Perfect pre-GO release must activate PERFECT LAUNCH pill (${pbAtGo.perfectLaunchBannerMs})", pbAtGo.perfectLaunchBannerMs > 0L)
         assertEquals("Perfect launch must not trigger wheelspin smoke", 0L, pbAtGo.wheelspinSmokeMs)
         repeat(15) {
@@ -2680,8 +2681,8 @@ class RaceEngineUnitTest {
             pbSnap = perfectBeforeEngine.step(0.02f)
         }
         assertTrue(
-            "Perfect launch boost must accelerate faster than baseline (${pbSnap.racers.first().speed} > $baselineSpeedAfter300ms)",
-            pbSnap.racers.first().speed > baselineSpeedAfter300ms * 1.15f
+            "Perfect launch boost must pull well ahead of baseline into Turn 1 (${pbSnap.racers.first().speed} > ${baselineSpeedAfter300ms * 1.25f})",
+            pbSnap.racers.first().speed > baselineSpeedAfter300ms * 1.25f
         )
 
         // 2b) PERFECT RELEASE (slightly after GO, within +0.25s window: release at raceTimeMs = 140ms)
@@ -2704,7 +2705,8 @@ class RaceEngineUnitTest {
         perfectAfterEngine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
         paSnap = perfectAfterEngine.step(0.02f)
         assertFalse("Releasing brake must clear isLaunchHoldActive", paSnap.racers.first().isLaunchHoldActive)
-        assertTrue("Post-GO release within +0.25s must trigger 0.4s launch boost (${paSnap.racers.first().launchBoostMs})", paSnap.racers.first().launchBoostMs in 350L..400L)
+        assertTrue("Post-GO release within +0.25s must trigger ~0.8s launch boost (${paSnap.racers.first().launchBoostMs})", paSnap.racers.first().launchBoostMs in 750L..800L)
+        assertTrue("Post-GO perfect release must impart immediate launch impulse (${paSnap.racers.first().speed})", paSnap.racers.first().speed > 100f)
         assertTrue("Post-GO perfect release must show PERFECT LAUNCH pill", paSnap.racers.first().perfectLaunchBannerMs > 0L)
 
         // 3) LATE RELEASE: keep holding brake past GO + 250ms (for 400ms after GO), then release

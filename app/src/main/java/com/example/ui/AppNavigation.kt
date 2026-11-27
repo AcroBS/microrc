@@ -1186,6 +1186,7 @@ fun MicroRCApp(
                     },
                     onSaveControlSettings = viewModel::updateControlSettings,
                     onUpdateSwapControls = viewModel::updateSwapControls,
+                    onUpdateControlVerticalOffset = viewModel::updateControlVerticalOffset,
                     onUpdateShowLiveLapDelta = viewModel::updateShowLiveLapDelta,
                     onUpdateShowTrackMiniMap = viewModel::updateShowTrackMiniMap,
                     onUpdateAudio = viewModel::updateAudioSettings,

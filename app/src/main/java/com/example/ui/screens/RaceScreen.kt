@@ -1155,19 +1155,28 @@ fun RaceScreen(
                 isStuntsMode = isStuntsMode
             )
         }
+        val notificationTopPadding = when {
+            isWideHud && maxWidth >= 700.dp -> 10.dp
+            isWideHud -> 64.dp
+            !overviewCamera && profile.showTrackMiniMap -> 164.dp
+            else -> 108.dp
+        }
+        val notificationHorizontalPadding = when {
+            isWideHud && maxWidth >= 700.dp -> 216.dp
+            isWideHud -> 156.dp
+            else -> 16.dp
+        }
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
+                .fillMaxWidth()
                 .windowInsetsPadding(WindowInsets.statusBars)
                 .padding(
-                    top = if (isWideHud) 8.dp else 124.dp,
-                    start = if (isWideHud) 252.dp else 12.dp,
-                    end = when {
-                        isWideHud -> 160.dp
-                        !overviewCamera && profile.showTrackMiniMap -> 156.dp
-                        else -> 12.dp
-                    }
-                ),
+                    top = notificationTopPadding,
+                    start = notificationHorizontalPadding,
+                    end = notificationHorizontalPadding
+                )
+                .testTag("top_notification_stack"),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
@@ -1355,12 +1364,17 @@ fun RaceScreen(
         val minesAvailable = localRacer?.minesAvailable ?: 0
         val hasMine = minesAvailable > 0
 
+        val verticalOffsetDp = if (isWideHud) {
+            profile.controlVerticalOffset.landscapeLiftDp.dp
+        } else {
+            profile.controlVerticalOffset.portraitLiftDp.dp
+        }
         BoxWithConstraints(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .windowInsetsPadding(WindowInsets.navigationBars)
-                .padding(horizontal = 12.dp, vertical = 12.dp)
+                .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 12.dp + verticalOffsetDp)
         ) {
             val steerWidth = when {
                 maxWidth >= 520.dp -> 116.dp
@@ -1389,6 +1403,8 @@ fun RaceScreen(
                 maxWidth >= 360.dp -> 94.dp
                 else -> 86.dp
             }
+            val brakeHeight = controlHeight + 14.dp
+            val brakeWidth = if (maxWidth >= 520.dp) 124.dp else 118.dp
             val steerIconSize = when {
                 maxWidth >= 520.dp -> 52.dp
                 maxWidth >= 360.dp -> 48.dp
@@ -1685,7 +1701,7 @@ fun RaceScreen(
                         activeColor = errorAccent,
                         onActiveColor = colorScheme.onError,
                         modifier = Modifier
-                            .size(width = 116.dp, height = controlHeight)
+                            .size(width = brakeWidth, height = brakeHeight)
                             .testTag("brake_button"),
                         onPressedChange = { brakePressed = it }
                     )

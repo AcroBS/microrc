@@ -103,6 +103,7 @@ import com.example.model.AppThemeMode
 import com.example.model.AudioSettings
 import com.example.model.CarSpeedPreset
 import com.example.model.ControlMode
+import com.example.model.ControlVerticalOffset
 import com.example.model.GameMode
 import com.example.model.PlayerProfile
 import com.example.model.RaceRulesSettings
@@ -129,6 +130,7 @@ fun SettingsScreen(
     onUpdateRules: (RaceRulesSettings) -> Unit,
     onSaveControlSettings: (ControlMode, Float, Boolean, Float) -> Unit = { _, _, _, _ -> },
     onUpdateSwapControls: (Boolean) -> Unit = {},
+    onUpdateControlVerticalOffset: (ControlVerticalOffset) -> Unit = {},
     onUpdateShowLiveLapDelta: (Boolean) -> Unit = {},
     onUpdateShowTrackMiniMap: (Boolean) -> Unit = {},
     onUpdateAudio: (AudioSettings) -> Unit = {},
@@ -292,6 +294,7 @@ fun SettingsScreen(
                         tiltController = tiltController,
                         onSaveControlSettings = onSaveControlSettings,
                         onUpdateSwapControls = onUpdateSwapControls,
+                        onUpdateControlVerticalOffset = onUpdateControlVerticalOffset,
                         onUpdateShowLiveLapDelta = onUpdateShowLiveLapDelta,
                         onUpdateShowTrackMiniMap = onUpdateShowTrackMiniMap
                     )
@@ -840,6 +843,7 @@ fun SettingsScreen(
                         tiltController = tiltController,
                         onSaveControlSettings = onSaveControlSettings,
                         onUpdateSwapControls = onUpdateSwapControls,
+                        onUpdateControlVerticalOffset = onUpdateControlVerticalOffset,
                         onUpdateShowLiveLapDelta = onUpdateShowLiveLapDelta,
                         onUpdateShowTrackMiniMap = onUpdateShowTrackMiniMap
                     )
@@ -921,12 +925,14 @@ fun SettingsScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SteeringControlsSection(
     profile: PlayerProfile,
     tiltController: TiltSteeringController?,
     onSaveControlSettings: (ControlMode, Float, Boolean, Float) -> Unit,
     onUpdateSwapControls: (Boolean) -> Unit,
+    onUpdateControlVerticalOffset: (ControlVerticalOffset) -> Unit,
     onUpdateShowLiveLapDelta: (Boolean) -> Unit,
     onUpdateShowTrackMiniMap: (Boolean) -> Unit
 ) {
@@ -1152,6 +1158,45 @@ private fun SteeringControlsSection(
                         valueRange = 0.6f..2.2f,
                         modifier = Modifier.testTag("settings_tilt_sensitivity")
                     )
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "Control Vertical Offset",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Raise steering & brake height for natural portrait thumb reach",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                SingleChoiceSegmentedButtonRow(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    ControlVerticalOffset.entries.forEachIndexed { index, option ->
+                        val selected = profile.controlVerticalOffset == option
+                        SegmentedButton(
+                            selected = selected,
+                            onClick = { onUpdateControlVerticalOffset(option) },
+                            shape = SegmentedButtonDefaults.itemShape(
+                                index = index,
+                                count = ControlVerticalOffset.entries.size
+                            ),
+                            modifier = Modifier.testTag("setting_control_offset_${option.name}")
+                        ) {
+                            Text(
+                                text = option.label,
+                                style = MaterialTheme.typography.labelLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                 }
             }
 

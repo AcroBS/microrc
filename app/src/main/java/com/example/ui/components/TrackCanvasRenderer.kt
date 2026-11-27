@@ -1148,6 +1148,71 @@ fun DrawScope.drawTrackWorld(
                 }
             }
         }
+        // Perfect Launch boost: crisp rear exhaust flame & twin speed-trail streaks
+        if (r.launchBoostMs > 0L && r.jumpZ <= 0.12f) {
+            val deg = r.angleRad * 180f / PI.toFloat()
+            val launchFrac = (r.launchBoostMs.toFloat() / 800f).coerceIn(0.25f, 1f)
+            val flicker = 1f + 0.25f * sin(animTimeSec * 52f + r.x * 0.04f)
+            val trailLen = 30f + 36f * launchFrac * flicker
+            withTransform({
+                translate(r.x, r.y)
+                rotate(deg, Offset.Zero)
+            }) {
+                // Twin rear speed-trail glow streaks
+                drawLine(
+                    color = Color(0xFFFF6D00).copy(alpha = 0.56f * launchFrac),
+                    start = Offset(-16f, -10.5f),
+                    end = Offset(-16f - trailLen, -12.5f),
+                    strokeWidth = 6.5f,
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    color = Color(0xFFFF6D00).copy(alpha = 0.56f * launchFrac),
+                    start = Offset(-16f, 10.5f),
+                    end = Offset(-16f - trailLen, 12.5f),
+                    strokeWidth = 6.5f,
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    color = Color(0xFFFFF176).copy(alpha = 0.90f * launchFrac),
+                    start = Offset(-16f, -10.5f),
+                    end = Offset(-14f - trailLen * 0.72f, -11.5f),
+                    strokeWidth = 2.6f,
+                    cap = StrokeCap.Round
+                )
+                drawLine(
+                    color = Color(0xFFFFF176).copy(alpha = 0.90f * launchFrac),
+                    start = Offset(-16f, 10.5f),
+                    end = Offset(-14f - trailLen * 0.72f, 11.5f),
+                    strokeWidth = 2.6f,
+                    cap = StrokeCap.Round
+                )
+                // White-hot rear diffuser launch flame cone
+                val coreFlame = Path().apply {
+                    moveTo(-18f, -7.5f)
+                    lineTo(-22f - 28f * launchFrac * flicker, 0f)
+                    lineTo(-18f, 7.5f)
+                    close()
+                }
+                drawPath(coreFlame, Color(0xFFFFAB00).copy(alpha = 0.88f * launchFrac))
+                drawCircle(
+                    color = Color(0xFFFFFFFF).copy(alpha = 0.92f * launchFrac),
+                    radius = 4.2f * flicker,
+                    center = Offset(-22f, 0f)
+                )
+                // Trailing hot embers
+                for (eIdx in 0 until 3) {
+                    val phase = ((animTimeSec * 10f + eIdx * 0.33f) % 1f)
+                    val ex = -24f - phase * 34f * launchFrac
+                    val ey = ((eIdx % 2) * 2 - 1) * (4f + phase * 8f)
+                    drawCircle(
+                        color = Color(0xFFFFD54F).copy(alpha = (1f - phase) * 0.85f * launchFrac),
+                        radius = (3.0f - phase * 1.6f).coerceAtLeast(1.0f),
+                        center = Offset(ex, ey)
+                    )
+                }
+            }
+        }
         val revJitterX = if (r.isCountdownRevving) sin(animTimeSec * 95f) * 1.4f else 0f
         val revJitterY = if (r.isCountdownRevving) cos(animTimeSec * 115f) * 1.1f else 0f
         val carType = runCatching { RcCarType.valueOf(r.carType) }.getOrDefault(RcCarType.VOLT_BUGGY)

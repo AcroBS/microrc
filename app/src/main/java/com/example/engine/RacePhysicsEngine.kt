@@ -954,10 +954,7 @@ class RacePhysicsEngine(
                             when {
                                 r.countdownPerfectReleasePending -> {
                                     r.countdownPerfectReleasePending = false
-                                    r.isLaunchHoldActive = false
-                                    r.launchEvaluated = true
-                                    r.launchBoostMs = LAUNCH_BOOST_DURATION_MS
-                                    r.perfectLaunchBannerMs = LAUNCH_BANNER_DURATION_MS
+                                    applyPerfectLaunchBoost(r)
                                 }
                                 r.countdownEarlyReleasePending -> {
                                     r.countdownEarlyReleasePending = false
@@ -1180,8 +1177,7 @@ class RacePhysicsEngine(
                     if (!racer.launchEvaluated) {
                         racer.launchEvaluated = true
                         if (raceTimeMs <= LAUNCH_PERFECT_WINDOW_MS) {
-                            racer.launchBoostMs = LAUNCH_BOOST_DURATION_MS
-                            racer.perfectLaunchBannerMs = LAUNCH_BANNER_DURATION_MS
+                            applyPerfectLaunchBoost(racer)
                         }
                     }
                 } else if (!racer.launchEvaluated && raceTimeMs > LAUNCH_PERFECT_WINDOW_MS) {
@@ -1807,7 +1803,7 @@ class RacePhysicsEngine(
         val speedMult = when {
             isStunned -> 0.36f
             hasBoost -> boostMult
-            hasLaunchBoost -> 1.24f
+            hasLaunchBoost -> 1.32f
             hasOverdrive -> 1.18f
             else -> 1.0f
         } * offRoadFactor * weatherSpeedMult
@@ -1819,7 +1815,7 @@ class RacePhysicsEngine(
             accelWeatherMult *
             when {
                 hasBoost -> if (isStuntMode) 1.38f else 1.75f
-                hasLaunchBoost -> 1.85f
+                hasLaunchBoost -> 2.35f
                 hasOverdrive -> 1.3f
                 hasWheelspin -> 0.22f
                 else -> 1.0f
@@ -2508,6 +2504,24 @@ class RacePhysicsEngine(
             racer.lastTrackIdx = targetIdx
             racer.checkpointIndex = targetIdx
             setBanner("${racer.name} WARPED FORWARD!", 1500L)
+        }
+    }
+
+    private fun applyPerfectLaunchBoost(racer: MutableRacer) {
+        racer.isLaunchHoldActive = false
+        racer.countdownBrakeHeld = false
+        racer.launchEvaluated = true
+        racer.launchBoostMs = LAUNCH_BOOST_DURATION_MS
+        racer.perfectLaunchBannerMs = LAUNCH_BANNER_DURATION_MS
+
+        // Punchy initial acceleration impulse off the line so Perfect Launch surges ahead into Turn 1
+        val impulseSpeed = racer.carType.maxSpeedPx * speedPreset.speedMultiplier * LAUNCH_IMPULSE_FRACTION
+        val cosA = cos(racer.angleRad)
+        val sinA = sin(racer.angleRad)
+        val curFwd = racer.vx * cosA + racer.vy * sinA
+        if (curFwd < impulseSpeed) {
+            racer.vx = cosA * impulseSpeed
+            racer.vy = sinA * impulseSpeed
         }
     }
 
@@ -3585,9 +3599,10 @@ class RacePhysicsEngine(
         const val COUNTDOWN_DURATION_MS = 3200L
         const val GO_FLASH_DURATION_MS = RaceSnapshot.GO_FLASH_DURATION_MS
         const val LAUNCH_PERFECT_WINDOW_MS = 250L
-        const val LAUNCH_BOOST_DURATION_MS = 400L
+        const val LAUNCH_BOOST_DURATION_MS = 800L
+        const val LAUNCH_IMPULSE_FRACTION = 0.62f
         const val LAUNCH_WHEELSPIN_DURATION_MS = 250L
-        const val LAUNCH_BANNER_DURATION_MS = 1400L
+        const val LAUNCH_BANNER_DURATION_MS = 1500L
         const val FINISH_GRACE_MS = 10_000L
         const val STALLED_RIVAL_MIN_GRACE_MS = 2_000L
         const val STALLED_RIVAL_THRESHOLD_MS = 3_500L

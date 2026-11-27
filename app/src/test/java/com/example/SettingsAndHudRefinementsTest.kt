@@ -12,12 +12,17 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.isSelected
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import com.example.audio.RaceAudioEngine
 import com.example.data.PreferencesRepository
 import com.example.data.TrackCatalog
 import com.example.model.AudioSettings
 import com.example.model.ControlMode
+import com.example.model.ControlVerticalOffset
 import com.example.model.GameMode
 import com.example.model.PlayerProfile
 import com.example.model.RacePhase
@@ -60,8 +65,10 @@ class SettingsAndHudRefinementsTest {
 
         val app = ApplicationProvider.getApplicationContext<Application>()
         val repo = PreferencesRepository(app)
+        assertEquals(ControlVerticalOffset.RAISED, repo.profileFlow.first().controlVerticalOffset)
         repo.updateAudioSettings(AudioSettings(musicEnabled = true, carSfxEnabled = true, hapticsEnabled = false, musicVolume = 0.35f, sfxVolume = 0.65f))
         repo.updateSwapControls(true)
+        repo.updateControlVerticalOffset(ControlVerticalOffset.HIGH)
         repo.updateShowLiveLapDelta(false)
         repo.updateShowTrackMiniMap(false)
 
@@ -70,6 +77,7 @@ class SettingsAndHudRefinementsTest {
         assertEquals(0.35f, audio.musicVolume, 0.001f)
         assertEquals(0.65f, audio.sfxVolume, 0.001f)
         assertTrue(profile.swapControls)
+        assertEquals(ControlVerticalOffset.HIGH, profile.controlVerticalOffset)
         assertFalse(profile.showLiveLapDelta)
         assertFalse(profile.showTrackMiniMap)
     }
@@ -139,6 +147,10 @@ class SettingsAndHudRefinementsTest {
                         profileState = profileState.copy(swapControls = it)
                         latestProfile = profileState
                     },
+                    onUpdateControlVerticalOffset = {
+                        profileState = profileState.copy(controlVerticalOffset = it)
+                        latestProfile = profileState
+                    },
                     onUpdateShowLiveLapDelta = {
                         profileState = profileState.copy(showLiveLapDelta = it)
                         latestProfile = profileState
@@ -157,7 +169,15 @@ class SettingsAndHudRefinementsTest {
         }
         composeTestRule.waitForIdle()
 
-        // Steering HUD toggles present & reactive
+        // Steering HUD toggles + Control Vertical Offset pill present & reactive
+        composeTestRule.onNodeWithTag("setting_control_offset_RAISED").performScrollTo().assertIsDisplayed().assert(isSelected())
+        composeTestRule.onNodeWithTag("setting_control_offset_HIGH").performScrollTo().assertIsDisplayed().performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(ControlVerticalOffset.HIGH, latestProfile.controlVerticalOffset)
+        composeTestRule.onNodeWithTag("setting_control_offset_BOTTOM").performScrollTo().assertIsDisplayed().performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(ControlVerticalOffset.BOTTOM, latestProfile.controlVerticalOffset)
+
         composeTestRule.onNodeWithTag("setting_swap_controls_switch").performScrollTo().assertIsDisplayed().performClick()
         composeTestRule.onNodeWithTag("setting_live_lap_delta_switch").performScrollTo().assertIsDisplayed().performClick()
         composeTestRule.onNodeWithTag("setting_show_minimap_switch").performScrollTo().assertIsDisplayed().performClick()
@@ -266,6 +286,179 @@ class SettingsAndHudRefinementsTest {
             val swappedSteerLeft = composeTestRule.onNodeWithTag("steer_left_button").getUnclippedBoundsInRoot()
             val swappedBrake = composeTestRule.onNodeWithTag("brake_button").getUnclippedBoundsInRoot()
             assertTrue(swappedBrake.left < swappedSteerLeft.left)
+        } finally {
+            composeTestRule.mainClock.autoAdvance = true
+        }
+    }
+
+    @Test
+    fun raceScreen_centersNotificationBannersAndStatusPillsHorizontallyWithMiniMap() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val tiltController = TiltSteeringController(app)
+        val track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP)
+        val snapshot = RaceSnapshot(
+            raceTimeMs = 4_500L,
+            phase = RacePhase.RACING.name,
+            trackId = TrackId.LIVING_ROOM_GP.name,
+            totalLaps = 3,
+            gameMode = GameMode.RACE.name,
+            eventBanner = "Acro triggered LiPo Turbo!",
+            racers = listOf(
+                RacerState(
+                    playerId = "p1",
+                    name = "Acro",
+                    carType = RcCarType.VOLT_BUGGY.name,
+                    primaryColorArgb = 0xFFFF5722,
+                    accentColorArgb = 0xFFFFD54F,
+                    x = 1200f,
+                    y = 950f,
+                    angleRad = 0f,
+                    lap = 1,
+                    boostMs = 1500L,
+                    perfectLaunchBannerMs = 900L,
+                    shieldMs = 1200L
+                )
+            )
+        )
+
+        composeTestRule.mainClock.autoAdvance = false
+        try {
+            composeTestRule.setContent {
+                MicroRCTheme {
+                    RaceScreen(
+                        profile = PlayerProfile(
+                            playerId = "p1",
+                            name = "Acro",
+                            controlMode = ControlMode.TOUCH_OVERLAY,
+                            showTrackMiniMap = true
+                        ),
+                        snapshot = snapshot,
+                        activeTrack = track,
+                        overviewCamera = false,
+                        tiltController = tiltController,
+                        onToggleOverviewCamera = {},
+                        onUpdateControlInput = { _, _ -> },
+                        onTriggerPowerUp = {},
+                        onSwitchControlMode = { _, _, _, _ -> },
+                        onLeaveRace = {}
+                    )
+                }
+            }
+            repeat(3) { composeTestRule.mainClock.advanceTimeByFrame() }
+
+            val rootBounds = composeTestRule.onRoot().getUnclippedBoundsInRoot()
+            val rootCenterX = (rootBounds.left.value + rootBounds.right.value) / 2f
+
+            val minimapBounds = composeTestRule.onNodeWithTag("race_minimap").getUnclippedBoundsInRoot()
+            val bannerBounds = composeTestRule.onNodeWithTag("top_event_banner").getUnclippedBoundsInRoot()
+            val calloutsBounds = composeTestRule.onNodeWithTag("race_status_callout_pill").getUnclippedBoundsInRoot()
+
+            val bannerCenterX = (bannerBounds.left.value + bannerBounds.right.value) / 2f
+            val calloutsCenterX = (calloutsBounds.left.value + calloutsBounds.right.value) / 2f
+
+            assertTrue(
+                "Event banner center ($bannerCenterX) must match root center ($rootCenterX)",
+                kotlin.math.abs(bannerCenterX - rootCenterX) <= 2f
+            )
+            assertTrue(
+                "Status pill center ($calloutsCenterX) must match root center ($rootCenterX)",
+                kotlin.math.abs(calloutsCenterX - rootCenterX) <= 2f
+            )
+            assertTrue(
+                "Top banner (top=${bannerBounds.top}) must sit below mini-map (bottom=${minimapBounds.bottom})",
+                bannerBounds.top >= minimapBounds.bottom
+            )
+        } finally {
+            composeTestRule.mainClock.autoAdvance = true
+        }
+    }
+
+    @Test
+    fun raceScreen_appliesControlVerticalOffset_andKeepsPowerUpAboveTallerBrakeButton() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val tiltController = TiltSteeringController(app)
+        val track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP)
+        val snapshot = RaceSnapshot(
+            raceTimeMs = 2_000L,
+            phase = RacePhase.RACING.name,
+            trackId = TrackId.LIVING_ROOM_GP.name,
+            totalLaps = 3,
+            gameMode = GameMode.RACE.name,
+            racers = listOf(
+                RacerState(
+                    playerId = "p1",
+                    name = "Acro",
+                    carType = RcCarType.VOLT_BUGGY.name,
+                    primaryColorArgb = 0xFFFF5722,
+                    accentColorArgb = 0xFFFFD54F,
+                    x = 1200f,
+                    y = 950f,
+                    angleRad = 0f,
+                    lap = 1
+                )
+            )
+        )
+        var profileState by mutableStateOf(
+            PlayerProfile(
+                playerId = "p1",
+                name = "Acro",
+                controlMode = ControlMode.TOUCH_OVERLAY,
+                controlVerticalOffset = ControlVerticalOffset.BOTTOM
+            )
+        )
+
+        composeTestRule.mainClock.autoAdvance = false
+        try {
+            composeTestRule.setContent {
+                MicroRCTheme {
+                    RaceScreen(
+                        profile = profileState,
+                        snapshot = snapshot,
+                        activeTrack = track,
+                        overviewCamera = false,
+                        tiltController = tiltController,
+                        onToggleOverviewCamera = {},
+                        onUpdateControlInput = { _, _ -> },
+                        onTriggerPowerUp = {},
+                        onSwitchControlMode = { _, _, _, _ -> },
+                        onLeaveRace = {}
+                    )
+                }
+            }
+            repeat(3) { composeTestRule.mainClock.advanceTimeByFrame() }
+
+            val bottomBrake = composeTestRule.onNodeWithTag("brake_button").getUnclippedBoundsInRoot()
+            val bottomPower = composeTestRule.onNodeWithTag("use_powerup_button").getUnclippedBoundsInRoot()
+            val bottomSteer = composeTestRule.onNodeWithTag("steer_left_button").getUnclippedBoundsInRoot()
+
+            val brakeHeight = bottomBrake.bottom - bottomBrake.top
+            val steerHeight = bottomSteer.bottom - bottomSteer.top
+            assertTrue(
+                "BRAKE button height ($brakeHeight) should be taller than steering height ($steerHeight)",
+                brakeHeight > steerHeight
+            )
+
+            // Default RAISED offset (~56.dp higher than BOTTOM)
+            profileState = profileState.copy(controlVerticalOffset = ControlVerticalOffset.RAISED)
+            repeat(3) { composeTestRule.mainClock.advanceTimeByFrame() }
+            val raisedBrake = composeTestRule.onNodeWithTag("brake_button").getUnclippedBoundsInRoot()
+            val raisedPower = composeTestRule.onNodeWithTag("use_powerup_button").getUnclippedBoundsInRoot()
+
+            val brakeLiftDp = bottomBrake.bottom - raisedBrake.bottom
+            val powerLiftDp = bottomPower.bottom - raisedPower.bottom
+            assertTrue("RAISED offset must lift BRAKE by ~56.dp (actual=$brakeLiftDp)", brakeLiftDp in 54.dp..58.dp)
+            assertTrue("RAISED offset must lift Power-Up slot together by ~56.dp (actual=$powerLiftDp)", powerLiftDp in 54.dp..58.dp)
+            assertTrue(
+                "Power-Up slot must stay >= 20.dp above BRAKE without overlap (gap=${raisedBrake.top - raisedPower.bottom})",
+                raisedBrake.top - raisedPower.bottom >= 20.dp
+            )
+
+            // HIGH offset (~96.dp higher than BOTTOM)
+            profileState = profileState.copy(controlVerticalOffset = ControlVerticalOffset.HIGH)
+            repeat(3) { composeTestRule.mainClock.advanceTimeByFrame() }
+            val highBrake = composeTestRule.onNodeWithTag("brake_button").getUnclippedBoundsInRoot()
+            val highLiftDp = bottomBrake.bottom - highBrake.bottom
+            assertTrue("HIGH offset must lift BRAKE by ~96.dp (actual=$highLiftDp)", highLiftDp in 94.dp..98.dp)
         } finally {
             composeTestRule.mainClock.autoAdvance = true
         }

@@ -14,6 +14,7 @@ import com.example.model.ArenaShape
 import com.example.model.AudioSettings
 import com.example.model.CarVisualUpgrades
 import com.example.model.ControlMode
+import com.example.model.ControlVerticalOffset
 import com.example.model.CosmeticUpgradeSlot
 import com.example.model.CustomTrackData
 import com.example.model.DiscoveredLobby
@@ -457,6 +458,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateSwapControls(enabled: Boolean) {
         viewModelScope.launch {
             prefsRepo.updateSwapControls(enabled)
+        }
+    }
+
+    fun updateControlVerticalOffset(offset: ControlVerticalOffset) {
+        viewModelScope.launch {
+            prefsRepo.updateControlVerticalOffset(offset)
         }
     }
 
