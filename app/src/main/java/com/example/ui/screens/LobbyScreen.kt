@@ -1267,7 +1267,7 @@ fun LobbyScreen(
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
-                                        text = "Rain puddles, tremors, wind & snow",
+                                        text = "Rain puddles, meteor showers, tremors, wind & snow",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )

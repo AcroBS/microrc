@@ -43,9 +43,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.AcUnit
+import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
@@ -60,6 +63,8 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Today
+import androidx.compose.material.icons.filled.WaterDrop
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -116,6 +121,7 @@ import com.example.R
 import com.example.data.FriendBoardStandingItem
 import com.example.data.FriendStandingsSummary
 import com.example.data.PlayStreakState
+import com.example.model.DailyWeatherTheme
 import com.example.model.GameMode
 import com.example.model.PlayerProfile
 import com.example.ui.components.drawRcCar
@@ -186,9 +192,11 @@ fun HomeScreen(
     dailyChallengeSubtitle: String = "Fixed Portals • 1 Nitro/Lap • No Mines",
     dailyChallengeResetLabel: String = "",
     dailyBestTimeMs: Long? = null,
+    dailyChallengeWeather: DailyWeatherTheme = DailyWeatherTheme.CLEAR,
     onOpenDailyDriftChallenge: () -> Unit = {},
     dailyDriftTitle: String = "Daily Drift",
     dailyDriftBestTimeMs: Long? = null,
+    dailyDriftWeather: DailyWeatherTheme = DailyWeatherTheme.CLEAR,
     onOpenOnlinePlay: () -> Unit = {},
     onOpenFriends: () -> Unit = {},
     onOpenFriendStandings: () -> Unit = onOpenFriends,
@@ -594,6 +602,8 @@ fun HomeScreen(
                                 dailyDriftStatus = dailyDriftStatus,
                                 dailyGpCompletedToday = dailyGpCompletedToday,
                                 dailyDriftCompletedToday = dailyDriftCompletedToday,
+                                dailyChallengeWeather = dailyChallengeWeather,
+                                dailyDriftWeather = dailyDriftWeather,
                                 completedAccentColor = onlineAccent,
                                 goldAccent = goldAccent,
                                 onOpenDailyChallenge = onOpenDailyChallenge,
@@ -772,6 +782,8 @@ private fun DailyChallengesAndTracksBlock(
     dailyDriftStatus: DailyLeadStatus,
     dailyGpCompletedToday: Boolean,
     dailyDriftCompletedToday: Boolean,
+    dailyChallengeWeather: DailyWeatherTheme,
+    dailyDriftWeather: DailyWeatherTheme,
     completedAccentColor: Color,
     goldAccent: Color,
     onOpenDailyChallenge: () -> Unit,
@@ -823,6 +835,8 @@ private fun DailyChallengesAndTracksBlock(
                     status = dailyGpStatus,
                     completedToday = dailyGpCompletedToday,
                     completedBadgeTag = "daily_gp_completed_badge",
+                    weatherTheme = dailyChallengeWeather,
+                    weatherBadgeTag = "daily_gp_weather_badge",
                     completedAccentColor = completedAccentColor,
                     goldAccent = goldAccent,
                     onClick = onOpenDailyChallenge,
@@ -840,6 +854,8 @@ private fun DailyChallengesAndTracksBlock(
                         status = dailyDriftStatus,
                         completedToday = dailyDriftCompletedToday,
                         completedBadgeTag = "daily_drift_completed_badge",
+                        weatherTheme = dailyDriftWeather,
+                        weatherBadgeTag = "daily_drift_weather_badge",
                         completedAccentColor = completedAccentColor,
                         goldAccent = goldAccent,
                         onClick = onOpenDailyDriftChallenge,
@@ -926,6 +942,8 @@ private fun DailyChallengeCompactCard(
     status: DailyLeadStatus,
     completedToday: Boolean,
     completedBadgeTag: String,
+    weatherTheme: DailyWeatherTheme,
+    weatherBadgeTag: String,
     completedAccentColor: Color,
     goldAccent: Color,
     onClick: () -> Unit,
@@ -1058,6 +1076,40 @@ private fun DailyChallengeCompactCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+                }
+            }
+
+            val (weatherIcon, weatherTint) = when (weatherTheme) {
+                DailyWeatherTheme.CLEAR -> Icons.Default.WbSunny to Color(0xFFFFD54F)
+                DailyWeatherTheme.NIGHT -> Icons.Default.DarkMode to Color(0xFF90CAF9)
+                DailyWeatherTheme.RAIN -> Icons.Default.WaterDrop to Color(0xFF4FC3F7)
+                DailyWeatherTheme.SNOW -> Icons.Default.AcUnit to Color(0xFFE1F5FE)
+                DailyWeatherTheme.WINDY -> Icons.Default.Air to Color(0xFF80CBC4)
+            }
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                shape = RoundedCornerShape(50),
+                border = BorderStroke(1.dp, weatherTint.copy(alpha = 0.42f)),
+                modifier = Modifier.testTag(weatherBadgeTag)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = weatherIcon,
+                        contentDescription = "${weatherTheme.badgeLabel} weather",
+                        tint = weatherTint,
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Text(
+                        text = weatherTheme.badgeLabel,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = PlusJakartaFontFamily),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }

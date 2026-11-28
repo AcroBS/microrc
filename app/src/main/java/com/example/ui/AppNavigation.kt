@@ -829,6 +829,7 @@ fun MicroRCApp(
                     ),
                     dailyChallengeResetLabel = "Resets in ${DailyChallengeCatalog.formatCountdownUntilReset()}",
                     dailyBestTimeMs = todayPbTime,
+                    dailyChallengeWeather = DailyChallengeCatalog.weatherThemeForDate(todayKey),
                     onOpenDailyDriftChallenge = {
                         leaderboardInitialDaily = true
                         leaderboardInitialMode = GameMode.DRIFT
@@ -839,6 +840,7 @@ fun MicroRCApp(
                         com.example.drift.DriftDailyChallenge.trackIdForDate(todayKey)
                     ) ?: "Daily Drift (${com.example.drift.DriftDailyChallenge.displayDateLabel(todayKey)})",
                     dailyDriftBestTimeMs = todayDriftPbTime,
+                    dailyDriftWeather = com.example.drift.DriftDailyChallenge.weatherThemeForDate(todayKey),
                     onOpenOnlinePlay = { navController.navigate(Routes.ONLINE_HUB) },
                     onOpenFriends = { navController.navigate(Routes.FRIENDS) },
                     onOpenFriendStandings = { navController.navigate(Routes.FRIEND_STANDINGS) },

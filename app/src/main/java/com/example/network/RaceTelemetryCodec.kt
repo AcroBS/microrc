@@ -11,6 +11,7 @@ import com.example.model.GameMode
 import com.example.model.HazardType
 import com.example.model.ItemBoxState
 import com.example.model.LobbyPlayer
+import com.example.model.MeteorStrikeState
 import com.example.model.PortalPairState
 import com.example.model.PowerUpType
 import com.example.model.RacePhase
@@ -21,12 +22,14 @@ import com.example.model.StuntObstacleState
 import com.example.model.StuntPinState
 import com.example.model.StuntStateSnapshot
 import com.example.model.StuntVariant
+import com.example.model.TrackCrater
 import com.example.model.TrackDefinition
 import com.example.model.TrackExplosion
 import com.example.model.TrackFieldPickup
 import com.example.model.TrackHazard
 import com.example.model.TrackId
 import com.example.model.TrackPuddle
+import com.example.model.TrackSnowPatch
 import com.example.model.WinCondition
 import java.util.Locale
 
@@ -230,7 +233,9 @@ object RaceTelemetryCodec {
                 .append(r.launchBoostMs).append(',')
                 .append(r.perfectLaunchBannerMs).append(',')
                 .append(r.wheelspinSmokeMs).append(',')
-                .append(if (r.isLaunchHoldActive) 1 else 0)
+                .append(if (r.isLaunchHoldActive) 1 else 0).append(',')
+                .append(r.zLayer).append(',')
+                .append(String.format(Locale.US, "%.2f", r.elevation))
         }
         sb.append('|')
 
@@ -240,7 +245,8 @@ object RaceTelemetryCodec {
             sb.append(b.id).append(':')
                 .append(String.format(Locale.US, "%.1f", b.x)).append(':')
                 .append(String.format(Locale.US, "%.1f", b.y)).append(':')
-                .append(if (b.available) 1 else 0)
+                .append(if (b.available) 1 else 0).append(':')
+                .append(b.zLayer)
         }
         sb.append('|')
 
@@ -252,7 +258,8 @@ object RaceTelemetryCodec {
                 .append(String.format(Locale.US, "%.1f", h.x)).append(',')
                 .append(String.format(Locale.US, "%.1f", h.y)).append(',')
                 .append(h.remainingMs).append(',')
-                .append(h.hazardTypeEnum.ordinal)
+                .append(h.hazardTypeEnum.ordinal).append(',')
+                .append(h.zLayer)
         }
         sb.append('|')
 
@@ -274,7 +281,8 @@ object RaceTelemetryCodec {
             .append(snap.arenaSuddenDeathRemainingMs).append(',')
             .append(if (snap.isHybridTour) 1 else 0).append(',')
             .append(snap.hybridStageNumber).append(',')
-            .append(sanitizeToken(snap.nextHybridMode ?: ""))
+            .append(sanitizeToken(snap.nextHybridMode ?: "")).append(',')
+            .append(snap.meteorImpactSeq)
         sb.append('|')
 
         // Rain puddles (index 12)
@@ -282,7 +290,8 @@ object RaceTelemetryCodec {
             if (idx > 0) sb.append(';')
             sb.append(String.format(Locale.US, "%.0f", p.x)).append(',')
                 .append(String.format(Locale.US, "%.0f", p.y)).append(',')
-                .append(String.format(Locale.US, "%.0f", p.radius))
+                .append(String.format(Locale.US, "%.0f", p.radius)).append(',')
+                .append(p.zLayer)
         }
         sb.append('|')
 
@@ -391,7 +400,42 @@ object RaceTelemetryCodec {
                 .append(String.format(Locale.US, "%.1f", rk.x)).append(',')
                 .append(String.format(Locale.US, "%.1f", rk.y)).append(',')
                 .append(String.format(Locale.US, "%.3f", rk.angleRad)).append(',')
-                .append(rk.remainingMs)
+                .append(rk.remainingMs).append(',')
+                .append(rk.zLayer)
+        }
+        sb.append('|')
+
+        // Snow Corner Patches (index 18)
+        snap.snowPatches.forEachIndexed { idx, sp ->
+            if (idx > 0) sb.append(';')
+            sb.append(String.format(Locale.US, "%.0f", sp.x)).append(',')
+                .append(String.format(Locale.US, "%.0f", sp.y)).append(',')
+                .append(String.format(Locale.US, "%.0f", sp.radius)).append(',')
+                .append(sp.zLayer)
+        }
+        sb.append('|')
+
+        // Active Telegraphed Meteor Strikes (index 19)
+        snap.meteorStrikes.forEachIndexed { idx, ms ->
+            if (idx > 0) sb.append(';')
+            sb.append(ms.id).append(',')
+                .append(String.format(Locale.US, "%.1f", ms.x)).append(',')
+                .append(String.format(Locale.US, "%.1f", ms.y)).append(',')
+                .append(String.format(Locale.US, "%.0f", ms.radius)).append(',')
+                .append(ms.countdownMs).append(',')
+                .append(ms.totalWarningMs).append(',')
+                .append(ms.zLayer)
+        }
+        sb.append('|')
+
+        // Persistent Scorched Meteor Craters (index 20)
+        snap.scorchedCraters.forEachIndexed { idx, cr ->
+            if (idx > 0) sb.append(';')
+            sb.append(cr.id).append(',')
+                .append(String.format(Locale.US, "%.1f", cr.x)).append(',')
+                .append(String.format(Locale.US, "%.1f", cr.y)).append(',')
+                .append(String.format(Locale.US, "%.0f", cr.radius)).append(',')
+                .append(cr.zLayer)
         }
 
         return sb.toString().toByteArray(Charsets.UTF_8)
@@ -445,6 +489,7 @@ object RaceTelemetryCodec {
         val isHybridTour = metaFields.getOrNull(15) == "1"
         val hybridStageNumber = metaFields.getOrNull(16)?.toIntOrNull() ?: 1
         val nextHybridMode = metaFields.getOrNull(17)?.ifEmpty { null }
+        val meteorImpactSeq = metaFields.getOrNull(18)?.toIntOrNull() ?: 0
 
         val rosterMap = roster.associateBy { it.id }
         val prevMap = previousSnapshot?.racers?.associateBy { it.playerId }.orEmpty()
@@ -491,6 +536,8 @@ object RaceTelemetryCodec {
                 val perfectLaunchBannerMs = f.getOrNull(35)?.toLongOrNull() ?: 0L
                 val wheelspinSmokeMs = f.getOrNull(36)?.toLongOrNull() ?: 0L
                 val isLaunchHoldActive = f.getOrNull(37) == "1"
+                val zLayer = (f.getOrNull(38)?.toIntOrNull() ?: 0).coerceIn(0, 1)
+                val elevation = (f.getOrNull(39)?.toFloatOrNull() ?: 0f).coerceIn(0f, 1f)
 
                 val vx = f[4].toFloatOrNull() ?: 0f
                 val vy = f[5].toFloatOrNull() ?: 0f
@@ -538,7 +585,9 @@ object RaceTelemetryCodec {
                     isLaunchHoldActive = isLaunchHoldActive,
                     launchBoostMs = launchBoostMs,
                     perfectLaunchBannerMs = perfectLaunchBannerMs,
-                    wheelspinSmokeMs = wheelspinSmokeMs
+                    wheelspinSmokeMs = wheelspinSmokeMs,
+                    zLayer = zLayer,
+                    elevation = elevation
                 )
             }
         }
@@ -651,7 +700,8 @@ object RaceTelemetryCodec {
                         x = bf[1].toFloatOrNull() ?: return@mapNotNull null,
                         y = bf[2].toFloatOrNull() ?: return@mapNotNull null,
                         available = bf[3] != "0",
-                        respawnMs = 0L
+                        respawnMs = 0L,
+                        zLayer = (bf.getOrNull(4)?.toIntOrNull() ?: 0).coerceIn(0, 1)
                     )
                 }
             }
@@ -663,7 +713,8 @@ object RaceTelemetryCodec {
                         x = spawn.x,
                         y = spawn.y,
                         available = rawBoxes.getOrNull(idx) != '0',
-                        respawnMs = 0L
+                        respawnMs = 0L,
+                        zLayer = spawn.zLayer
                     )
                 }
             }
@@ -688,7 +739,8 @@ object RaceTelemetryCodec {
                         else -> 32f
                     },
                     remainingMs = f[4].toLongOrNull() ?: 0L,
-                    type = hazType
+                    type = hazType,
+                    zLayer = (f.getOrNull(6)?.toIntOrNull() ?: 0).coerceIn(0, 1)
                 )
             }
         }
@@ -703,7 +755,8 @@ object RaceTelemetryCodec {
                 TrackPuddle(
                     x = f[0].toFloatOrNull() ?: return@mapNotNull null,
                     y = f[1].toFloatOrNull() ?: return@mapNotNull null,
-                    radius = f[2].toFloatOrNull() ?: 40f
+                    radius = f[2].toFloatOrNull() ?: 40f,
+                    zLayer = (f.getOrNull(3)?.toIntOrNull() ?: 0).coerceIn(0, 1)
                 )
             }
         }
@@ -791,7 +844,60 @@ object RaceTelemetryCodec {
                     x = f[3].toFloatOrNull() ?: return@mapNotNull null,
                     y = f[4].toFloatOrNull() ?: return@mapNotNull null,
                     angleRad = f[5].toFloatOrNull() ?: 0f,
-                    remainingMs = f[6].toLongOrNull() ?: 3000L
+                    remainingMs = f[6].toLongOrNull() ?: 3000L,
+                    zLayer = (f.getOrNull(7)?.toIntOrNull() ?: 0).coerceIn(0, 1)
+                )
+            }
+        }
+
+        val snowRaw = parts.getOrNull(18).orEmpty()
+        val snowPatches = if (snowRaw.isEmpty()) {
+            emptyList()
+        } else {
+            snowRaw.split(';').mapNotNull { entry ->
+                val f = entry.split(',')
+                if (f.size < 3) return@mapNotNull null
+                TrackSnowPatch(
+                    x = f[0].toFloatOrNull() ?: return@mapNotNull null,
+                    y = f[1].toFloatOrNull() ?: return@mapNotNull null,
+                    radius = f[2].toFloatOrNull() ?: 44f,
+                    zLayer = (f.getOrNull(3)?.toIntOrNull() ?: 0).coerceIn(0, 1)
+                )
+            }
+        }
+
+        val meteorsRaw = parts.getOrNull(19).orEmpty()
+        val meteorStrikes = if (meteorsRaw.isEmpty()) {
+            emptyList()
+        } else {
+            meteorsRaw.split(';').mapNotNull { entry ->
+                val f = entry.split(',')
+                if (f.size < 6) return@mapNotNull null
+                MeteorStrikeState(
+                    id = f[0].toIntOrNull() ?: return@mapNotNull null,
+                    x = f[1].toFloatOrNull() ?: return@mapNotNull null,
+                    y = f[2].toFloatOrNull() ?: return@mapNotNull null,
+                    radius = f[3].toFloatOrNull() ?: 88f,
+                    countdownMs = f[4].toLongOrNull() ?: 1200L,
+                    totalWarningMs = f[5].toLongOrNull() ?: 1200L,
+                    zLayer = (f.getOrNull(6)?.toIntOrNull() ?: 0).coerceIn(0, 1)
+                )
+            }
+        }
+
+        val cratersRaw = parts.getOrNull(20).orEmpty()
+        val scorchedCraters = if (cratersRaw.isEmpty()) {
+            emptyList()
+        } else {
+            cratersRaw.split(';').mapNotNull { entry ->
+                val f = entry.split(',')
+                if (f.size < 4) return@mapNotNull null
+                TrackCrater(
+                    id = f[0].toIntOrNull() ?: return@mapNotNull null,
+                    x = f[1].toFloatOrNull() ?: return@mapNotNull null,
+                    y = f[2].toFloatOrNull() ?: return@mapNotNull null,
+                    radius = f[3].toFloatOrNull() ?: 66f,
+                    zLayer = (f.getOrNull(4)?.toIntOrNull() ?: 0).coerceIn(0, 1)
                 )
             }
         }
@@ -833,7 +939,11 @@ object RaceTelemetryCodec {
                 isHybridTour = isHybridTour,
                 hybridStageNumber = hybridStageNumber,
                 nextHybridMode = nextHybridMode,
-                rockets = rockets
+                rockets = rockets,
+                snowPatches = snowPatches,
+                meteorStrikes = meteorStrikes,
+                scorchedCraters = scorchedCraters,
+                meteorImpactSeq = meteorImpactSeq
             )
         )
     }

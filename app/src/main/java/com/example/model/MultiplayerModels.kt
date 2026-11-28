@@ -121,14 +121,56 @@ enum class ExternalEventType(val displayName: String) {
     EARTHQUAKE("Earthquake"),
     WIND("Crosswind"),
     SNOW("Snowfall"),
-    DAY_NIGHT("Day/Night")
+    DAY_NIGHT("Day/Night"),
+    METEOR_SHOWER("Meteor Shower")
+}
+
+enum class DailyWeatherTheme(
+    val displayName: String,
+    val badgeLabel: String,
+    val externalEvent: ExternalEventType
+) {
+    CLEAR("Clear", "Clear", ExternalEventType.NONE),
+    NIGHT("Night", "Night", ExternalEventType.DAY_NIGHT),
+    RAIN("Rain", "Rain", ExternalEventType.RAIN),
+    SNOW("Snow", "Snow", ExternalEventType.SNOW),
+    WINDY("Windy", "Windy", ExternalEventType.WIND)
 }
 
 @JsonClass(generateAdapter = true)
 data class TrackPuddle(
     val x: Float,
     val y: Float,
-    val radius: Float = 42f
+    val radius: Float = 42f,
+    val zLayer: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class TrackSnowPatch(
+    val x: Float,
+    val y: Float,
+    val radius: Float = 44f,
+    val zLayer: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class TrackCrater(
+    val id: Int,
+    val x: Float,
+    val y: Float,
+    val radius: Float = 66f,
+    val zLayer: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class MeteorStrikeState(
+    val id: Int,
+    val x: Float,
+    val y: Float,
+    val radius: Float = 88f,
+    val countdownMs: Long = 1200L,
+    val totalWarningMs: Long = 1200L,
+    val zLayer: Int = 0
 )
 
 enum class CarSpeedPreset(
@@ -320,7 +362,9 @@ data class RacerState(
     val isLaunchHoldActive: Boolean = false,
     val launchBoostMs: Long = 0L,
     val perfectLaunchBannerMs: Long = 0L,
-    val wheelspinSmokeMs: Long = 0L
+    val wheelspinSmokeMs: Long = 0L,
+    val zLayer: Int = 0,
+    val elevation: Float = 0f
 )
 
 @JsonClass(generateAdapter = true)
@@ -355,7 +399,11 @@ data class RaceSnapshot(
     val stuntState: StuntStateSnapshot? = null,
     val isHybridTour: Boolean = false,
     val hybridStageNumber: Int = 1,
-    val nextHybridMode: String? = null
+    val nextHybridMode: String? = null,
+    val snowPatches: List<TrackSnowPatch> = emptyList(),
+    val meteorStrikes: List<MeteorStrikeState> = emptyList(),
+    val scorchedCraters: List<TrackCrater> = emptyList(),
+    val meteorImpactSeq: Int = 0
 ) {
     /** True during the ~0.6s bold "GO!" callout right when the race timer begins and cars unlock. */
     val isGoFlashActive: Boolean

@@ -2,6 +2,7 @@ package com.example.data
 
 import com.example.model.CarSpeedPreset
 import com.example.model.CustomTrackData
+import com.example.model.DailyWeatherTheme
 import com.example.model.GameMode
 import com.example.model.LeaderboardBoardKey
 import com.example.model.RaceRulesSettings
@@ -87,23 +88,34 @@ object DailyChallengeCatalog {
         return result and Long.MAX_VALUE
     }
 
+    fun weatherThemeForDate(dateKey: String = todayDateKey()): DailyWeatherTheme {
+        val normalized = normalizeDateKey(dateKey)
+        val daySeed = seedForDate(normalized)
+        val themes = DailyWeatherTheme.entries
+        val idx = ((daySeed ushr 12) % themes.size.toLong()).toInt().coerceIn(0, themes.lastIndex)
+        return themes[idx]
+    }
+
     fun dailyCustomTrack(dateKey: String = todayDateKey()): CustomTrackData {
         val normalized = normalizeDateKey(dateKey)
         val label = displayDateLabel(normalized)
         val daySeed = seedForDate(normalized)
         val featureRng = kotlin.random.Random(daySeed xor 0x5A3C19F1L)
         val includeJumps = featureRng.nextFloat() < 0.70f
+        val weatherTheme = weatherThemeForDate(normalized)
         return TrackCatalog.generateRandomTrack(
             seed = daySeed,
             preferredTheme = null,
             roadHalfWidth = 112f,
             trackIdOverride = trackIdForDate(normalized),
             trackNameOverride = "Daily GP ($label)",
+            forceNight = (weatherTheme == DailyWeatherTheme.NIGHT),
             forceRandomConditions = false,
             forceIncludeJumps = includeJumps
         ).copy(
             // Daily Challenge has no power-ups along the track; racers get 1 manual Nitro per lap
-            itemSpawns = emptyList()
+            itemSpawns = emptyList(),
+            dailyWeatherTheme = weatherTheme.name
         )
     }
 

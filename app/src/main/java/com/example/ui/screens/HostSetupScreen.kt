@@ -713,7 +713,7 @@ fun HostSetupScreen(
                     SetupSwitchCard(
                         icon = Icons.Default.Thunderstorm,
                         title = "Random Environmental Effects",
-                        description = "Enable dynamic rain puddles, tremors, wind & snow for this multiplayer lobby.",
+                        description = "Enable dynamic rain puddles, meteor showers, tremors, wind & snow for this multiplayer lobby.",
                         checked = draft.hostRandomConditionsOverride == true,
                         testTag = "setup_environmental_effects_switch",
                         onCheckedChange = { enabled ->

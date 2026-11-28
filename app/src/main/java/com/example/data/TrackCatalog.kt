@@ -54,7 +54,8 @@ object TrackCatalog {
         val normalX: Float,
         val normalY: Float,
         val tangentAngleRad: Float,
-        val halfWidth: Float
+        val halfWidth: Float,
+        val zLayer: Int = 0
     )
 
     private class SplineArcTable(
@@ -334,6 +335,48 @@ object TrackCatalog {
                 )
                 TrackDefinition(id, worldW, worldH, spline, boosts, items, props, ramps = ramps)
             }
+
+            TrackId.SKYWAY_OVERPASS -> {
+                // Tabletop Figure-8 Crossover: sweeps clockwise through East loop, then bridges NW over the underpass straight
+                val hw = 104f
+                val ctrl = listOf(
+                    TrackPoint(720f, 1110f, hw),
+                    TrackPoint(1100f, 750f, hw),
+                    TrackPoint(1480f, 380f, hw),
+                    TrackPoint(1850f, 460f, hw),
+                    TrackPoint(1910f, 760f, hw),
+                    TrackPoint(1820f, 1130f, hw),
+                    TrackPoint(1450f, 1190f, hw),
+                    TrackPoint(1100f, 750f, hw, isOverpassControl = true),
+                    TrackPoint(760f, 300f, hw),
+                    TrackPoint(360f, 380f, hw),
+                    TrackPoint(280f, 760f, hw),
+                    TrackPoint(420f, 1230f, hw)
+                )
+                val spline = subdivideClosedSpline(ctrl, samplesPerSegment = 14)
+                val boosts = listOf(
+                    boostAt(spline, 36),
+                    boostAt(spline, 132)
+                )
+                val items = listOf(
+                    itemAt(spline, 24, 0),
+                    itemAt(spline, 54, 1),
+                    itemAt(spline, 76, 2),
+                    itemAt(spline, 118, 3),
+                    itemAt(spline, 146, 4)
+                )
+                val ramps = listOf(
+                    rampAt(spline, 48, impulse = 1.08f),
+                    rampAt(spline, 142, impulse = 1.08f)
+                )
+                val props = listOf(
+                    TrackProp(640f, 750f, 42f, PropShape.PYLON, 0xFF00BFA5, 0xFFFFF8E1, isSolidObstacle = true),
+                    TrackProp(1560f, 750f, 42f, PropShape.CRATE, 0xFF37474F, 0xFF00BFA5, isSolidObstacle = true),
+                    TrackProp(160f, 180f, 46f, PropShape.CRATE, 0xFF263238, 0xFF00BFA5, isSolidObstacle = false),
+                    TrackProp(2040f, 1320f, 46f, PropShape.PYLON, 0xFF00BFA5, 0xFFFFFFFF, isSolidObstacle = false)
+                )
+                TrackDefinition(id, worldW, worldH, spline, boosts, items, props, ramps = ramps)
+            }
         }
     }
 
@@ -347,17 +390,25 @@ object TrackCatalog {
             defaultEditorOval(theme).controlPoints
         }
         val spline = subdivideClosedSpline(safeControl, samplesPerSegment = 14)
+        val hasBridge = spline.any { it.zLayer > 0 }
+
+        fun resolveZ(x: Float, y: Float, existingZ: Int): Int {
+            if (!hasBridge) return existingZ
+            if (existingZ > 0) return existingZ
+            val (idx, dist) = nearestTrackPointForLayerLookup(spline, x, y)
+            return if (dist <= spline[idx].halfWidth * 1.4f) spline[idx].zLayer else 0
+        }
 
         val boosts = data.boostPads.ifEmpty {
             listOf(
                 boostAt(spline, (spline.size * 0.14).toInt()),
                 boostAt(spline, (spline.size * 0.64).toInt())
             )
-        }
+        }.map { pad -> pad.copy(zLayer = resolveZ(pad.x, pad.y, pad.zLayer)) }
         val noTrackItems = data.id.startsWith("drift_") ||
             data.id.startsWith("daily_drift_") ||
             data.id.startsWith("daily_")
-        val items = if (noTrackItems) {
+        val items = (if (noTrackItems) {
             data.itemSpawns
         } else {
             data.itemSpawns.ifEmpty {
@@ -365,8 +416,9 @@ object TrackCatalog {
                     itemAt(spline, (spline.size * frac).toInt(), idx)
                 }
             }
-        }
-        val ramps = data.ramps
+        }).map { item -> item.copy(zLayer = resolveZ(item.x, item.y, item.zLayer)) }
+        val ramps = data.ramps.map { ramp -> ramp.copy(zLayer = resolveZ(ramp.x, ramp.y, ramp.zLayer)) }
+        val puddles = data.puddles.map { puddle -> puddle.copy(zLayer = resolveZ(puddle.x, puddle.y, puddle.zLayer)) }
         return TrackDefinition(
             id = theme,
             worldWidth = worldW,
@@ -376,11 +428,12 @@ object TrackCatalog {
             itemSpawns = items,
             props = data.props,
             ramps = ramps,
-            puddles = data.puddles,
+            puddles = puddles,
             customId = data.id,
             customName = data.name,
             isNightTrack = data.isNightTrack,
-            randomConditionsEnabled = false
+            randomConditionsEnabled = false,
+            dailyWeatherTheme = data.dailyWeatherTheme
         )
     }
 
@@ -571,7 +624,7 @@ object TrackCatalog {
                 val shape = when (theme) {
                     TrackId.BACKYARD_DIRT -> PropShape.TREE
                     TrackId.SANDBOX_DUNES -> PropShape.CACTUS
-                    TrackId.NEON_ROOFTOP -> PropShape.PYLON
+                    TrackId.NEON_ROOFTOP, TrackId.SKYWAY_OVERPASS -> PropShape.PYLON
                     TrackId.WAREHOUSE_DRIFT -> PropShape.CRATE
                     TrackId.LIVING_ROOM_GP -> PropShape.CIRCLE
                 }
@@ -626,7 +679,8 @@ object TrackCatalog {
             angleRad = angle,
             radius = 48f,
             impulse = impulse,
-            lateralOffset = clampedLat
+            lateralOffset = clampedLat,
+            zLayer = p.zLayer
         )
     }
 
@@ -648,7 +702,8 @@ object TrackCatalog {
             x = p.x + perpX * shift,
             y = p.y + perpY * shift,
             angleRad = angle,
-            lateralOffset = clampedLat
+            lateralOffset = clampedLat,
+            zLayer = p.zLayer
         )
     }
 
@@ -677,13 +732,15 @@ object TrackCatalog {
         return ItemBoxSpawn(
             id = id,
             x = p.x + perpX * offset,
-            y = p.y + perpY * offset
+            y = p.y + perpY * offset,
+            zLayer = p.zLayer
         )
     }
 
     fun subdivideClosedSpline(
         points: List<TrackPoint>,
-        samplesPerSegment: Int
+        samplesPerSegment: Int,
+        resolveOverpasses: Boolean = true
     ): List<TrackPoint> {
         val result = ArrayList<TrackPoint>(points.size * samplesPerSegment)
         val n = points.size
@@ -700,7 +757,173 @@ object TrackCatalog {
                 result.add(TrackPoint(x, y, w))
             }
         }
-        return result
+        return if (resolveOverpasses && points.size >= 4) {
+            resolveSplineOverpasses(result, points, samplesPerSegment)
+        } else {
+            result
+        }
+    }
+
+    private fun resolveSplineOverpasses(
+        spline: MutableList<TrackPoint>,
+        controlPoints: List<TrackPoint>,
+        samplesPerSegment: Int
+    ): List<TrackPoint> {
+        val n = spline.size
+        if (n < 12) return spline
+
+        val cumLen = FloatArray(n + 1)
+        var totalLen = 0f
+        for (i in 0 until n) {
+            cumLen[i] = totalLen
+            val a = spline[i]
+            val b = spline[(i + 1) % n]
+            totalLen += hypot(b.x - a.x, b.y - a.y)
+        }
+        cumLen[n] = totalLen
+        if (totalLen <= 1f) return spline
+
+        fun arcDist(aIdx: Int, bIdx: Int): Float {
+            val d = abs(cumLen[aIdx] - cumLen[bIdx])
+            return kotlin.math.min(d, totalLen - d)
+        }
+
+        val explicitBridge = BooleanArray(n)
+        val ctrlCount = controlPoints.size
+        for (cIdx in 0 until ctrlCount) {
+            if (!controlPoints[cIdx].isOverpassControl) continue
+            val nextC = (cIdx + 1) % ctrlCount
+            val centerSample = (cIdx * samplesPerSegment).mod(n)
+            if (controlPoints[nextC].isOverpassControl) {
+                for (step in 0 until samplesPerSegment) {
+                    explicitBridge[(cIdx * samplesPerSegment + step).mod(n)] = true
+                }
+            } else {
+                for (k in 0 until n) {
+                    if (arcDist(k, centerSample) <= 135f) {
+                        explicitBridge[k] = true
+                    }
+                }
+            }
+        }
+
+        val minIdxGap = kotlin.math.min(10, n / 5).coerceAtLeast(4)
+        data class Crossing(val upperIdx: Int, val lowerIdx: Int, val spanHalfLen: Float)
+        val crossings = mutableListOf<Crossing>()
+
+        for (i in 0 until n) {
+            val a1 = spline[i]
+            val a2 = spline[(i + 1) % n]
+            val aMinX = kotlin.math.min(a1.x, a2.x)
+            val aMaxX = kotlin.math.max(a1.x, a2.x)
+            val aMinY = kotlin.math.min(a1.y, a2.y)
+            val aMaxY = kotlin.math.max(a1.y, a2.y)
+            for (j in (i + 1) until n) {
+                val idxGap = kotlin.math.min(j - i, n - (j - i))
+                if (idxGap < minIdxGap) continue
+                if (arcDist(i, j) < 160f) continue
+                val b1 = spline[j]
+                val b2 = spline[(j + 1) % n]
+                if (aMaxX < kotlin.math.min(b1.x, b2.x) || kotlin.math.max(b1.x, b2.x) < aMinX) continue
+                if (aMaxY < kotlin.math.min(b1.y, b2.y) || kotlin.math.max(b1.y, b2.y) < aMinY) continue
+                if (segmentsIntersect(a1.x, a1.y, a2.x, a2.y, b1.x, b1.y, b2.x, b2.y)) {
+                    val iExplicit = explicitBridge[i]
+                    val jExplicit = explicitBridge[j]
+                    val upperIdx = if (iExplicit && !jExplicit) i else j
+                    val lowerIdx = if (upperIdx == i) j else i
+                    // Avoid duplicate crossing records within 85px of an already captured crossing on the same upper leg
+                    val alreadyNear = crossings.any { prev ->
+                        arcDist(prev.upperIdx, upperIdx) < 85f && arcDist(prev.lowerIdx, lowerIdx) < 85f
+                    }
+                    if (!alreadyNear) {
+                        val span = (spline[lowerIdx].halfWidth + 76f).coerceIn(170f, 240f)
+                        crossings.add(Crossing(upperIdx, lowerIdx, span))
+                    }
+                }
+            }
+        }
+
+        val isBridgeCore = BooleanArray(n)
+        for (cIdx in 0 until n) {
+            if (explicitBridge[cIdx]) isBridgeCore[cIdx] = true
+        }
+        for (c in crossings) {
+            val lowerClearance = (spline[c.upperIdx].halfWidth + 68f)
+            for (k in 0 until n) {
+                if (arcDist(k, c.upperIdx) <= c.spanHalfLen && arcDist(k, c.lowerIdx) >= lowerClearance) {
+                    isBridgeCore[k] = true
+                }
+            }
+        }
+
+        if (isBridgeCore.none { it }) {
+            return spline
+        }
+
+        val rampLen = 115f
+        for (k in 0 until n) {
+            if (isBridgeCore[k]) {
+                spline[k] = spline[k].copy(zLayer = 1, elevation = 1f)
+            } else {
+                var minDist = Float.MAX_VALUE
+                for (m in 0 until n) {
+                    if (!isBridgeCore[m]) continue
+                    val d = arcDist(k, m)
+                    if (d < minDist) minDist = d
+                }
+                if (minDist < rampLen) {
+                    val u = (1f - minDist / rampLen).coerceIn(0f, 1f)
+                    val elev = u * u * (3f - 2f * u)
+                    val layer = if (elev >= 0.45f) 1 else 0
+                    spline[k] = spline[k].copy(zLayer = layer, elevation = elev)
+                } else {
+                    spline[k] = spline[k].copy(zLayer = 0, elevation = 0f)
+                }
+            }
+        }
+        return spline
+    }
+
+    private fun segmentsIntersect(
+        ax1: Float, ay1: Float, ax2: Float, ay2: Float,
+        bx1: Float, by1: Float, bx2: Float, by2: Float
+    ): Boolean {
+        fun orient(px: Float, py: Float, qx: Float, qy: Float, rx: Float, ry: Float): Float {
+            return (qx - px) * (ry - py) - (qy - py) * (rx - px)
+        }
+        val d1 = orient(bx1, by1, bx2, by2, ax1, ay1)
+        val d2 = orient(bx1, by1, bx2, by2, ax2, ay2)
+        val d3 = orient(ax1, ay1, ax2, ay2, bx1, by1)
+        val d4 = orient(ax1, ay1, ax2, ay2, bx2, by2)
+        if (((d1 > 0f && d2 < 0f) || (d1 < 0f && d2 > 0f)) &&
+            ((d3 > 0f && d4 < 0f) || (d3 < 0f && d4 > 0f))
+        ) {
+            return true
+        }
+        val eps = 1e-3f
+        fun onSeg(px: Float, py: Float, qx: Float, qy: Float, rx: Float, ry: Float): Boolean {
+            return rx in kotlin.math.min(px, qx) - eps..kotlin.math.max(px, qx) + eps &&
+                ry in kotlin.math.min(py, qy) - eps..kotlin.math.max(py, qy) + eps
+        }
+        return (abs(d1) <= eps && onSeg(bx1, by1, bx2, by2, ax1, ay1)) ||
+            (abs(d2) <= eps && onSeg(bx1, by1, bx2, by2, ax2, ay2)) ||
+            (abs(d3) <= eps && onSeg(ax1, ay1, ax2, ay2, bx1, by1)) ||
+            (abs(d4) <= eps && onSeg(ax1, ay1, ax2, ay2, bx2, by2))
+    }
+
+    private fun nearestTrackPointForLayerLookup(pts: List<TrackPoint>, x: Float, y: Float): Pair<Int, Float> {
+        var bestIdx = 0
+        var bestDistSq = Float.MAX_VALUE
+        for (i in pts.indices) {
+            val dx = x - pts[i].x
+            val dy = y - pts[i].y
+            val d2 = dx * dx + dy * dy
+            if (d2 < bestDistSq) {
+                bestDistSq = d2
+                bestIdx = i
+            }
+        }
+        return bestIdx to kotlin.math.sqrt(bestDistSq)
     }
 
     private fun catmullRom(p0: Float, p1: Float, p2: Float, p3: Float, t: Float): Float {
@@ -717,11 +940,12 @@ object TrackCatalog {
     /**
      * Returns (closestIndex, distanceToCenterline) for physics & checkpoint checks.
      */
-    fun nearestTrackPoint(track: TrackDefinition, x: Float, y: Float): Pair<Int, Float> {
+    fun nearestTrackPoint(track: TrackDefinition, x: Float, y: Float, preferredZLayer: Int? = null): Pair<Int, Float> {
         var bestIdx = 0
         var bestDistSq = Float.MAX_VALUE
         val pts = track.centerline
         for (i in pts.indices) {
+            if (preferredZLayer != null && pts[i].zLayer != preferredZLayer) continue
             val dx = x - pts[i].x
             val dy = y - pts[i].y
             val d2 = dx * dx + dy * dy
@@ -729,6 +953,9 @@ object TrackCatalog {
                 bestDistSq = d2
                 bestIdx = i
             }
+        }
+        if (preferredZLayer != null && bestDistSq == Float.MAX_VALUE) {
+            return nearestTrackPoint(track, x, y, preferredZLayer = null)
         }
         return bestIdx to kotlin.math.sqrt(bestDistSq)
     }
@@ -742,7 +969,8 @@ object TrackCatalog {
         x: Float,
         y: Float,
         hintIdx: Int,
-        windowRadius: Int = 20
+        windowRadius: Int = 20,
+        preferredZLayer: Int? = null
     ): Pair<Int, Float> {
         val pts = track.centerline
         if (pts.isEmpty()) return 0 to 0f
@@ -764,7 +992,16 @@ object TrackCatalog {
         return if (localDist <= fallbackThresh) {
             bestIdx to localDist
         } else {
-            nearestTrackPoint(track, x, y)
+            val layerMatch = if (preferredZLayer != null) {
+                nearestTrackPoint(track, x, y, preferredZLayer)
+            } else {
+                nearestTrackPoint(track, x, y)
+            }
+            if (preferredZLayer != null && layerMatch.second > pts[layerMatch.first].halfWidth * 3f) {
+                nearestTrackPoint(track, x, y, preferredZLayer = null)
+            } else {
+                layerMatch
+            }
         }
     }
 
@@ -785,13 +1022,14 @@ object TrackCatalog {
         x: Float,
         y: Float,
         hintIdx: Int,
-        windowRadius: Int = 22
+        windowRadius: Int = 22,
+        preferredZLayer: Int? = null
     ): SegmentProjection {
         val pts = track.centerline
         if (pts.isEmpty()) return SegmentProjection(0, x, y, 112f, 0f)
         val n = pts.size
 
-        fun searchRange(indices: IntProgression): SegmentProjection {
+        fun searchRange(indices: IntProgression, layerFilter: Int? = null): SegmentProjection {
             var bestIdx = hintIdx.mod(n)
             var bestX = pts[bestIdx].x
             var bestY = pts[bestIdx].y
@@ -801,6 +1039,7 @@ object TrackCatalog {
                 val i = raw.mod(n)
                 val a = pts[i]
                 val b = pts[(i + 1) % n]
+                if (layerFilter != null && a.zLayer != layerFilter && b.zLayer != layerFilter) continue
                 val abx = b.x - a.x
                 val aby = b.y - a.y
                 val lenSq = abx * abx + aby * aby
@@ -822,7 +1061,8 @@ object TrackCatalog {
                     bestHw = a.halfWidth + (b.halfWidth - a.halfWidth) * t
                 }
             }
-            return SegmentProjection(bestIdx, bestX, bestY, bestHw, kotlin.math.sqrt(bestDistSq))
+            val dist = if (bestDistSq == Float.MAX_VALUE) Float.MAX_VALUE else kotlin.math.sqrt(bestDistSq)
+            return SegmentProjection(bestIdx, bestX, bestY, bestHw, dist)
         }
 
         val local = searchRange((hintIdx - windowRadius)..(hintIdx + windowRadius))
@@ -830,7 +1070,12 @@ object TrackCatalog {
         return if (local.distance <= fallbackThresh) {
             local
         } else {
-            searchRange(0 until n)
+            val layerGlobal = if (preferredZLayer != null) searchRange(0 until n, preferredZLayer) else null
+            if (layerGlobal != null && layerGlobal.distance <= layerGlobal.halfWidth * 3f) {
+                layerGlobal
+            } else {
+                searchRange(0 until n)
+            }
         }
     }
 
@@ -953,7 +1198,7 @@ object TrackCatalog {
                         )
                     )
                 }
-                subdivideClosedSpline(withMidpoints, samplesPerSegment = 6)
+                subdivideClosedSpline(withMidpoints, samplesPerSegment = 6, resolveOverpasses = false)
             }
 
             ArenaShape.CLOVER -> {
@@ -1399,7 +1644,12 @@ object TrackCatalog {
      * returning cumulative arc-length `arcS`, signed lateral offset in world px
      * (negative = Left of travel direction, positive = Right), and local halfWidth.
      */
-    fun projectOntoCenterline(pts: List<TrackPoint>, x: Float, y: Float): SplineProjection {
+    fun projectOntoCenterline(
+        pts: List<TrackPoint>,
+        x: Float,
+        y: Float,
+        zLayerFilter: Int? = null
+    ): SplineProjection {
         val n = pts.size
         if (n < 2) {
             return SplineProjection(0f, 0f, 112f, x, y, 0f, 0f, 1f, 0f)
@@ -1418,6 +1668,7 @@ object TrackCatalog {
         for (i in 0 until n) {
             val a = pts[i]
             val b = pts[(i + 1) % n]
+            if (zLayerFilter != null && a.zLayer != zLayerFilter && b.zLayer != zLayerFilter) continue
             val abx = b.x - a.x
             val aby = b.y - a.y
             val lenSq = abx * abx + aby * aby
@@ -1448,6 +1699,9 @@ object TrackCatalog {
                 bestNy = ny
             }
         }
+        if (zLayerFilter != null && bestDistSq == Float.MAX_VALUE) {
+            return projectOntoCenterline(pts, x, y, zLayerFilter = null)
+        }
         return SplineProjection(
             arcS = bestArcS,
             lateralOffsetPx = bestLat,
@@ -1461,9 +1715,12 @@ object TrackCatalog {
         )
     }
 
-    private fun rawPointAtArc(pts: List<TrackPoint>, table: SplineArcTable, rawArcS: Float): Triple<Float, Float, Float> {
+    private fun rawPointAtArc(pts: List<TrackPoint>, table: SplineArcTable, rawArcS: Float): Pair<TrackPoint, TrackPoint> {
         val total = table.totalLength
-        if (total <= 1e-3f || pts.isEmpty()) return Triple(0f, 0f, 112f)
+        if (total <= 1e-3f || pts.isEmpty()) {
+            val fallback = TrackPoint(0f, 0f, 112f)
+            return fallback to fallback
+        }
         val s = ((rawArcS % total) + total) % total
         var lo = 0
         var hi = pts.size - 1
@@ -1477,31 +1734,35 @@ object TrackCatalog {
         val u = ((s - segStart) / segLen).coerceIn(0f, 1f)
         val a = pts[i]
         val b = pts[(i + 1) % pts.size]
-        return Triple(
-            a.x + (b.x - a.x) * u,
-            a.y + (b.y - a.y) * u,
-            a.halfWidth + (b.halfWidth - a.halfWidth) * u
+        val pt = TrackPoint(
+            x = a.x + (b.x - a.x) * u,
+            y = a.y + (b.y - a.y) * u,
+            halfWidth = a.halfWidth + (b.halfWidth - a.halfWidth) * u,
+            zLayer = if (u < 0.5f) a.zLayer else b.zLayer,
+            elevation = a.elevation + (b.elevation - a.elevation) * u
         )
+        return pt to a
     }
 
     fun sampleSplineAtArc(pts: List<TrackPoint>, rawArcS: Float): SplineSample {
         val table = getSplineArcTable(pts)
-        val (x, y, hw) = rawPointAtArc(pts, table, rawArcS)
+        val (pt, _) = rawPointAtArc(pts, table, rawArcS)
         val eps = 10f.coerceAtMost(table.totalLength * 0.05f).coerceAtLeast(1f)
-        val (bx, by, _) = rawPointAtArc(pts, table, rawArcS - eps)
-        val (fx, fy, _) = rawPointAtArc(pts, table, rawArcS + eps)
-        val dx = fx - bx
-        val dy = fy - by
+        val (bPt, _) = rawPointAtArc(pts, table, rawArcS - eps)
+        val (fPt, _) = rawPointAtArc(pts, table, rawArcS + eps)
+        val dx = fPt.x - bPt.x
+        val dy = fPt.y - bPt.y
         val len = hypot(dx, dy).coerceAtLeast(1e-4f)
         val tx = dx / len
         val ty = dy / len
         return SplineSample(
-            x = x,
-            y = y,
+            x = pt.x,
+            y = pt.y,
             normalX = -ty,
             normalY = tx,
             tangentAngleRad = atan2(ty, tx),
-            halfWidth = hw
+            halfWidth = pt.halfWidth,
+            zLayer = pt.zLayer
         )
     }
 
@@ -1514,7 +1775,7 @@ object TrackCatalog {
         newLateralOffset: Float
     ): TrackRamp {
         if (track.isArena || track.centerline.size < 4) return ramp
-        val proj = projectOntoCenterline(track.centerline, ramp.x, ramp.y)
+        val proj = projectOntoCenterline(track.centerline, ramp.x, ramp.y, ramp.zLayer)
         val clampedLat = newLateralOffset.coerceIn(-MAX_LATERAL_OFFSET, MAX_LATERAL_OFFSET)
         val shift = clampedLat * proj.halfWidth
         return ramp.copy(
@@ -1534,7 +1795,7 @@ object TrackCatalog {
         newLateralOffset: Float
     ): BoostPad {
         if (track.isArena || track.centerline.size < 4) return pad
-        val proj = projectOntoCenterline(track.centerline, pad.x, pad.y)
+        val proj = projectOntoCenterline(track.centerline, pad.x, pad.y, pad.zLayer)
         val clampedLat = newLateralOffset.coerceIn(-MAX_LATERAL_OFFSET, MAX_LATERAL_OFFSET)
         val shift = clampedLat * proj.halfWidth
         return pad.copy(
@@ -1553,7 +1814,7 @@ object TrackCatalog {
     fun gravelPatchForRamp(track: TrackDefinition, ramp: TrackRamp): GravelPatch? {
         if (track.isStunt) return null
         if (!track.isArena && track.centerline.size >= 4) {
-            val proj = projectOntoCenterline(track.centerline, ramp.x, ramp.y)
+            val proj = projectOntoCenterline(track.centerline, ramp.x, ramp.y, ramp.zLayer)
             val totalLen = proj.totalLength
             if (totalLen < 24f) return null
             val startS = proj.arcS + GRAVEL_START_OFFSET
@@ -1581,7 +1842,8 @@ object TrackCatalog {
                 startArcS = startS,
                 endArcS = endS,
                 totalSplineLength = totalLen,
-                isSplineRibbon = true
+                isSplineRibbon = true,
+                zLayer = ramp.zLayer
             )
         }
 
@@ -1610,7 +1872,8 @@ object TrackCatalog {
             halfWidth = halfW,
             leftEdge = leftEdge,
             rightEdge = rightEdge,
-            isSplineRibbon = false
+            isSplineRibbon = false,
+            zLayer = ramp.zLayer
         )
     }
 
@@ -1626,16 +1889,17 @@ object TrackCatalog {
      * Returns true when world point (x, y) lies inside the spline-bounded gravel ribbon
      * immediately behind any non-Stunt jump ramp (exact match with rendered curb-inset polygon).
      */
-    fun isPointOnGravelPatch(track: TrackDefinition, x: Float, y: Float): Boolean {
+    fun isPointOnGravelPatch(track: TrackDefinition, x: Float, y: Float, zLayer: Int? = null): Boolean {
         if (track.isStunt || track.ramps.isEmpty()) return false
         val patches = gravelPatchesForTrack(track)
         if (patches.isEmpty()) return false
 
         if (!track.isArena && track.centerline.size >= 4) {
-            val proj = projectOntoCenterline(track.centerline, x, y)
+            val proj = projectOntoCenterline(track.centerline, x, y, zLayer)
             val maxLat = (proj.halfWidth - GRAVEL_EDGE_INSET).coerceAtLeast(16f)
             if (abs(proj.lateralOffsetPx) > maxLat) return false
             for (patch in patches) {
+                if (zLayer != null && patch.zLayer != zLayer) continue
                 val totalLen = patch.totalSplineLength
                 if (totalLen <= 1e-3f) continue
                 val deltaS = ((proj.arcS - patch.startArcS) % totalLen + totalLen) % totalLen

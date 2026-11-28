@@ -77,7 +77,8 @@ data class ItemBoxState(
     val x: Float,
     val y: Float,
     val available: Boolean = true,
-    val respawnMs: Long = 0L
+    val respawnMs: Long = 0L,
+    val zLayer: Int = 0
 )
 
 @JsonClass(generateAdapter = true)
@@ -88,7 +89,8 @@ data class TrackHazard(
     val y: Float,
     val radius: Float = 32f,
     val remainingMs: Long = 10000L,
-    val type: String = HazardType.GLUE_SLICK.name
+    val type: String = HazardType.GLUE_SLICK.name,
+    val zLayer: Int = 0
 ) {
     val hazardTypeEnum: HazardType
         get() = runCatching { HazardType.valueOf(type) }.getOrDefault(HazardType.GLUE_SLICK)
@@ -135,6 +137,7 @@ data class ActiveRocketState(
     val x: Float,
     val y: Float,
     val angleRad: Float,
-    val remainingMs: Long = 6000L
+    val remainingMs: Long = 6000L,
+    val zLayer: Int = 0
 )
 

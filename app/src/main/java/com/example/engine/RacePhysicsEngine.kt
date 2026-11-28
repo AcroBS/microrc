@@ -6,12 +6,14 @@ import com.example.model.ArenaFlagState
 import com.example.model.CarSpeedPreset
 import com.example.model.CarVisualUpgrades
 import com.example.model.ControlInput
+import com.example.model.DailyWeatherTheme
 import com.example.model.ExternalEventType
 import com.example.model.FieldPickupType
 import com.example.model.GameMode
 import com.example.model.HazardType
 import com.example.model.ItemBoxState
 import com.example.model.LobbyPlayer
+import com.example.model.MeteorStrikeState
 import com.example.model.PortalPairState
 import com.example.model.PowerUpType
 import com.example.model.PropShape
@@ -21,12 +23,14 @@ import com.example.model.RaceSnapshot
 import com.example.model.RacerState
 import com.example.model.RcCarType
 import com.example.model.StuntVariant
+import com.example.model.TrackCrater
 import com.example.model.TrackDefinition
 import com.example.model.TrackExplosion
 import com.example.model.TrackFieldPickup
 import com.example.model.TrackHazard
 import com.example.model.TrackPoint
 import com.example.model.TrackPuddle
+import com.example.model.TrackSnowPatch
 import com.example.model.WinCondition
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.PI
@@ -121,7 +125,9 @@ class RacePhysicsEngine(
         var launchEvaluated: Boolean = false,
         var launchBoostMs: Long = 0L,
         var perfectLaunchBannerMs: Long = 0L,
-        var wheelspinSmokeMs: Long = 0L
+        var wheelspinSmokeMs: Long = 0L,
+        var zLayer: Int = 0,
+        var elevation: Float = 0f
     )
 
     private data class MutableRocket(
@@ -134,7 +140,8 @@ class RacePhysicsEngine(
         var prevY: Float = y,
         var angleRad: Float,
         val speed: Float,
-        var remainingMs: Long
+        var remainingMs: Long,
+        var zLayer: Int = 0
     )
 
     private val isStuntMode: Boolean = track.isStunt || rules.gameModeEnum == GameMode.STUNTS
@@ -165,10 +172,24 @@ class RacePhysicsEngine(
         null
     }
 
+    private val meteorShowerAllowed: Boolean =
+        isMultiplayerSession && !isDailyChallenge && racers_placeholder_guard(players.size) && !isStuntMode
+
+    private val fixedDailyWeatherTheme: DailyWeatherTheme? = if (stuntController == null) {
+        track.dailyWeatherTheme?.let { raw ->
+            runCatching { DailyWeatherTheme.valueOf(raw) }.getOrNull()
+        }
+    } else {
+        null
+    }
+
+    private fun racers_placeholder_guard(count: Int): Boolean = count >= 2
+
     private val racers: MutableList<MutableRacer> = players.mapIndexed { idx, p ->
         val (sx, sy, angle) = TrackCatalog.gridStartTransform(track, idx)
         val car = runCatching { RcCarType.valueOf(p.carType) }.getOrDefault(RcCarType.VOLT_BUGGY)
         val startTrackIdx = (track.centerline.size - 4 - (idx / 2) * 3).mod(track.centerline.size.coerceAtLeast(1))
+        val startPt = track.centerline.getOrNull(startTrackIdx)
         MutableRacer(
             playerId = p.id,
             name = p.name,
@@ -185,12 +206,14 @@ class RacePhysicsEngine(
             botLaneOffset = ((idx % 3) - 1) * 26f,
             minesAvailable = 0,
             lastMineGrantedLap = 1,
-            botMineDelayMs = 0L
+            botMineDelayMs = 0L,
+            zLayer = startPt?.zLayer ?: 0,
+            elevation = startPt?.elevation ?: 0f
         )
     }.toMutableList()
 
     private val itemBoxes: MutableList<ItemBoxState> = track.itemSpawns.map {
-        ItemBoxState(id = it.id, x = it.x, y = it.y, available = true, respawnMs = 0L)
+        ItemBoxState(id = it.id, x = it.x, y = it.y, available = true, respawnMs = 0L, zLayer = it.zLayer)
     }.toMutableList()
 
     private val hazards: MutableList<TrackHazard> = mutableListOf()
@@ -204,6 +227,7 @@ class RacePhysicsEngine(
 
     // Random direct-trigger track power-ups (Position Swap double-arrow & 5s Steering Invert)
     private val fieldPickups: MutableList<TrackFieldPickup> = mutableListOf()
+    private val fieldPickupZLayers = mutableMapOf<Int, Int>()
     private var nextFieldPickupId = 1
     private var nextFieldPickupSpawnMs: Long = random.nextLong(3600L, 6200L)
     private var lastFieldPickupType: FieldPickupType? = null
@@ -232,7 +256,7 @@ class RacePhysicsEngine(
 
     // Random external weather/quake event state (owned by track, overridable by multiplayer host)
     private val effectiveRandomConditionsEnabled: Boolean =
-        !isStuntMode && rules.effectiveRandomConditions(track)
+        !isStuntMode && fixedDailyWeatherTheme == null && rules.effectiveRandomConditions(track)
     private var activeEvent: ExternalEventType = ExternalEventType.NONE
     private var eventRemainingMs: Long = 0L
     private var nextEventCooldownMs: Long = if (effectiveRandomConditionsEnabled) {
@@ -243,7 +267,15 @@ class RacePhysicsEngine(
     private var lastEventType: ExternalEventType = ExternalEventType.NONE
     private var windAngleRad: Float = 0f
     private var windStrength: Float = 0f
+    private var dailyWindBaseAngle: Float = 0f
     private val rainPuddles: MutableList<TrackPuddle> = mutableListOf()
+    private val snowPatches: MutableList<TrackSnowPatch> = mutableListOf()
+    private val scorchedCraters: MutableList<TrackCrater> = mutableListOf()
+    private val meteorStrikes: MutableList<MeteorStrikeState> = mutableListOf()
+    private var nextMeteorStrikeId = 1
+    private var nextCraterId = 1
+    private var nextMeteorSpawnMs = 0L
+    private var meteorImpactSeq = 0
     private var quakePulseTimerMs: Long = 0L
 
     private val latestInputs = ConcurrentHashMap<String, ControlInput>()
@@ -273,6 +305,7 @@ class RacePhysicsEngine(
             if (isDailyChallenge || isDriftMode) {
                 itemBoxes.clear()
                 fieldPickups.clear()
+                fieldPickupZLayers.clear()
                 nextFieldPickupSpawnMs = Long.MAX_VALUE
                 racers.forEach { r ->
                     r.heldPowerUp = PowerUpType.TURBO_NITRO
@@ -285,6 +318,39 @@ class RacePhysicsEngine(
                 }
             } else {
                 randomizeAllItemBoxes()
+            }
+            applyFixedDailyWeatherIfNeeded()
+        }
+    }
+
+    private fun applyFixedDailyWeatherIfNeeded() {
+        val weather = fixedDailyWeatherTheme ?: return
+        val weatherSeed = computeDeterministicPortalSeed() xor 0x6A09E667L
+        val weatherRng = Random(weatherSeed)
+        when (weather) {
+            DailyWeatherTheme.CLEAR, DailyWeatherTheme.NIGHT -> {
+                activeEvent = ExternalEventType.NONE
+                eventRemainingMs = 0L
+            }
+            DailyWeatherTheme.RAIN -> {
+                activeEvent = ExternalEventType.RAIN
+                lastEventType = ExternalEventType.RAIN
+                eventRemainingMs = 3_600_000L
+                spawnRainPuddles(weatherRng)
+            }
+            DailyWeatherTheme.SNOW -> {
+                activeEvent = ExternalEventType.SNOW
+                lastEventType = ExternalEventType.SNOW
+                eventRemainingMs = 3_600_000L
+                spawnCornerSnowPatches(weatherRng)
+            }
+            DailyWeatherTheme.WINDY -> {
+                activeEvent = ExternalEventType.WIND
+                lastEventType = ExternalEventType.WIND
+                eventRemainingMs = 3_600_000L
+                dailyWindBaseAngle = weatherRng.nextFloat() * (2f * PI.toFloat())
+                windAngleRad = dailyWindBaseAngle
+                windStrength = 0.85f
             }
         }
     }
@@ -397,8 +463,16 @@ class RacePhysicsEngine(
                 boundaryOverride = activePoly
             )
             placed.add(rx to ry)
-            itemBoxes[i] = itemBoxes[i].copy(x = rx, y = ry)
+            val resolvedZ = resolveZLayerForPoint(rx, ry)
+            itemBoxes[i] = itemBoxes[i].copy(x = rx, y = ry, zLayer = resolvedZ)
         }
+    }
+
+    private fun resolveZLayerForPoint(x: Float, y: Float, preferredZLayer: Int? = null): Int {
+        if (track.isArena || track.isStunt || track.centerline.isEmpty()) return 0
+        val (idx, dist) = TrackCatalog.nearestTrackPoint(track, x, y, preferredZLayer = preferredZLayer)
+        val pt = track.centerline[idx]
+        return if (dist <= pt.halfWidth * 1.4f) pt.zLayer else 0
     }
 
     private fun setupStuntTurn(turnIdx: Int, variant: StuntVariant) {
@@ -502,6 +576,34 @@ class RacePhysicsEngine(
         rainPuddles.addAll(puddles)
     }
 
+    fun spawnMeteorStrikeForTest(
+        x: Float,
+        y: Float,
+        warningMs: Long = METEOR_WARNING_DURATION_MS,
+        radius: Float = 88f,
+        zLayer: Int = 0
+    ) {
+        if (!meteorShowerAllowed) return
+        if (activeEvent != ExternalEventType.METEOR_SHOWER) {
+            activeEvent = ExternalEventType.METEOR_SHOWER
+            lastEventType = ExternalEventType.METEOR_SHOWER
+            eventRemainingMs = (warningMs + 3000L).coerceAtLeast(5000L)
+        }
+        meteorStrikes.clear()
+        nextMeteorSpawnMs = (warningMs + 5000L).coerceAtLeast(5000L)
+        meteorStrikes.add(
+            MeteorStrikeState(
+                id = nextMeteorStrikeId++,
+                x = x,
+                y = y,
+                radius = radius,
+                countdownMs = warningMs.coerceAtLeast(50L),
+                totalWarningMs = warningMs.coerceAtLeast(50L),
+                zLayer = zLayer
+            )
+        )
+    }
+
     fun givePowerUpForTest(playerId: String, powerUp: PowerUpType, triggerImmediately: Boolean = false) {
         val racer = racers.find { it.playerId == playerId } ?: return
         racer.heldPowerUp = powerUp
@@ -571,10 +673,15 @@ class RacePhysicsEngine(
             clearExternalEvent()
             return
         }
+        if (type == ExternalEventType.METEOR_SHOWER && !meteorShowerAllowed) {
+            clearExternalEvent()
+            return
+        }
         activeEvent = type
         lastEventType = type
         eventRemainingMs = durationMs.coerceAtLeast(1000L)
         rainPuddles.clear()
+        snowPatches.clear()
         windStrength = 0f
         quakePulseTimerMs = 0L
 
@@ -597,10 +704,15 @@ class RacePhysicsEngine(
                 setBanner("GUSTY WIND! Tailwind boosts, crosswind drifts!", 2600L)
             }
             ExternalEventType.SNOW -> {
-                setBanner("SNOWFALL! Icy surface — expect skidding!", 2600L)
+                spawnCornerSnowPatches()
+                setBanner("SNOWFALL! Slick snow on corners — expect skidding!", 2600L)
             }
             ExternalEventType.DAY_NIGHT -> {
                 setBanner("NIGHTFALL! Headlights on!", 2600L)
+            }
+            ExternalEventType.METEOR_SHOWER -> {
+                nextMeteorSpawnMs = 320L
+                setBanner("METEOR SHOWER! Dodge the glowing impact rings!", 2600L)
             }
             ExternalEventType.NONE -> Unit
         }
@@ -613,6 +725,7 @@ class RacePhysicsEngine(
         eventRemainingMs = 0L
         windStrength = 0f
         rainPuddles.clear()
+        snowPatches.clear()
         nextEventCooldownMs = if (effectiveRandomConditionsEnabled) {
             random.nextLong(8500L, 14000L)
         } else {
@@ -631,16 +744,16 @@ class RacePhysicsEngine(
     private fun currentArenaPolygon(): List<TrackPoint> =
         TrackCatalog.scaledArenaPolygon(track, arenaSuddenDeathStage)
 
-    private fun spawnRainPuddles() {
+    private fun spawnRainPuddles(rng: Random = random) {
         if (track.isArena) {
             val activePoly = currentArenaPolygon()
             val shrinkScale = TrackCatalog.arenaShrinkScaleForStage(arenaSuddenDeathStage)
-            val count = if (arenaSuddenDeathStage >= 2) random.nextInt(4, 7) else random.nextInt(7, 11)
+            val count = if (arenaSuddenDeathStage >= 2) rng.nextInt(4, 7) else rng.nextInt(7, 11)
             val placed = mutableListOf<Pair<Float, Float>>()
             repeat(count) {
                 val (px, py) = TrackCatalog.sampleArenaInteriorPoint(
                     track = track,
-                    rng = random,
+                    rng = rng,
                     minWallClearance = 135f * shrinkScale,
                     avoidPoints = placed,
                     minAvoidDist = 140f * shrinkScale,
@@ -651,7 +764,8 @@ class RacePhysicsEngine(
                     TrackPuddle(
                         x = px,
                         y = py,
-                        radius = 38f + random.nextFloat() * 14f
+                        radius = 38f + rng.nextFloat() * 14f,
+                        zLayer = 0
                     )
                 )
             }
@@ -660,27 +774,261 @@ class RacePhysicsEngine(
 
         val pts = track.centerline
         if (pts.size < 20) return
-        val count = random.nextInt(6, 10)
+        val count = rng.nextInt(6, 10)
         repeat(count) {
-            val idx = random.nextInt(8, pts.size - 4)
+            val idx = rng.nextInt(8, pts.size - 4)
             val pt = pts[idx]
             val next = pts[(idx + 1) % pts.size]
             val tangAng = atan2(next.y - pt.y, next.x - pt.x)
             val perpX = -sin(tangAng)
             val perpY = cos(tangAng)
-            val offset = (random.nextFloat() * 2f - 1f) * (pt.halfWidth * 0.55f)
+            val offset = (rng.nextFloat() * 2f - 1f) * (pt.halfWidth * 0.55f)
             rainPuddles.add(
                 TrackPuddle(
                     x = pt.x + perpX * offset,
                     y = pt.y + perpY * offset,
-                    radius = 36f + random.nextFloat() * 14f
+                    radius = 36f + rng.nextFloat() * 14f,
+                    zLayer = pt.zLayer
                 )
             )
         }
     }
 
+    private fun spawnCornerSnowPatches(rng: Random = random) {
+        snowPatches.clear()
+        if (track.isArena) {
+            val activePoly = currentArenaPolygon()
+            val shrinkScale = TrackCatalog.arenaShrinkScaleForStage(arenaSuddenDeathStage)
+            val count = 6
+            val placed = mutableListOf<Pair<Float, Float>>()
+            repeat(count) {
+                val (px, py) = TrackCatalog.sampleArenaInteriorPoint(
+                    track = track,
+                    rng = rng,
+                    minWallClearance = 135f * shrinkScale,
+                    avoidPoints = placed,
+                    minAvoidDist = 155f * shrinkScale,
+                    boundaryOverride = activePoly
+                )
+                placed.add(px to py)
+                snowPatches.add(
+                    TrackSnowPatch(
+                        x = px,
+                        y = py,
+                        radius = 48f + rng.nextFloat() * 16f,
+                        zLayer = 0
+                    )
+                )
+            }
+            return
+        }
+
+        val pts = track.centerline
+        val n = pts.size
+        if (n < 24) return
+        val candidates = (6 until (n - 8)).map { idx ->
+            val prev = pts[(idx - 3).mod(n)]
+            val cur = pts[idx]
+            val next = pts[(idx + 3).mod(n)]
+            val a1 = atan2(cur.y - prev.y, cur.x - prev.x)
+            val a2 = atan2(next.y - cur.y, next.x - cur.x)
+            idx to abs(normalizeAngle(a2 - a1))
+        }.sortedByDescending { it.second }
+
+        val minIdxGap = (n / 11).coerceAtLeast(8)
+        val chosenIndices = mutableListOf<Int>()
+        for ((idx, _) in candidates) {
+            val farEnough = chosenIndices.all { other ->
+                val gap = kotlin.math.min(abs(idx - other), n - abs(idx - other))
+                gap >= minIdxGap
+            }
+            if (farEnough) {
+                chosenIndices.add(idx)
+                if (chosenIndices.size >= 8) break
+            }
+        }
+        if (chosenIndices.size < 5) {
+            val step = (n / 6).coerceAtLeast(6)
+            var fallback = 8
+            while (fallback < n - 6 && chosenIndices.size < 6) {
+                if (chosenIndices.none { abs(it - fallback) < 6 }) {
+                    chosenIndices.add(fallback)
+                }
+                fallback += step
+            }
+        }
+
+        for (idx in chosenIndices) {
+            val pt = pts[idx]
+            val next = pts[(idx + 1) % n]
+            val tangAng = atan2(next.y - pt.y, next.x - pt.x)
+            val perpX = -sin(tangAng)
+            val perpY = cos(tangAng)
+            val latBias = (rng.nextFloat() * 2f - 1f) * (pt.halfWidth * 0.34f)
+            snowPatches.add(
+                TrackSnowPatch(
+                    x = pt.x + perpX * latBias,
+                    y = pt.y + perpY * latBias,
+                    radius = (pt.halfWidth * 0.56f).coerceIn(44f, 64f),
+                    zLayer = pt.zLayer
+                )
+            )
+        }
+    }
+
+    private fun updateMeteorStrikes(dtMs: Long) {
+        if (phase != RacePhase.RACING) return
+
+        if (activeEvent == ExternalEventType.METEOR_SHOWER && meteorShowerAllowed) {
+            nextMeteorSpawnMs -= dtMs
+            if (nextMeteorSpawnMs <= 0L && meteorStrikes.size < 3) {
+                spawnNextMeteorStrike()
+                nextMeteorSpawnMs = random.nextLong(850L, 1250L)
+            }
+        }
+
+        if (meteorStrikes.isEmpty()) return
+        val it = meteorStrikes.iterator()
+        while (it.hasNext()) {
+            val strike = it.next()
+            val rem = strike.countdownMs - dtMs
+            if (rem <= 0L) {
+                it.remove()
+                detonateMeteorStrike(strike)
+            } else {
+                val idx = meteorStrikes.indexOf(strike)
+                if (idx >= 0) meteorStrikes[idx] = strike.copy(countdownMs = rem)
+            }
+        }
+    }
+
+    private fun spawnNextMeteorStrike() {
+        if (!meteorShowerAllowed) return
+        if (track.isArena) {
+            val activePoly = currentArenaPolygon()
+            val shrinkScale = TrackCatalog.arenaShrinkScaleForStage(arenaSuddenDeathStage)
+            val (mx, my) = TrackCatalog.sampleArenaInteriorPoint(
+                track = track,
+                rng = random,
+                minWallClearance = 120f * shrinkScale,
+                avoidPoints = meteorStrikes.map { it.x to it.y },
+                minAvoidDist = 140f * shrinkScale,
+                boundaryOverride = activePoly
+            )
+            meteorStrikes.add(
+                MeteorStrikeState(
+                    id = nextMeteorStrikeId++,
+                    x = mx,
+                    y = my,
+                    radius = 88f,
+                    countdownMs = METEOR_WARNING_DURATION_MS,
+                    totalWarningMs = METEOR_WARNING_DURATION_MS,
+                    zLayer = 0
+                )
+            )
+            return
+        }
+
+        val pts = track.centerline
+        if (pts.size < 12) return
+        val anchor = racers.filter { !it.finished }.randomOrNull(random) ?: racers.firstOrNull()
+        val targetIdx = if (anchor != null) {
+            (anchor.lastTrackIdx + random.nextInt(4, 15)).mod(pts.size)
+        } else {
+            random.nextInt(0, pts.size)
+        }
+        val pt = pts[targetIdx]
+        val next = pts[(targetIdx + 1) % pts.size]
+        val tangAng = atan2(next.y - pt.y, next.x - pt.x)
+        val latOffset = (random.nextFloat() * 2f - 1f) * (pt.halfWidth * 0.56f)
+        val mx = pt.x + (-sin(tangAng)) * latOffset
+        val my = pt.y + cos(tangAng) * latOffset
+        meteorStrikes.add(
+            MeteorStrikeState(
+                id = nextMeteorStrikeId++,
+                x = mx,
+                y = my,
+                radius = 88f,
+                countdownMs = METEOR_WARNING_DURATION_MS,
+                totalWarningMs = METEOR_WARNING_DURATION_MS,
+                zLayer = pt.zLayer
+            )
+        )
+    }
+
+    private fun detonateMeteorStrike(strike: MeteorStrikeState) {
+        meteorImpactSeq += 1
+        explosions.add(
+            TrackExplosion(
+                id = nextExplosionId++,
+                x = strike.x,
+                y = strike.y,
+                ageMs = 0L,
+                durationMs = 760L
+            )
+        )
+        scorchedCraters.add(
+            TrackCrater(
+                id = nextCraterId++,
+                x = strike.x,
+                y = strike.y,
+                radius = (strike.radius * 0.72f).coerceIn(52f, 70f),
+                zLayer = strike.zLayer
+            )
+        )
+        while (scorchedCraters.size > 18) {
+            scorchedCraters.removeAt(0)
+        }
+
+        for (r in racers) {
+            if (!track.isArena && r.zLayer != strike.zLayer) continue
+            if (r.jumpZ > 0.35f) continue
+            val hitDist = strike.radius * 0.78f + r.carType.radiusPx * 0.4f
+            if (TrackCatalog.distance(r.x, r.y, strike.x, strike.y) <= hitDist) {
+                r.collisionSeq += 1
+                if (r.shieldMs > 0L) {
+                    r.shieldMs = 0L
+                    setBanner("${r.name}'s Shield blocked a Meteor!", 1500L)
+                } else if (r.overdriveMs == 0L) {
+                    r.stunnedMs = max(r.stunnedMs, 1150L)
+                    r.spinImmunityMs = 2400L
+                    r.vx *= 0.42f
+                    r.vy *= 0.42f
+                    if (isArenaMode && flagCarrierId == r.playerId) {
+                        dropFlagFrom(r, "got hit by a Meteor")
+                    } else {
+                        setBanner("METEOR HIT! ${r.name} spun out!", 1600L)
+                    }
+                }
+            }
+        }
+    }
+
     private fun updateExternalEvents(dtMs: Long, dt: Float) {
-        if (!effectiveRandomConditionsEnabled || phase != RacePhase.RACING) return
+        if (phase != RacePhase.RACING) return
+
+        updateMeteorStrikes(dtMs)
+
+        if (fixedDailyWeatherTheme != null) {
+            eventRemainingMs = if (activeEvent != ExternalEventType.NONE) 3_600_000L else 0L
+            if (fixedDailyWeatherTheme == DailyWeatherTheme.WINDY) {
+                windAngleRad = normalizeAngle(dailyWindBaseAngle + sin(raceTimeMs * 0.00055f) * 0.85f)
+                windStrength = (0.78f + 0.30f * cos(raceTimeMs * 0.00085f)).coerceIn(0.45f, 1.15f)
+                val wx = cos(windAngleRad) * 95f * windStrength
+                val wy = sin(windAngleRad) * 95f * windStrength
+                for (r in racers) {
+                    r.vx += wx * dt
+                    r.vy += wy * dt
+                    val rightX = -sin(r.angleRad)
+                    val rightY = cos(r.angleRad)
+                    val cross = (wx * rightX + wy * rightY) / 95f
+                    r.angleRad = normalizeAngle(r.angleRad + cross * 0.28f * dt)
+                }
+            }
+            return
+        }
+
+        if (!effectiveRandomConditionsEnabled) return
 
         if (activeEvent != ExternalEventType.NONE) {
             eventRemainingMs = (eventRemainingMs - dtMs).coerceAtLeast(0L)
@@ -716,12 +1064,13 @@ class RacePhysicsEngine(
         } else {
             nextEventCooldownMs -= dtMs
             if (nextEventCooldownMs <= 0L) {
-                val choices = listOf(
-                    ExternalEventType.RAIN,
-                    ExternalEventType.EARTHQUAKE,
-                    ExternalEventType.WIND,
-                    ExternalEventType.SNOW
-                ).filter { it != lastEventType }
+                val choices = buildList {
+                    add(ExternalEventType.RAIN)
+                    add(ExternalEventType.EARTHQUAKE)
+                    add(ExternalEventType.WIND)
+                    add(ExternalEventType.SNOW)
+                    if (meteorShowerAllowed) add(ExternalEventType.METEOR_SHOWER)
+                }.filter { it != lastEventType }
                 val nextType = choices[random.nextInt(choices.size)]
                 val duration = random.nextLong(8500L, 12500L)
                 triggerExternalEvent(nextType, durationMs = duration)
@@ -801,9 +1150,11 @@ class RacePhysicsEngine(
                         FieldPickupType.STEER_INVERT -> if (random.nextFloat() < 0.65f) FieldPickupType.POSITION_SWAP else FieldPickupType.STEER_INVERT
                     }
                     lastFieldPickupType = nextType
+                    val id = nextFieldPickupId++
+                    fieldPickupZLayers[id] = resolveZLayerForPoint(pos.first, pos.second)
                     fieldPickups.add(
                         TrackFieldPickup(
-                            id = nextFieldPickupId++,
+                            id = id,
                             x = pos.first,
                             y = pos.second,
                             type = nextType.name,
@@ -1075,7 +1426,13 @@ class RacePhysicsEngine(
                             avoidPoints = avoid,
                             boundaryOverride = if (isArenaMode) currentArenaPolygon() else null
                         )
-                        box.copy(x = nx, y = ny, available = true, respawnMs = 0L)
+                        box.copy(
+                            x = nx,
+                            y = ny,
+                            available = true,
+                            respawnMs = 0L,
+                            zLayer = resolveZLayerForPoint(nx, ny)
+                        )
                     }
                 } else {
                     box.copy(respawnMs = rem)
@@ -1695,11 +2052,14 @@ class RacePhysicsEngine(
                 track = track,
                 x = racer.x,
                 y = racer.y,
-                hintIdx = racer.lastTrackIdx
+                hintIdx = racer.lastTrackIdx,
+                preferredZLayer = racer.zLayer
             )
             closestIdx = idx
             racer.lastTrackIdx = idx
             val trackPt = track.centerline[idx]
+            racer.zLayer = trackPt.zLayer
+            racer.elevation = trackPt.elevation
             isOffRoad = !isAirborne && distToCenter > trackPt.halfWidth
         }
 
@@ -1708,11 +2068,13 @@ class RacePhysicsEngine(
 
         val hitRainPuddle = if (!isAirborne) {
             val trackPlaced = track.puddles.firstOrNull {
-                TrackCatalog.distance(racer.x, racer.y, it.x, it.y) <= it.radius + racer.carType.radiusPx * 0.45f
+                (track.isArena || it.zLayer == racer.zLayer) &&
+                    TrackCatalog.distance(racer.x, racer.y, it.x, it.y) <= it.radius + racer.carType.radiusPx * 0.45f
             }
             trackPlaced ?: if (activeEvent == ExternalEventType.RAIN) {
                 rainPuddles.firstOrNull {
-                    TrackCatalog.distance(racer.x, racer.y, it.x, it.y) <= it.radius + racer.carType.radiusPx * 0.45f
+                    (track.isArena || it.zLayer == racer.zLayer) &&
+                        TrackCatalog.distance(racer.x, racer.y, it.x, it.y) <= it.radius + racer.carType.radiusPx * 0.45f
                 }
             } else {
                 null
@@ -1721,7 +2083,16 @@ class RacePhysicsEngine(
             null
         }
         val inRainPuddle = hitRainPuddle != null
-        val inGravelTrap = !isAirborne && !track.isStunt && TrackCatalog.isPointOnGravelPatch(track, racer.x, racer.y)
+        val inSnowPatch = !isAirborne && snowPatches.any {
+            (track.isArena || it.zLayer == racer.zLayer) &&
+                TrackCatalog.distance(racer.x, racer.y, it.x, it.y) <= it.radius + racer.carType.radiusPx * 0.45f
+        }
+        val inScorchedCrater = !isAirborne && scorchedCraters.any {
+            (track.isArena || it.zLayer == racer.zLayer) &&
+                TrackCatalog.distance(racer.x, racer.y, it.x, it.y) <= it.radius + racer.carType.radiusPx * 0.40f
+        }
+        val inGravelTrap = !isAirborne && !track.isStunt &&
+            TrackCatalog.isPointOnGravelPatch(track, racer.x, racer.y, racer.zLayer)
 
         // Moving hydroplane spin/skid on rain puddles across all modes — retains forward
         // momentum and slides sideways while spinning, distinct from mine/rocket/shock stun.
@@ -1795,7 +2166,7 @@ class RacePhysicsEngine(
             activeEvent == ExternalEventType.RAIN -> 0.93f
             activeEvent == ExternalEventType.SNOW -> 0.89f
             else -> 1.0f
-        }
+        } * if (inScorchedCrater && !hasOverdrive) 0.88f else 1.0f
 
         val hasLaunchBoost = racer.launchBoostMs > 0L
         val hasWheelspin = racer.wheelspinSmokeMs > 0L
@@ -1841,19 +2212,25 @@ class RacePhysicsEngine(
         } else {
             inputSteer
         }
+        val craterSteerScale = if (inScorchedCrater && !hasOverdrive) 0.56f else 1.0f
+        val craterSteerTremor = if (inScorchedCrater && !hasOverdrive) {
+            sin((elapsedMs / 85f) + closestIdx.toFloat()) * 0.20f
+        } else {
+            0f
+        }
         val steer = if (isHydroplaning) {
             // Player keeps partial counter-steer authority while hydroplane yaw pulls the car off-line
             val counterSteerAuthority = 0.48f + 0.52f * (1f - hydroplaneIntensity)
             val hydroYawPull = racer.puddleSkidDir * 0.62f * hydroplaneIntensity +
                 sin((elapsedMs / 95f) + closestIdx.toFloat()) * 0.18f * hydroplaneIntensity
-            (effectiveSteer * counterSteerAuthority + hydroYawPull).coerceIn(-1.2f, 1.2f)
+            (effectiveSteer * counterSteerAuthority * craterSteerScale + hydroYawPull + craterSteerTremor).coerceIn(-1.2f, 1.2f)
         } else {
             val puddleSteerJitter = if (inRainPuddle && !hasOverdrive) {
                 sin((elapsedMs / 110f) + closestIdx.toFloat()) * 0.45f
             } else {
                 0f
             }
-            (effectiveSteer + puddleSteerJitter).coerceIn(-1.15f, 1.15f)
+            (effectiveSteer * craterSteerScale + puddleSteerJitter + craterSteerTremor).coerceIn(-1.15f, 1.15f)
         }
         racer.steerVisual = effectiveSteer
 
@@ -1925,6 +2302,10 @@ class RacePhysicsEngine(
         val airSteerFactor = if (isAirborne) 0.25f else 1.0f
         val hydroGripMult = 0.14f + 0.42f * (1f - hydroplaneIntensity)
 
+        val surfacePatchGripMult =
+            (if (inSnowPatch && !hasOverdrive) 0.52f else 1.0f) *
+                (if (inScorchedCrater && !hasOverdrive) 0.56f else 1.0f)
+
         if (isDriftMode && !isAirborne) {
             val weatherGripMult = when {
                 isHydroplaning -> hydroGripMult
@@ -1933,7 +2314,7 @@ class RacePhysicsEngine(
                 activeEvent == ExternalEventType.RAIN -> 0.72f
                 activeEvent == ExternalEventType.EARTHQUAKE -> 0.80f
                 else -> 1.0f
-            }
+            } * surfacePatchGripMult
             val driftStep = com.example.drift.DriftPhysics.integrateDriftTurn(
                 currentAngleRad = racer.angleRad,
                 forwardVel = forwardVel,
@@ -1981,7 +2362,7 @@ class RacePhysicsEngine(
                     activeEvent == ExternalEventType.RAIN -> 0.72f
                     activeEvent == ExternalEventType.EARTHQUAKE -> 0.80f
                     else -> 1.0f
-                }
+                } * surfacePatchGripMult
                 val grip = racer.carType.lateralGrip *
                     track.id.surfaceGripMultiplier *
                     weatherGripMult *
@@ -2101,9 +2482,13 @@ class RacePhysicsEngine(
             track = track,
             x = racer.x,
             y = racer.y,
-            hintIdx = racer.lastTrackIdx
+            hintIdx = racer.lastTrackIdx,
+            preferredZLayer = racer.zLayer
         )
         racer.lastTrackIdx = proj.index
+        val projPt = track.centerline[proj.index]
+        racer.zLayer = projPt.zLayer
+        racer.elevation = projPt.elevation
 
         val maxCorridor = if (rules.hardTrackBoundary) {
             (proj.halfWidth - racer.carType.radiusPx * 0.45f).coerceAtLeast(42f)
@@ -2163,6 +2548,7 @@ class RacePhysicsEngine(
         }
 
         for (prop in track.props) {
+            if (!track.isArena && !track.isStunt && prop.zLayer != racer.zLayer) continue
             val dx = racer.x - prop.x
             val dy = racer.y - prop.y
             val dist = hypot(dx, dy)
@@ -2216,6 +2602,7 @@ class RacePhysicsEngine(
     private fun handleBoostPads(racer: MutableRacer) {
         if (racer.jumpZ > 0.1f) return
         for (pad in track.boostPads) {
+            if (!track.isArena && !track.isStunt && pad.zLayer != racer.zLayer) continue
             if (TrackCatalog.distance(racer.x, racer.y, pad.x, pad.y) <= pad.radius + 10f) {
                 if (racer.boostMs < 900L) {
                     racer.boostMs = 1250L
@@ -2234,6 +2621,7 @@ class RacePhysicsEngine(
         if (speed < minTriggerSpeed) return
         val baseTopSpeed = (racer.carType.maxSpeedPx * speedPreset.speedMultiplier).coerceAtLeast(180f)
         for (ramp in track.ramps) {
+            if (!track.isArena && !track.isStunt && ramp.zLayer != racer.zLayer) continue
             val c = cos(ramp.angleRad)
             val s = sin(ramp.angleRad)
             val dx = racer.x - ramp.x
@@ -2267,6 +2655,7 @@ class RacePhysicsEngine(
         if (isDailyChallenge || isDriftMode || racer.heldPowerUp != null) return
         for (i in itemBoxes.indices) {
             val box = itemBoxes[i]
+            if (!track.isArena && !track.isStunt && box.zLayer != racer.zLayer) continue
             if (box.available && TrackCatalog.distance(racer.x, racer.y, box.x, box.y) <= 44f) {
                 itemBoxes[i] = box.copy(available = false, respawnMs = 5500L)
                 val pool = when {
@@ -2336,7 +2725,8 @@ class RacePhysicsEngine(
                 y = dropY,
                 radius = 30f,
                 remainingMs = 45000L,
-                type = HazardType.MINE.name
+                type = HazardType.MINE.name,
+                zLayer = racer.zLayer
             )
         )
         setBanner("${racer.name} dropped a Red Mine!", 1400L)
@@ -2348,8 +2738,11 @@ class RacePhysicsEngine(
         val it = fieldPickups.iterator()
         while (it.hasNext()) {
             val fp = it.next()
+            val fpLayer = fieldPickupZLayers[fp.id] ?: 0
+            if (!track.isArena && !track.isStunt && fpLayer != racer.zLayer) continue
             if (TrackCatalog.distance(racer.x, racer.y, fp.x, fp.y) <= hitRadius) {
                 it.remove()
+                fieldPickupZLayers.remove(fp.id)
                 racer.portalWarpSeq += 1
                 when (fp.pickupTypeEnum) {
                     FieldPickupType.POSITION_SWAP -> {
@@ -2481,7 +2874,8 @@ class RacePhysicsEngine(
         }
 
         // Circuit mode: strictly forward-only teleport from upstream entry hole -> downstream exit hole!
-        if (distEntry <= portalHitRadius) {
+        val entryLayer = track.centerline.getOrNull(activePortalEntryIdx)?.zLayer ?: 0
+        if (racer.zLayer == entryLayer && distEntry <= portalHitRadius) {
             val outAng = portals.exitAngleRad
             val outSpeed = max(hypot(racer.vx, racer.vy), 215f * speedPreset.speedMultiplier)
             racer.x = portals.exitX + cos(outAng) * 36f
@@ -2503,6 +2897,10 @@ class RacePhysicsEngine(
             markSectorsCrossedForward(racer, startIdx, targetIdx)
             racer.lastTrackIdx = targetIdx
             racer.checkpointIndex = targetIdx
+            track.centerline.getOrNull(targetIdx)?.let { exitPt ->
+                racer.zLayer = exitPt.zLayer
+                racer.elevation = exitPt.elevation
+            }
             setBanner("${racer.name} WARPED FORWARD!", 1500L)
         }
     }
@@ -2583,7 +2981,8 @@ class RacePhysicsEngine(
                         y = dropY,
                         radius = 30f,
                         remainingMs = 11000L,
-                        type = HazardType.GLUE_SLICK.name
+                        type = HazardType.GLUE_SLICK.name,
+                        zLayer = racer.zLayer
                     )
                 )
             }
@@ -2613,7 +3012,8 @@ class RacePhysicsEngine(
                         prevY = spawnY,
                         angleRad = racer.angleRad,
                         speed = rocketSpeed,
-                        remainingMs = ROCKET_DURATION_MS
+                        remainingMs = ROCKET_DURATION_MS,
+                        zLayer = racer.zLayer
                     )
                 )
                 val targetLabel = target?.name ?: "ahead"
@@ -2706,10 +3106,17 @@ class RacePhysicsEngine(
             rocket.prevY = rocket.y
             rocket.x += cos(rocket.angleRad) * rocket.speed * dt
             rocket.y += sin(rocket.angleRad) * rocket.speed * dt
+            if (!track.isArena && !track.isStunt && track.centerline.any { it.zLayer > 0 }) {
+                val (nIdx, nDist) = TrackCatalog.nearestTrackPoint(track, rocket.x, rocket.y, preferredZLayer = rocket.zLayer)
+                if (nDist <= track.centerline[nIdx].halfWidth * 1.45f) {
+                    rocket.zLayer = track.centerline[nIdx].zLayer
+                }
+            }
 
             var hitRacer: MutableRacer? = null
             for (r in racers) {
                 if (r.playerId == rocket.ownerId || r.finished || r.jumpZ > 0.45f) continue
+                if (!track.isArena && !track.isStunt && r.zLayer != rocket.zLayer) continue
                 val dist = pointToSegmentDistance(r.x, r.y, rocket.prevX, rocket.prevY, rocket.x, rocket.y)
                 if (dist <= r.carType.radiusPx + 20f) {
                     hitRacer = r
@@ -2765,6 +3172,7 @@ class RacePhysicsEngine(
 
             for (target in racers) {
                 if (target.playerId == source.playerId || target.finished) continue
+                if (!track.isArena && !track.isStunt && source.zLayer != target.zLayer) continue
                 if (target.electroParalyzedMs > 0L || target.electroImmunityMs > 0L) continue
                 if (abs(source.jumpZ - target.jumpZ) > 0.45f) continue
                 val dist = pointToSegmentDistance(target.x, target.y, startX, startY, endX, endY)
@@ -2807,6 +3215,7 @@ class RacePhysicsEngine(
             if (source.electroShockAuraMs <= 0L || source.finished) continue
             for (target in racers) {
                 if (target.playerId == source.playerId || target.finished) continue
+                if (!track.isArena && !track.isStunt && source.zLayer != target.zLayer) continue
                 if (target.electroParalyzedMs > 0L || target.electroImmunityMs > 0L) continue
                 if (abs(source.jumpZ - target.jumpZ) > 0.45f) continue
                 val dist = TrackCatalog.distance(source.x, source.y, target.x, target.y)
@@ -2997,6 +3406,7 @@ class RacePhysicsEngine(
         while (it.hasNext()) {
             val h = it.next()
             val hazType = h.hazardTypeEnum
+            if (!track.isArena && !track.isStunt && hazType != HazardType.BARRIER && h.zLayer != racer.zLayer) continue
             if (hazType == HazardType.BARRIER) {
                 val dx = racer.x - h.x
                 val dy = racer.y - h.y
@@ -3120,6 +3530,7 @@ class RacePhysicsEngine(
             for (j in i + 1 until racers.size) {
                 val a = racers[i]
                 val b = racers[j]
+                if (!track.isArena && !track.isStunt && a.zLayer != b.zLayer) continue
                 if (abs(a.jumpZ - b.jumpZ) > 0.28f) continue
                 val dx = b.x - a.x
                 val dy = b.y - a.y
@@ -3214,7 +3625,13 @@ class RacePhysicsEngine(
 
     private fun updateLapProgress(racer: MutableRacer) {
         val n = track.centerline.size
-        val (newIdx, _) = TrackCatalog.nearestTrackPointLocal(track, racer.x, racer.y, racer.lastTrackIdx)
+        val (newIdx, _) = TrackCatalog.nearestTrackPointLocal(
+            track = track,
+            x = racer.x,
+            y = racer.y,
+            hintIdx = racer.lastTrackIdx,
+            preferredZLayer = racer.zLayer
+        )
         val q1 = n / 4
         val q2 = n / 2
         val q3 = (3 * n) / 4
@@ -3339,7 +3756,13 @@ class RacePhysicsEngine(
             return computeArenaBotInput(racer, cruise)
         }
         val pts = track.centerline
-        val (closestIdx, _) = TrackCatalog.nearestTrackPointLocal(track, racer.x, racer.y, racer.lastTrackIdx)
+        val (closestIdx, _) = TrackCatalog.nearestTrackPointLocal(
+            track = track,
+            x = racer.x,
+            y = racer.y,
+            hintIdx = racer.lastTrackIdx,
+            preferredZLayer = racer.zLayer
+        )
         val lookAhead = 7
         val targetIdx = (closestIdx + lookAhead) % pts.size
         val nextIdx = (targetIdx + 1) % pts.size
@@ -3528,7 +3951,9 @@ class RacePhysicsEngine(
                     isLaunchHoldActive = r.isLaunchHoldActive,
                     launchBoostMs = r.launchBoostMs,
                     perfectLaunchBannerMs = r.perfectLaunchBannerMs,
-                    wheelspinSmokeMs = r.wheelspinSmokeMs
+                    wheelspinSmokeMs = r.wheelspinSmokeMs,
+                    zLayer = r.zLayer,
+                    elevation = r.elevation
                 )
             },
             itemBoxes = itemBoxes.toList(),
@@ -3576,9 +4001,14 @@ class RacePhysicsEngine(
                     x = rk.x,
                     y = rk.y,
                     angleRad = rk.angleRad,
-                    remainingMs = rk.remainingMs
+                    remainingMs = rk.remainingMs,
+                    zLayer = rk.zLayer
                 )
-            }
+            },
+            snowPatches = snowPatches.toList(),
+            meteorStrikes = meteorStrikes.toList(),
+            scorchedCraters = scorchedCraters.toList(),
+            meteorImpactSeq = meteorImpactSeq
         )
     }
 
@@ -3616,6 +4046,7 @@ class RacePhysicsEngine(
         const val LASER_DURATION_MS = 4000L
         const val LASER_LENGTH_PX = 340f
         const val ROCKET_DURATION_MS = 6000L
+        const val METEOR_WARNING_DURATION_MS = 1200L
         const val TRACK_JUMP_GRAVITY = 24.0f
         private const val MAX_FIELD_PICKUPS = 2
 

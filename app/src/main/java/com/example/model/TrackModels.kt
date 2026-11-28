@@ -77,13 +77,29 @@ enum class TrackId(
         kerbSecondaryHex = 0xFF1A1E26,
         offRoadDragMultiplier = 0.62f,
         surfaceGripMultiplier = 0.75f
+    ),
+    SKYWAY_OVERPASS(
+        displayName = "Skyway Crossover",
+        subtitle = "Tabletop figure-8 crossover with elevated bridge deck & sweeping hairpins",
+        difficulty = "Medium",
+        surfaceLabel = "Tabletop Tarmac",
+        baseBgColorHex = 0xFF162235,
+        roadColorHex = 0xFF2B3648,
+        borderColorHex = 0xFF00BFA5,
+        kerbPrimaryHex = 0xFF00BFA5,
+        kerbSecondaryHex = 0xFFFFF8E1,
+        offRoadDragMultiplier = 0.66f,
+        surfaceGripMultiplier = 1.02f
     )
 }
 
 data class TrackPoint(
     val x: Float,
     val y: Float,
-    val halfWidth: Float = 115f
+    val halfWidth: Float = 115f,
+    val zLayer: Int = 0,
+    val elevation: Float = 0f,
+    val isOverpassControl: Boolean = false
 )
 
 data class BoostPad(
@@ -91,7 +107,8 @@ data class BoostPad(
     val y: Float,
     val angleRad: Float,
     val radius: Float = 44f,
-    val lateralOffset: Float = 0f
+    val lateralOffset: Float = 0f,
+    val zLayer: Int = 0
 )
 
 data class TrackRamp(
@@ -100,7 +117,8 @@ data class TrackRamp(
     val angleRad: Float,
     val radius: Float = 48f,
     val impulse: Float = 1.0f,
-    val lateralOffset: Float = 0f
+    val lateralOffset: Float = 0f,
+    val zLayer: Int = 0
 )
 
 data class GravelPatch(
@@ -114,13 +132,15 @@ data class GravelPatch(
     val startArcS: Float = 0f,
     val endArcS: Float = 0f,
     val totalSplineLength: Float = 0f,
-    val isSplineRibbon: Boolean = false
+    val isSplineRibbon: Boolean = false,
+    val zLayer: Int = 0
 )
 
 data class ItemBoxSpawn(
     val id: Int,
     val x: Float,
-    val y: Float
+    val y: Float,
+    val zLayer: Int = 0
 )
 
 data class TrackProp(
@@ -130,7 +150,8 @@ data class TrackProp(
     val shape: PropShape,
     val colorHex: Long,
     val accentHex: Long = 0xFFFFFFFF,
-    val isSolidObstacle: Boolean = false
+    val isSolidObstacle: Boolean = false,
+    val zLayer: Int = 0
 )
 
 enum class PropShape {
@@ -226,7 +247,8 @@ data class CustomTrackData(
     val creatorUid: String = "",
     val creatorName: String = "",
     val isNightTrack: Boolean = false,
-    val randomConditionsEnabled: Boolean = false
+    val randomConditionsEnabled: Boolean = false,
+    val dailyWeatherTheme: String? = null
 )
 
 data class TrackDefinition(
@@ -248,7 +270,8 @@ data class TrackDefinition(
     val isStunt: Boolean = false,
     val stuntVariant: StuntVariant? = null,
     val isNightTrack: Boolean = false,
-    val randomConditionsEnabled: Boolean = false
+    val randomConditionsEnabled: Boolean = false,
+    val dailyWeatherTheme: String? = null
 ) {
     val displayTitle: String
         get() = customName ?: stuntVariant?.displayName ?: arenaShape?.displayName ?: id.displayName

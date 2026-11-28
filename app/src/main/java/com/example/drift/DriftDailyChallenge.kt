@@ -3,6 +3,7 @@ package com.example.drift
 import com.example.data.DailyChallengeCatalog
 import com.example.model.CarSpeedPreset
 import com.example.model.CustomTrackData
+import com.example.model.DailyWeatherTheme
 import com.example.model.GameMode
 import com.example.model.LeaderboardBoardKey
 import com.example.model.RaceRulesSettings
@@ -57,20 +58,31 @@ object DriftDailyChallenge {
         return result and Long.MAX_VALUE
     }
 
+    fun weatherThemeForDate(dateKey: String = DailyChallengeCatalog.todayDateKey()): DailyWeatherTheme {
+        val normalized = DailyChallengeCatalog.normalizeDateKey(dateKey)
+        val daySeed = seedForDate(normalized)
+        val themes = DailyWeatherTheme.entries
+        val idx = ((daySeed ushr 12) % themes.size.toLong()).toInt().coerceIn(0, themes.lastIndex)
+        return themes[idx]
+    }
+
     fun dailyDriftCustomTrack(dateKey: String = DailyChallengeCatalog.todayDateKey()): CustomTrackData {
         val normalized = DailyChallengeCatalog.normalizeDateKey(dateKey)
         val label = displayDateLabel(normalized)
         val daySeed = seedForDate(normalized)
         val featureRng = kotlin.random.Random(daySeed xor 0x3D2E9B71L)
         val includeJumps = featureRng.nextFloat() < 0.45f
+        val weatherTheme = weatherThemeForDate(normalized)
         return DriftTrackCatalog.generateRandomDriftTrack(
             seed = daySeed,
             preferredTheme = null,
             roadHalfWidth = 122f,
             trackIdOverride = trackIdForDate(normalized),
             trackNameOverride = "Daily Drift ($label)",
+            forceNight = (weatherTheme == DailyWeatherTheme.NIGHT),
             forceRandomConditions = false,
-            includeJumps = includeJumps
+            includeJumps = includeJumps,
+            dailyWeatherTheme = weatherTheme.name
         )
     }
 

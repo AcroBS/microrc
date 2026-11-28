@@ -7,6 +7,8 @@ import com.example.model.ArenaShape
 import com.example.model.CarSpeedPreset
 import com.example.model.ChatMessage
 import com.example.model.ControlInput
+import com.example.model.CustomTrackCodec
+import com.example.model.CustomTrackData
 import com.example.model.ExternalEventType
 import com.example.model.FieldPickupType
 import com.example.model.GameMode
@@ -26,6 +28,7 @@ import com.example.model.RaceRulesSettings
 import com.example.model.RaceSnapshot
 import com.example.model.RcCarType
 import com.example.model.TrackId
+import com.example.model.TrackPoint
 import com.example.model.TrackPuddle
 import com.example.model.WinCondition
 import kotlinx.coroutines.CoroutineScope
@@ -69,9 +72,10 @@ class RaceEngineUnitTest {
     }
 
     @Test
-    fun allFiveTracks_haveValidSplinesAndGridPositions() {
+    fun allSixTracks_haveValidSplinesAndGridPositions() {
         val tracks = TrackCatalog.allTracks()
-        assertEquals(5, tracks.size)
+        assertEquals(6, tracks.size)
+        assertTrue("Built-in tracks must include SKYWAY_OVERPASS", tracks.any { it.id == TrackId.SKYWAY_OVERPASS })
         for (track in tracks) {
             assertTrue("Spline should be populated", track.centerline.size >= 100)
             assertTrue("Boost pads should exist", track.boostPads.isNotEmpty())
@@ -1219,20 +1223,27 @@ class RaceEngineUnitTest {
                 }
             }
 
-            // 2. Non-adjacent road legs must never overlap their asphalt/kerb strokes (which hid invisible walls!)
+            // 2. Non-adjacent road legs must never overlap on the same layer (overpasses on distinct zLayer may cross)
             val minIndexSeparation = 26
             for (i in 0 until n) {
                 for (j in (i + 1) until n) {
                     val circDiff = min(j - i, n - (j - i))
                     if (circDiff >= minIndexSeparation) {
+                        if (pts[i].zLayer != pts[j].zLayer || pts[i].elevation > 0.05f || pts[j].elevation > 0.05f) {
+                            continue
+                        }
                         val d = TrackCatalog.distance(pts[i].x, pts[i].y, pts[j].x, pts[j].y)
                         val minLegSeparation = pts[i].halfWidth + pts[j].halfWidth + 24f
                         assertTrue(
-                            "Track ${track.id} has overlapping road legs at $i and $j (dist=$d < $minLegSeparation)",
+                            "Track ${track.id} has overlapping same-layer road legs at $i and $j (dist=$d < $minLegSeparation)",
                             d >= minLegSeparation
                         )
                     }
                 }
+            }
+            if (track.id == TrackId.SKYWAY_OVERPASS) {
+                assertTrue("SKYWAY_OVERPASS must have ground zLayer=0 segments", pts.any { it.zLayer == 0 })
+                assertTrue("SKYWAY_OVERPASS must have elevated overpass zLayer=1 segments", pts.any { it.zLayer == 1 && it.elevation > 0.5f })
             }
 
             // 3. Drive every default circuit cleanly through a full lap with hard boundaries enabled
@@ -2875,5 +2886,204 @@ class RaceEngineUnitTest {
             "Subsequent BRAKE press during the race must still engage reverse normally ($reverseForwardVel)",
             reverseForwardVel < -15f
         )
+    }
+
+    @Test
+    fun overpassCrossings_autoDetectIntersectionExplicitBridgeCodecRoundTripAndLayerCollisionIsolation() {
+        // 1. Self-crossing Figure-8 custom track automatically elevates later crossover leg to zLayer = 1
+        val figureEightCtrl = listOf(
+            TrackPoint(380f, 380f, 110f),
+            TrackPoint(900f, 380f, 110f),
+            TrackPoint(1300f, 1120f, 110f),
+            TrackPoint(1820f, 1120f, 110f),
+            TrackPoint(1820f, 380f, 110f),
+            TrackPoint(1300f, 380f, 110f),
+            TrackPoint(900f, 1120f, 110f),
+            TrackPoint(380f, 1120f, 110f)
+        )
+        val fig8Track = TrackCatalog.buildCustomTrack(
+            CustomTrackData(
+                id = "custom_fig8",
+                name = "Studio Fig 8",
+                themeId = TrackId.NEON_ROOFTOP.name,
+                controlPoints = figureEightCtrl
+            )
+        )
+        assertTrue("Self-crossing spline must elevate overpass section to zLayer=1", fig8Track.centerline.any { it.zLayer == 1 })
+        assertTrue("Self-crossing spline must preserve ground underpass zLayer=0", fig8Track.centerline.any { it.zLayer == 0 })
+
+        // 2. Explicit Track Studio bridge anchor works on any flat loop + CustomTrackCodec preserves isOverpassControl
+        val explicitDraft = CustomTrackData(
+            id = "custom_bridge",
+            name = "Custom Bridge",
+            themeId = TrackId.SKYWAY_OVERPASS.name,
+            controlPoints = listOf(
+                TrackPoint(400f, 350f, 112f, isOverpassControl = false),
+                TrackPoint(1100f, 350f, 112f, isOverpassControl = true),
+                TrackPoint(1800f, 350f, 112f, isOverpassControl = false),
+                TrackPoint(1800f, 1150f, 112f, isOverpassControl = false),
+                TrackPoint(1100f, 1150f, 112f, isOverpassControl = false),
+                TrackPoint(400f, 1150f, 112f, isOverpassControl = false)
+            )
+        )
+        val encoded = CustomTrackCodec.encode(explicitDraft)
+        val decoded = CustomTrackCodec.decode(
+            id = explicitDraft.id,
+            name = explicitDraft.name,
+            themeId = explicitDraft.themeId,
+            roadHalfWidth = explicitDraft.roadHalfWidth,
+            raw = encoded
+        )
+        assertNotNull(decoded)
+        assertEquals(true, decoded!!.controlPoints[1].isOverpassControl)
+        val explicitTrack = TrackCatalog.buildCustomTrack(decoded)
+        assertTrue("Explicit overpass control point must elevate bridge spline segment", explicitTrack.centerline.any { it.zLayer == 1 })
+
+        // 3. Built-in SKYWAY_OVERPASS isolates zLayer=0 vs zLayer=1 cars while colliding on same layer
+        val skyway = TrackCatalog.getTrack(TrackId.SKYWAY_OVERPASS).copy(ramps = emptyList(), itemSpawns = emptyList())
+        val groundPt = skyway.centerline.first { it.zLayer == 0 }
+        val bridgePt = skyway.centerline.first { it.zLayer == 1 && it.elevation > 0.6f }
+        // Find ground & overpass points right near the crossover center
+        val crossingBridge = skyway.centerline.filter { it.zLayer == 1 }.minByOrNull { pt ->
+            val nearestGround = skyway.centerline.filter { it.zLayer == 0 }.minOf { g -> TrackCatalog.distance(pt.x, pt.y, g.x, g.y) }
+            nearestGround
+        } ?: bridgePt
+        val bridgeIdx = skyway.centerline.indexOf(crossingBridge).coerceAtLeast(0)
+        val groundIdx = skyway.centerline.withIndex()
+            .filter { it.value.zLayer == 0 }
+            .minByOrNull { TrackCatalog.distance(it.value.x, it.value.y, crossingBridge.x, crossingBridge.y) }
+            ?.index ?: 0
+        val players = listOf(
+            LobbyPlayer("p_over", "Over", isHost = true, carType = RcCarType.VOLT_BUGGY.name),
+            LobbyPlayer("p_under", "Under", isHost = false, carType = RcCarType.APEX_FORMULA.name)
+        )
+        val diffLayerEngine = RacePhysicsEngine(
+            track = skyway,
+            totalLaps = 3,
+            players = players,
+            rules = RaceRulesSettings(randomConditionsEnabled = false, autoAccelerate = false)
+        )
+        var s = diffLayerEngine.step(0.02f)
+        while (s.phase == RacePhase.COUNTDOWN.name) s = diffLayerEngine.step(0.02f)
+
+        // Position both cars right at the crossover, approaching horizontally within bumper radius,
+        // one on overpass zLayer=1 and one on ground zLayer=0
+        val baseSeqOver = s.racers.first { it.playerId == "p_over" }.collisionSeq
+        val baseSeqUnder = s.racers.first { it.playerId == "p_under" }.collisionSeq
+        val engineFields = RacePhysicsEngine::class.java.getDeclaredField("racers").apply { isAccessible = true }
+        val mutableRacers = engineFields.get(diffLayerEngine) as List<*>
+        mutableRacers.forEach { mr ->
+            val cls = mr!!::class.java
+            val id = cls.getDeclaredField("playerId").apply { isAccessible = true }.get(mr) as String
+            val isOver = id == "p_over"
+            cls.getDeclaredField("x").apply { isAccessible = true }.setFloat(mr, crossingBridge.x + if (isOver) -6f else 6f)
+            cls.getDeclaredField("y").apply { isAccessible = true }.setFloat(mr, crossingBridge.y)
+            cls.getDeclaredField("vx").apply { isAccessible = true }.setFloat(mr, if (isOver) 180f else -180f)
+            cls.getDeclaredField("vy").apply { isAccessible = true }.setFloat(mr, 0f)
+            cls.getDeclaredField("zLayer").apply { isAccessible = true }.setInt(mr, if (isOver) 1 else 0)
+            cls.getDeclaredField("elevation").apply { isAccessible = true }.setFloat(mr, if (isOver) 1f else 0f)
+            cls.getDeclaredField("lastTrackIdx").apply { isAccessible = true }.setInt(mr, if (isOver) bridgeIdx else groundIdx)
+        }
+        val afterDiffStep = diffLayerEngine.step(0.016f)
+        assertEquals(baseSeqOver, afterDiffStep.racers.first { it.playerId == "p_over" }.collisionSeq)
+        assertEquals(baseSeqUnder, afterDiffStep.racers.first { it.playerId == "p_under" }.collisionSeq)
+
+        // Now place both on the SAME zLayer=1 -> collision fires cleanly
+        mutableRacers.forEach { mr ->
+            val cls = mr!!::class.java
+            val id = cls.getDeclaredField("playerId").apply { isAccessible = true }.get(mr) as String
+            val isOver = id == "p_over"
+            cls.getDeclaredField("x").apply { isAccessible = true }.setFloat(mr, crossingBridge.x + if (isOver) -6f else 6f)
+            cls.getDeclaredField("y").apply { isAccessible = true }.setFloat(mr, crossingBridge.y)
+            cls.getDeclaredField("vx").apply { isAccessible = true }.setFloat(mr, if (isOver) 180f else -180f)
+            cls.getDeclaredField("vy").apply { isAccessible = true }.setFloat(mr, 0f)
+            cls.getDeclaredField("zLayer").apply { isAccessible = true }.setInt(mr, 1)
+            cls.getDeclaredField("elevation").apply { isAccessible = true }.setFloat(mr, 1f)
+            cls.getDeclaredField("lastTrackIdx").apply { isAccessible = true }.setInt(mr, bridgeIdx)
+        }
+        val afterSameStep = diffLayerEngine.step(0.016f)
+        assertTrue(
+            "Same-layer cars overlapping at crossover must trigger collision",
+            afterSameStep.racers.first { it.playerId == "p_over" }.collisionSeq > baseSeqOver
+        )
+    }
+
+    @Test
+    fun multiplayerMeteorShower_telegraphsSpinsOutScorchesCraterAndExcludesSoloAndDaily() {
+        val track = TrackCatalog.getTrack(TrackId.NEON_ROOFTOP).copy(ramps = emptyList(), itemSpawns = emptyList())
+        val soloEngine = RacePhysicsEngine(
+            track = track,
+            totalLaps = 3,
+            players = listOf(LobbyPlayer("p1", "Solo", isHost = true, carType = RcCarType.VOLT_BUGGY.name)),
+            rules = RaceRulesSettings(randomConditionsEnabled = true, hostRandomConditionsOverride = true),
+            isDailyChallenge = false,
+            isMultiplayerSession = false
+        )
+        val dailyEngine = RacePhysicsEngine(
+            track = track,
+            totalLaps = 3,
+            players = listOf(
+                LobbyPlayer("p1", "P1", isHost = true, carType = RcCarType.VOLT_BUGGY.name),
+                LobbyPlayer("p2", "P2", isHost = false, carType = RcCarType.APEX_FORMULA.name)
+            ),
+            rules = RaceRulesSettings(randomConditionsEnabled = true, hostRandomConditionsOverride = true),
+            isDailyChallenge = true,
+            isMultiplayerSession = true
+        )
+        soloEngine.spawnMeteorStrikeForTest(track.centerline[5].x, track.centerline[5].y)
+        dailyEngine.spawnMeteorStrikeForTest(track.centerline[5].x, track.centerline[5].y)
+        assertTrue("Solo play must never spawn meteor strikes", soloEngine.step(0.02f).meteorStrikes.isEmpty())
+        assertTrue("Daily Challenge must never spawn meteor strikes", dailyEngine.step(0.02f).meteorStrikes.isEmpty())
+
+        // 2P Multiplayer race enables Meteor Shower cleanly
+        val mpEngine = RacePhysicsEngine(
+            track = track,
+            totalLaps = 3,
+            players = listOf(
+                LobbyPlayer("p1", "Host", isHost = true, carType = RcCarType.VOLT_BUGGY.name),
+                LobbyPlayer("p2", "Guest", isHost = false, carType = RcCarType.APEX_FORMULA.name)
+            ),
+            rules = RaceRulesSettings(randomConditionsEnabled = true, hostRandomConditionsOverride = true, autoAccelerate = false),
+            random = Random(77L),
+            isDailyChallenge = false,
+            isMultiplayerSession = true
+        )
+        var snap = mpEngine.step(0.05f)
+        while (snap.phase == RacePhase.COUNTDOWN.name) {
+            snap = mpEngine.step(0.05f)
+        }
+        val target = snap.racers.first { it.playerId == "p1" }
+        // Keep cars parked at strike location so blast & crater grip effect are deterministic
+        mpEngine.spawnMeteorStrikeForTest(x = target.x, y = target.y, warningMs = 1200L, radius = 88f, zLayer = target.zLayer)
+        snap = mpEngine.step(0.05f)
+        assertEquals(ExternalEventType.METEOR_SHOWER.name, snap.activeEvent)
+        assertEquals(1, snap.meteorStrikes.size)
+        val initialSeq = snap.meteorImpactSeq
+
+        // Step through ~1.2s telegraph window until impact
+        repeat(30) {
+            mpEngine.submitInput("p1", ControlInput(throttle = 0f, steer = 0f))
+            snap = mpEngine.step(0.05f)
+        }
+        assertTrue("Meteor impact must increment meteorImpactSeq", snap.meteorImpactSeq > initialSeq)
+        assertTrue("Scorched crater must persist on track after impact", snap.scorchedCraters.isNotEmpty())
+        val hitCar = snap.racers.first { it.playerId == "p1" }
+        assertTrue("Car inside blast radius must spin out/stun", hitCar.stunnedMs > 0L)
+
+        // Verify RaceTelemetryCodec round-trips active strikes, scorched craters, meteorImpactSeq, and racer zLayer
+        val mpPlayers = listOf(
+            LobbyPlayer("p1", "Host", isHost = true, carType = RcCarType.VOLT_BUGGY.name),
+            LobbyPlayer("p2", "Guest", isHost = false, carType = RcCarType.APEX_FORMULA.name)
+        )
+        val encoded = RaceTelemetryCodec.encodeSnapshot(seq = 42L, snap = snap)
+        val decoded = RaceTelemetryCodec.decodeSnapshot(
+            text = String(encoded, Charsets.UTF_8),
+            roster = mpPlayers,
+            previousSnapshot = snap,
+            activeTrack = track
+        )?.snapshot
+        assertNotNull(decoded)
+        assertEquals(snap.meteorImpactSeq, decoded!!.meteorImpactSeq)
+        assertEquals(snap.scorchedCraters.size, decoded.scorchedCraters.size)
     }
 }

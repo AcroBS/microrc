@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -125,6 +126,7 @@ import com.example.ui.components.drawWeatherScreenOverlay
 import com.example.ui.theme.adaptiveGoldColor
 import com.example.ui.theme.adaptiveOnlineColor
 import com.example.ui.theme.isMicroRCDarkSurface
+import kotlinx.coroutines.launch
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
@@ -280,6 +282,26 @@ fun RaceScreen(
             hapticController?.onPortalWarp()
         }
         lastPortalWarpSeq = seq
+    }
+
+    val meteorFlashAlpha = remember { Animatable(0f) }
+    val meteorShakeAnim = remember { Animatable(0f) }
+    var lastMeteorImpactSeq by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(snapshot?.meteorImpactSeq) {
+        val seq = snapshot?.meteorImpactSeq ?: return@LaunchedEffect
+        val prev = lastMeteorImpactSeq
+        if (prev != null && seq > prev && snapshot.phase == RacePhase.RACING.name) {
+            hapticController?.onCollision(heavy = true)
+            launch {
+                meteorFlashAlpha.snapTo(0.42f)
+                meteorFlashAlpha.animateTo(0f, tween(durationMillis = 280))
+            }
+            launch {
+                meteorShakeAnim.snapTo(1f)
+                meteorShakeAnim.animateTo(0f, tween(durationMillis = 260))
+            }
+        }
+        lastMeteorImpactSeq = seq
     }
 
     // Crisp 3-2-1 pips + bright GO! start chime & haptic pulse synchronized to the exact callout frame
@@ -486,16 +508,19 @@ fun RaceScreen(
             val viewW = size.width
             val viewH = size.height
 
-            val shakeX = if (activeEvent == ExternalEventType.EARTHQUAKE && snapshot?.phase == RacePhase.RACING.name) {
+            val quakeShakeX = if (activeEvent == ExternalEventType.EARTHQUAKE && snapshot?.phase == RacePhase.RACING.name) {
                 sin(animTimeSec * 44f) * 14f + sin(animTimeSec * 29f) * 6f
             } else {
                 0f
             }
-            val shakeY = if (activeEvent == ExternalEventType.EARTHQUAKE && snapshot?.phase == RacePhase.RACING.name) {
+            val quakeShakeY = if (activeEvent == ExternalEventType.EARTHQUAKE && snapshot?.phase == RacePhase.RACING.name) {
                 cos(animTimeSec * 51f) * 11f + cos(animTimeSec * 33f) * 5f
             } else {
                 0f
             }
+            val meteorShakeAmp = meteorShakeAnim.value * 22f
+            val shakeX = quakeShakeX + sin(animTimeSec * 72f) * meteorShakeAmp
+            val shakeY = quakeShakeY + cos(animTimeSec * 83f) * meteorShakeAmp * 0.85f
 
             if (overviewCamera) {
                 val scale = minOf(viewW / track.worldWidth, viewH / track.worldHeight) * 0.94f
@@ -526,7 +551,10 @@ fun RaceScreen(
                         rockets = snapshot?.rockets.orEmpty(),
                         ghostCar = ghostCar,
                         isDriftMode = isDriftMode,
-                        nightIntensity = nightIntensity
+                        nightIntensity = nightIntensity,
+                        snowPatches = snapshot?.snowPatches.orEmpty(),
+                        meteorStrikes = snapshot?.meteorStrikes.orEmpty(),
+                        scorchedCraters = snapshot?.scorchedCraters.orEmpty()
                     )
                 }
             } else {
@@ -556,7 +584,10 @@ fun RaceScreen(
                         rockets = snapshot?.rockets.orEmpty(),
                         ghostCar = ghostCar,
                         isDriftMode = isDriftMode,
-                        nightIntensity = nightIntensity
+                        nightIntensity = nightIntensity,
+                        snowPatches = snapshot?.snowPatches.orEmpty(),
+                        meteorStrikes = snapshot?.meteorStrikes.orEmpty(),
+                        scorchedCraters = snapshot?.scorchedCraters.orEmpty()
                     )
                 }
             }
@@ -568,6 +599,9 @@ fun RaceScreen(
                     windAngleRad = snapshot.windAngleRad,
                     windStrength = snapshot.windStrength
                 )
+            }
+            if (meteorFlashAlpha.value > 0.01f) {
+                drawRect(color = Color(0xFFFF6D00).copy(alpha = meteorFlashAlpha.value))
             }
         }
 
@@ -944,6 +978,7 @@ fun RaceScreen(
                         ExternalEventType.WIND -> Icons.Default.Air to tertiaryAccent
                         ExternalEventType.SNOW -> Icons.Default.AcUnit to hudOnSurface
                         ExternalEventType.DAY_NIGHT -> Icons.Default.DarkMode to Color(0xFF90CAF9)
+                        ExternalEventType.METEOR_SHOWER -> Icons.Default.Warning to Color(0xFFFF6D00)
                         ExternalEventType.NONE -> Icons.Default.WaterDrop to secondaryAccent
                     }
                     val remSec = ((snapshot.eventRemainingMs + 999L) / 1000L).coerceAtLeast(1L)

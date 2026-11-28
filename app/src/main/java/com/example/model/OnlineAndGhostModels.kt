@@ -432,32 +432,35 @@ object CustomTrackCodec {
             )
         }
         val ptsStr = safePoints.joinToString(";") { p ->
-            String.format(Locale.US, "%.1f,%.1f,%.1f", p.x, p.y, p.halfWidth.coerceIn(80f, 150f))
+            val ov = if (p.isOverpassControl) 1 else 0
+            String.format(Locale.US, "%.1f,%.1f,%.1f,%d", p.x, p.y, p.halfWidth.coerceIn(80f, 150f), ov)
         }
         val boostsStr = track.boostPads.take(MAX_BOOSTS).joinToString(";") { b ->
             String.format(
                 Locale.US,
-                "%.1f,%.1f,%.3f,%.1f,%.2f",
+                "%.1f,%.1f,%.3f,%.1f,%.2f,%d",
                 b.x,
                 b.y,
                 b.angleRad,
                 b.radius,
-                b.lateralOffset.coerceIn(-0.55f, 0.55f)
+                b.lateralOffset.coerceIn(-0.55f, 0.55f),
+                b.zLayer
             )
         }
         val itemsStr = track.itemSpawns.take(MAX_ITEMS).joinToString(";") { item ->
-            String.format(Locale.US, "%d,%.1f,%.1f", item.id, item.x, item.y)
+            String.format(Locale.US, "%d,%.1f,%.1f,%d", item.id, item.x, item.y, item.zLayer)
         }
         val rampsStr = track.ramps.take(MAX_RAMPS).joinToString(";") { r ->
             String.format(
                 Locale.US,
-                "%.1f,%.1f,%.3f,%.1f,%.2f,%.2f",
+                "%.1f,%.1f,%.3f,%.1f,%.2f,%.2f,%d",
                 r.x,
                 r.y,
                 r.angleRad,
                 r.radius,
                 r.impulse,
-                r.lateralOffset.coerceIn(-0.55f, 0.55f)
+                r.lateralOffset.coerceIn(-0.55f, 0.55f),
+                r.zLayer
             )
         }
         val propsStr = track.props.take(MAX_PROPS).joinToString(";") { pr ->
@@ -476,7 +479,7 @@ object CustomTrackCodec {
         val nightFlag = if (track.isNightTrack) "1" else "0"
         val conditionsFlag = "0"
         val puddlesStr = track.puddles.take(MAX_PUDDLES).joinToString(";") { pd ->
-            String.format(Locale.US, "%.1f,%.1f,%.1f", pd.x, pd.y, pd.radius.coerceIn(18f, 76f))
+            String.format(Locale.US, "%.1f,%.1f,%.1f,%d", pd.x, pd.y, pd.radius.coerceIn(18f, 76f), pd.zLayer)
         }
         return "$VERSION_PREFIX|$ptsStr|$boostsStr|$itemsStr|$rampsStr|$propsStr|$nightFlag|$conditionsFlag|$puddlesStr".take(24_500)
     }
@@ -506,7 +509,8 @@ object CustomTrackCodec {
                 val x = p[0].toFloatOrNull()?.coerceIn(80f, 2120f) ?: return@mapNotNull null
                 val y = p[1].toFloatOrNull()?.coerceIn(80f, 1420f) ?: return@mapNotNull null
                 val hw = p.getOrNull(2)?.toFloatOrNull()?.coerceIn(80f, 150f) ?: safeHw
-                TrackPoint(x = x, y = y, halfWidth = hw)
+                val ov = (p.getOrNull(3)?.toIntOrNull() ?: 0) != 0
+                TrackPoint(x = x, y = y, halfWidth = hw, isOverpassControl = ov)
             }
         if (points.size < 4) return null
 
@@ -521,7 +525,8 @@ object CustomTrackCodec {
                 val ang = p[2].toFloatOrNull() ?: 0f
                 val rad = p.getOrNull(3)?.toFloatOrNull()?.coerceIn(20f, 90f) ?: 44f
                 val lat = p.getOrNull(4)?.toFloatOrNull()?.coerceIn(-0.55f, 0.55f) ?: 0f
-                BoostPad(x = x, y = y, angleRad = ang, radius = rad, lateralOffset = lat)
+                val zl = (p.getOrNull(5)?.toIntOrNull() ?: 0).coerceIn(0, 1)
+                BoostPad(x = x, y = y, angleRad = ang, radius = rad, lateralOffset = lat, zLayer = zl)
             }
 
         val items = sections.getOrNull(3).orEmpty()
@@ -533,7 +538,8 @@ object CustomTrackCodec {
                 val itemId = p[0].toIntOrNull() ?: idx
                 val x = p[1].toFloatOrNull() ?: return@mapIndexedNotNull null
                 val y = p[2].toFloatOrNull() ?: return@mapIndexedNotNull null
-                ItemBoxSpawn(id = itemId, x = x, y = y)
+                val zl = (p.getOrNull(3)?.toIntOrNull() ?: 0).coerceIn(0, 1)
+                ItemBoxSpawn(id = itemId, x = x, y = y, zLayer = zl)
             }
 
         val ramps = sections.getOrNull(4).orEmpty()
@@ -548,7 +554,8 @@ object CustomTrackCodec {
                 val rad = p.getOrNull(3)?.toFloatOrNull()?.coerceIn(24f, 96f) ?: 48f
                 val imp = p.getOrNull(4)?.toFloatOrNull()?.coerceIn(0.5f, 1.8f) ?: 1.0f
                 val lat = p.getOrNull(5)?.toFloatOrNull()?.coerceIn(-0.55f, 0.55f) ?: 0f
-                TrackRamp(x = x, y = y, angleRad = ang, radius = rad, impulse = imp, lateralOffset = lat)
+                val zl = (p.getOrNull(6)?.toIntOrNull() ?: 0).coerceIn(0, 1)
+                TrackRamp(x = x, y = y, angleRad = ang, radius = rad, impulse = imp, lateralOffset = lat, zLayer = zl)
             }
 
         val props = sections.getOrNull(5).orEmpty()
@@ -559,7 +566,7 @@ object CustomTrackCodec {
                 if (p.size < 6) return@mapNotNull null
                 val x = p[0].toFloatOrNull() ?: return@mapNotNull null
                 val y = p[1].toFloatOrNull() ?: return@mapNotNull null
-                val rad = p[2].toFloatOrNull()?.coerceIn(12f, 120f) ?: 42f
+                val rad = p.getOrNull(2)?.toFloatOrNull()?.coerceIn(12f, 120f) ?: 42f
                 val shape = PropShape.entries.firstOrNull { it.name == p[3] } ?: PropShape.CIRCLE
                 val col = p[4].toLongOrNull() ?: 0xFFE65100
                 val acc = p[5].toLongOrNull() ?: 0xFFFFFFFF
@@ -585,7 +592,8 @@ object CustomTrackCodec {
                 val x = p[0].toFloatOrNull() ?: return@mapNotNull null
                 val y = p[1].toFloatOrNull() ?: return@mapNotNull null
                 val rad = p.getOrNull(2)?.toFloatOrNull()?.coerceIn(18f, 76f) ?: 38f
-                TrackPuddle(x = x, y = y, radius = rad)
+                val zl = (p.getOrNull(3)?.toIntOrNull() ?: 0).coerceIn(0, 1)
+                TrackPuddle(x = x, y = y, radius = rad, zLayer = zl)
             }
 
         return CustomTrackData(

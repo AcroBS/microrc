@@ -531,7 +531,7 @@ fun OnlineHubScreen(
                                                 color = MaterialTheme.colorScheme.onSurface
                                             )
                                             Text(
-                                                text = "Rain puddles, tremors, wind & snow (multiplayer host option)",
+                                                text = "Rain puddles, meteor showers, tremors, wind & snow (multiplayer host option)",
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )

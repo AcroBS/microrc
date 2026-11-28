@@ -19,6 +19,8 @@ import com.example.data.TrackCatalog
 import com.example.engine.RacePhysicsEngine
 import com.example.model.CarSpeedPreset
 import com.example.model.ControlInput
+import com.example.model.DailyWeatherTheme
+import com.example.model.ExternalEventType
 import com.example.model.GameMode
 import com.example.model.LeaderboardNotificationDoc
 import com.example.model.LobbyPlayer
@@ -334,5 +336,61 @@ class DailyChallengeAndNotificationsTest {
         }
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag("daily_challenge_button").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("daily_gp_weather_badge", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("daily_drift_weather_badge", useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+    }
+
+    @Test
+    fun dailyChallenges_deterministicallyAssignAllWeatherThemesAcrossDates_andApplyWeatherPhysics() {
+        val sampleDates = (1..40).map { d -> "202611%02d".format(d) }
+        val gpThemes = sampleDates.map { DailyChallengeCatalog.weatherThemeForDate(it) }.toSet()
+        val driftThemes = sampleDates.map { com.example.drift.DriftDailyChallenge.weatherThemeForDate(it) }.toSet()
+        assertEquals(DailyWeatherTheme.entries.toSet(), gpThemes)
+        assertEquals(DailyWeatherTheme.entries.toSet(), driftThemes)
+
+        val rules = DailyChallengeCatalog.lockedDailyRules(RaceRulesSettings())
+        val playersA = listOf(LobbyPlayer("p1", "A", isHost = true, carType = RcCarType.VOLT_BUGGY.name))
+        val playersB = listOf(LobbyPlayer("p2", "B", isHost = true, carType = RcCarType.APEX_FORMULA.name))
+
+        // RAIN date: identical deterministic puddles across runs, active RAIN event, no meteors
+        val rainDate = sampleDates.first { DailyChallengeCatalog.weatherThemeForDate(it) == DailyWeatherTheme.RAIN }
+        val rainTrack = TrackCatalog.buildCustomTrack(DailyChallengeCatalog.dailyCustomTrack(rainDate))
+        val rainA = RacePhysicsEngine(rainTrack, 3, playersA, rules, Random(11L), isDailyChallenge = true)
+        val rainB = RacePhysicsEngine(rainTrack, 3, playersB, rules, Random(999L), isDailyChallenge = true)
+        repeat(90) { rainA.step(0.04f); rainB.step(0.04f) }
+        val snapRainA = rainA.step(0.02f)
+        val snapRainB = rainB.step(0.02f)
+        assertEquals(ExternalEventType.RAIN.name, snapRainA.activeEvent)
+        assertEquals(snapRainA.rainPuddles, snapRainB.rainPuddles)
+        assertTrue(snapRainA.rainPuddles.isNotEmpty())
+        assertTrue(snapRainA.meteorStrikes.isEmpty())
+
+        // SNOW date: identical deterministic snow patches across runs, active SNOW event
+        val snowDate = sampleDates.first { DailyChallengeCatalog.weatherThemeForDate(it) == DailyWeatherTheme.SNOW }
+        val snowTrack = TrackCatalog.buildCustomTrack(DailyChallengeCatalog.dailyCustomTrack(snowDate))
+        val snowA = RacePhysicsEngine(snowTrack, 3, playersA, rules, Random(11L), isDailyChallenge = true)
+        val snowB = RacePhysicsEngine(snowTrack, 3, playersB, rules, Random(999L), isDailyChallenge = true)
+        repeat(90) { snowA.step(0.04f); snowB.step(0.04f) }
+        val snapSnowA = snowA.step(0.02f)
+        val snapSnowB = snowB.step(0.02f)
+        assertEquals(ExternalEventType.SNOW.name, snapSnowA.activeEvent)
+        assertEquals(snapSnowA.snowPatches, snapSnowB.snowPatches)
+        assertTrue(snapSnowA.snowPatches.isNotEmpty())
+
+        // WINDY date: identical deterministic wind angle and strength across runs
+        val windDate = sampleDates.first { DailyChallengeCatalog.weatherThemeForDate(it) == DailyWeatherTheme.WINDY }
+        val windTrack = TrackCatalog.buildCustomTrack(DailyChallengeCatalog.dailyCustomTrack(windDate))
+        val windA = RacePhysicsEngine(windTrack, 3, playersA, rules, Random(11L), isDailyChallenge = true)
+        val windB = RacePhysicsEngine(windTrack, 3, playersB, rules, Random(999L), isDailyChallenge = true)
+        repeat(90) { windA.step(0.04f); windB.step(0.04f) }
+        val snapWindA = windA.step(0.02f)
+        val snapWindB = windB.step(0.02f)
+        assertEquals(ExternalEventType.WIND.name, snapWindA.activeEvent)
+        assertEquals(snapWindA.windAngleRad, snapWindB.windAngleRad, 0.001f)
+        assertEquals(snapWindA.windStrength, snapWindB.windStrength, 0.001f)
+
+        // NIGHT date: night lighting flag enabled on daily track
+        val nightDate = sampleDates.first { DailyChallengeCatalog.weatherThemeForDate(it) == DailyWeatherTheme.NIGHT }
+        assertTrue(DailyChallengeCatalog.dailyCustomTrack(nightDate).isNightTrack)
     }
 }

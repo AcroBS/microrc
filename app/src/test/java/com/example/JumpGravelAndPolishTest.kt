@@ -4,11 +4,13 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.unit.dp
 import com.example.data.TrackCatalog
 import com.example.engine.RacePhysicsEngine
@@ -653,6 +655,7 @@ class JumpGravelAndPolishTest {
             }
         }
 
+        composeRule.onNodeWithTag("editor_tools_row").performScrollToNode(hasTestTag("editor_tool_TOGGLE_PUDDLE"))
         composeRule.onNodeWithTag("editor_tool_TOGGLE_PUDDLE").assertIsDisplayed().performClick()
         composeRule.onNodeWithText("Tap on track to add or remove a Rain Puddle").assertIsDisplayed()
 

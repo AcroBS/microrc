@@ -70,7 +70,8 @@ object DriftTrackCatalog {
         trackNameOverride: String? = null,
         forceNight: Boolean? = null,
         forceRandomConditions: Boolean? = null,
-        includeJumps: Boolean = false
+        includeJumps: Boolean = false,
+        dailyWeatherTheme: String? = null
     ): CustomTrackData {
         val rng = Random(seed)
         val isNightTrack = forceNight ?: (rng.nextFloat() < 0.35f)
@@ -213,7 +214,8 @@ object DriftTrackCatalog {
             ramps = ramps,
             props = props,
             isNightTrack = isNightTrack,
-            randomConditionsEnabled = false
+            randomConditionsEnabled = false,
+            dailyWeatherTheme = dailyWeatherTheme
         )
     }
 

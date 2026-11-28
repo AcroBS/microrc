@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FlightTakeoff
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -94,6 +95,7 @@ import kotlin.math.roundToInt
 private enum class EditorTool(val label: String) {
     MOVE_NODE("Drag Corner"),
     ADD_NODE("Add Corner"),
+    TOGGLE_OVERPASS("Overpass Bridge"),
     TOGGLE_RAMP("Toggle Jump"),
     TOGGLE_BOOST("Toggle Boost"),
     TOGGLE_PUDDLE("Toggle Puddle")
@@ -367,7 +369,7 @@ fun TrackEditorScreen(
                                                             val prev = currentDraft.controlPoints[hitIdx]
                                                             if (hypot(targetX - prev.x, targetY - prev.y) > 0.5f) {
                                                                 val updated = currentDraft.controlPoints.toMutableList()
-                                                                updated[hitIdx] = TrackPoint(
+                                                                updated[hitIdx] = prev.copy(
                                                                     x = targetX,
                                                                     y = targetY,
                                                                     halfWidth = currentDraft.roadHalfWidth
@@ -579,6 +581,19 @@ fun TrackEditorScreen(
                                                     }
                                                     savedBannerName = null
                                                 }
+                                                EditorTool.TOGGLE_OVERPASS -> {
+                                                    val hitIdx = findNearestNode(wx, wy)
+                                                    if (hitIdx >= 0 && hitIdx in curDraft.controlPoints.indices) {
+                                                        val updated = curDraft.controlPoints.toMutableList()
+                                                        val prevPt = updated[hitIdx]
+                                                        updated[hitIdx] = prevPt.copy(isOverpassControl = !prevPt.isOverpassControl)
+                                                        draft = curDraft.copy(controlPoints = updated)
+                                                        selectedNodeIdx = hitIdx
+                                                        selectedRampIdx = -1
+                                                        selectedBoostIdx = -1
+                                                        savedBannerName = null
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -638,6 +653,20 @@ fun TrackEditorScreen(
                                 ctrl.forEachIndexed { idx, pt ->
                                     val isDragging = idx == draggingNodeIdx
                                     val isSel = idx == selectedNodeIdx
+                                    val isBridgeAnchor = pt.isOverpassControl
+                                    if (isBridgeAnchor) {
+                                        drawCircle(
+                                            color = Color(0xFFFFAB00).copy(alpha = 0.28f),
+                                            radius = if (isDragging) 84f else 62f,
+                                            center = Offset(pt.x, pt.y)
+                                        )
+                                        drawCircle(
+                                            color = Color(0xFFFFAB00),
+                                            radius = if (isDragging) 60f else 48f,
+                                            center = Offset(pt.x, pt.y),
+                                            style = Stroke(width = 6f)
+                                        )
+                                    }
                                     if (isDragging || isSel) {
                                         drawCircle(
                                             color = primaryColor.copy(alpha = if (isDragging) 0.36f else 0.22f),
@@ -646,7 +675,7 @@ fun TrackEditorScreen(
                                         )
                                     }
                                     drawCircle(
-                                        color = if (isSel || isDragging) primaryColor else secondaryColor,
+                                        color = if (isBridgeAnchor) Color(0xFFFFAB00) else if (isSel || isDragging) primaryColor else secondaryColor,
                                         radius = if (isDragging) 42f else if (isSel) 36f else 30f,
                                         center = Offset(pt.x, pt.y)
                                     )
@@ -707,6 +736,7 @@ fun TrackEditorScreen(
                                     draggingFeatureKind == "BOOST" -> "Sliding Boost #${draggingFeatureIdx + 1} across track lanes..."
                                     activeTool == EditorTool.MOVE_NODE -> "Drag corner dots or slide jumps/boosts laterally"
                                     activeTool == EditorTool.ADD_NODE -> "Tap anywhere to insert a new corner"
+                                    activeTool == EditorTool.TOGGLE_OVERPASS -> "Tap any corner dot to elevate / lower an Overpass Bridge"
                                     activeTool == EditorTool.TOGGLE_RAMP -> "Tap track to place Jump, drag sideways or pick Lane below"
                                     activeTool == EditorTool.TOGGLE_PUDDLE -> "Tap on track to add or remove a Rain Puddle"
                                     else -> "Tap track to place Boost, drag sideways or pick Lane below"
@@ -737,12 +767,16 @@ fun TrackEditorScreen(
                     }
                 }
 
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LazyRow(
+                    modifier = Modifier.testTag("editor_tools_row"),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     items(EditorTool.entries) { tool ->
                         val active = activeTool == tool
                         val icon = when (tool) {
                             EditorTool.MOVE_NODE -> Icons.Default.OpenWith
                             EditorTool.ADD_NODE -> Icons.Default.AddCircleOutline
+                            EditorTool.TOGGLE_OVERPASS -> Icons.Default.Layers
                             EditorTool.TOGGLE_RAMP -> Icons.Default.FlightTakeoff
                             EditorTool.TOGGLE_BOOST -> Icons.Default.Bolt
                             EditorTool.TOGGLE_PUDDLE -> Icons.Default.WaterDrop
@@ -891,6 +925,36 @@ fun TrackEditorScreen(
                             }
                         }
                     }
+                }
+
+                if (selectedNodeIdx in draft.controlPoints.indices) {
+                    val isElevated = draft.controlPoints[selectedNodeIdx].isOverpassControl
+                    FilterChip(
+                        selected = isElevated,
+                        onClick = {
+                            val updated = draft.controlPoints.toMutableList()
+                            val pt = updated[selectedNodeIdx]
+                            updated[selectedNodeIdx] = pt.copy(isOverpassControl = !pt.isOverpassControl)
+                            draft = draft.copy(controlPoints = updated)
+                            savedBannerName = null
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Layers,
+                                contentDescription = "Toggle Overpass Bridge",
+                                modifier = Modifier.size(16.dp)
+                            )
+                        },
+                        label = {
+                            Text(
+                                text = "Corner #${selectedNodeIdx + 1}: ${if (isElevated) "Overpass Bridge ON" else "Elevate as Overpass Bridge"}",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("editor_toggle_selected_overpass_button")
+                    )
                 }
 
                 Row(
