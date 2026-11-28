@@ -9,6 +9,7 @@ import com.example.data.DailyChallengeCatalog
 import com.example.data.PlayStreakState
 import com.example.data.PreferencesRepository
 import com.example.data.TrackCatalog
+import com.example.data.WeeklyCrewChampRecord
 import com.example.model.ActiveGhostCarState
 import com.example.model.ArenaShape
 import com.example.model.AudioSettings
@@ -105,6 +106,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
         initialValue = PlayStreakState()
+    )
+
+    val weeklyCrewChamp: StateFlow<WeeklyCrewChampRecord?> = prefsRepo.weeklyCrewChampFlow.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = null
     )
 
     val discoveredLobbies: StateFlow<List<DiscoveredLobby>> = raceManager.discovery.discoveredLobbies
@@ -215,6 +222,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun recordCompletedRaceStreak() {
         viewModelScope.launch {
             prefsRepo.recordPlayStreakActivity()
+        }
+    }
+
+    fun saveWeeklyCrewChamp(record: WeeklyCrewChampRecord) {
+        viewModelScope.launch {
+            prefsRepo.saveWeeklyCrewChamp(record)
         }
     }
 

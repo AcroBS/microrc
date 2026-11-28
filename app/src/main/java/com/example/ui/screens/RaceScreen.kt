@@ -284,6 +284,16 @@ fun RaceScreen(
         lastPortalWarpSeq = seq
     }
 
+    var lastCurbTickSeq by remember(localRacer?.playerId) { mutableStateOf<Int?>(null) }
+    LaunchedEffect(localRacer?.curbTickSeq) {
+        val seq = localRacer?.curbTickSeq ?: return@LaunchedEffect
+        val prev = lastCurbTickSeq
+        if (prev != null && seq > prev) {
+            hapticController?.onCurbTick()
+        }
+        lastCurbTickSeq = seq
+    }
+
     val meteorFlashAlpha = remember { Animatable(0f) }
     val meteorShakeAnim = remember { Animatable(0f) }
     var lastMeteorImpactSeq by remember { mutableStateOf<Int?>(null) }
@@ -323,6 +333,8 @@ fun RaceScreen(
         }
     }
 
+    val skidMarks = remember { com.example.ui.components.SkidMarkRingBuffer() }
+
     LaunchedEffect(snapshot) {
         if (snapshot != null) {
             val arrivalNs = System.nanoTime()
@@ -332,6 +344,7 @@ fun RaceScreen(
                 smoothPoseMap.clear()
                 prevSnapAngles.clear()
                 snapAngularVelMap.clear()
+                skidMarks.clear()
             } else {
                 snapshot.racers.forEach { r ->
                     val prev = prevSnapAngles[r.playerId]
@@ -408,6 +421,12 @@ fun RaceScreen(
                         }
                     }
                     smoothedRacers = rendered
+                    skidMarks.recordRacers(
+                        racers = rendered,
+                        nowSec = animTimeSec,
+                        isDriftMode = (snap.gameMode == GameMode.DRIFT.name),
+                        isRaceActive = (snap.phase == RacePhase.RACING.name)
+                    )
 
                     val activeStuntId = if (snap.gameMode == GameMode.STUNTS.name) {
                         snap.stuntState?.activePlayerId?.takeIf { it.isNotEmpty() }
@@ -457,6 +476,9 @@ fun RaceScreen(
             isArenaMode -> TrackCatalog.getArenaTrack(snapshot?.arenaShape)
             else -> TrackCatalog.getTrack(snapshot?.trackId ?: "LIVING_ROOM_GP")
         }
+    }
+    LaunchedEffect(track.id, track.customId, track.isArena, track.isStunt) {
+        skidMarks.clear()
     }
     val racersToDraw = smoothedRacers.ifEmpty { snapshot?.racers.orEmpty() }
     val arenaFlagToDraw = snapshot?.arenaFlag?.let { rawFlag ->
@@ -554,7 +576,8 @@ fun RaceScreen(
                         nightIntensity = nightIntensity,
                         snowPatches = snapshot?.snowPatches.orEmpty(),
                         meteorStrikes = snapshot?.meteorStrikes.orEmpty(),
-                        scorchedCraters = snapshot?.scorchedCraters.orEmpty()
+                        scorchedCraters = snapshot?.scorchedCraters.orEmpty(),
+                        skidMarks = skidMarks
                     )
                 }
             } else {
@@ -587,7 +610,8 @@ fun RaceScreen(
                         nightIntensity = nightIntensity,
                         snowPatches = snapshot?.snowPatches.orEmpty(),
                         meteorStrikes = snapshot?.meteorStrikes.orEmpty(),
-                        scorchedCraters = snapshot?.scorchedCraters.orEmpty()
+                        scorchedCraters = snapshot?.scorchedCraters.orEmpty(),
+                        skidMarks = skidMarks
                     )
                 }
             }

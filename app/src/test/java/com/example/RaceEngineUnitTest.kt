@@ -3086,4 +3086,170 @@ class RaceEngineUnitTest {
         assertEquals(snap.meteorImpactSeq, decoded!!.meteorImpactSeq)
         assertEquals(snap.scorchedCraters.size, decoded.scorchedCraters.size)
     }
+
+    @Test
+    fun insideApexCurbs_renderOnlyOnCircuitCornersAndApplyZeroPhysicsPenalty() {
+        // 1. All 6 built-in circuits generate inside-apex curbs cleanly, while arenas & stunts do not
+        for (track in TrackCatalog.allTracks()) {
+            val curbs = TrackCatalog.insideApexCurbsForTrack(track)
+            assertTrue("${track.id.name} must generate inside-apex curbs on sharp corners", curbs.isNotEmpty())
+            assertTrue(
+                "${track.id.name} curb inner/outer edges must match in size",
+                curbs.all { it.innerEdge.size >= 3 && it.innerEdge.size == it.outerEdge.size }
+            )
+        }
+        assertTrue(TrackCatalog.insideApexCurbsForTrack(TrackCatalog.getArenaTrack(ArenaShape.CIRCLE)).isEmpty())
+        assertTrue(
+            TrackCatalog.insideApexCurbsForTrack(
+                TrackCatalog.getStuntTrack(com.example.model.StuntVariant.BOWLING)
+            ).isEmpty()
+        )
+
+        // 2. Verify point-in-curb detection & ZERO speed/accel/grip penalty vs clean asphalt
+        val track = TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP).copy(ramps = emptyList(), itemSpawns = emptyList())
+        val firstCurb = TrackCatalog.insideApexCurbsForTrack(track).first()
+        val midIdx = firstCurb.innerEdge.size / 2
+        val innerPt = firstCurb.innerEdge[midIdx]
+        val outerPt = firstCurb.outerEdge[midIdx]
+        val onCurbX = (innerPt.first + outerPt.first) * 0.5f
+        val onCurbY = (innerPt.second + outerPt.second) * 0.5f
+        assertTrue(
+            "Point inside apex curb strip must be detected",
+            TrackCatalog.isPointOnInsideApexCurb(track, onCurbX, onCurbY, zLayer = firstCurb.zLayer)
+        )
+
+        // Compare straight-line acceleration from identical pose on asphalt vs over an explicit curb zone
+        fun measureStraightAccel(enableCurbs: Boolean): Pair<Float, Pair<Boolean, Int>> {
+            val players = listOf(
+                LobbyPlayer("p1", "CurbTester", isHost = true, isBot = false, carType = RcCarType.APEX_FORMULA.name)
+            )
+            val engine = RacePhysicsEngine(
+                track = if (enableCurbs) track else TrackCatalog.getTrack(TrackId.LIVING_ROOM_GP).copy(
+                    centerline = track.centerline.map { it.copy(halfWidth = it.halfWidth) },
+                    ramps = emptyList(),
+                    itemSpawns = emptyList()
+                ),
+                totalLaps = 3,
+                players = players,
+                rules = RaceRulesSettings(autoAccelerate = true, randomConditionsEnabled = false)
+            )
+            var snap = engine.step(0.02f)
+            while (snap.phase == RacePhase.COUNTDOWN.name) {
+                snap = engine.step(0.02f)
+            }
+            val nextOuter = firstCurb.outerEdge[(midIdx + 1).coerceAtMost(firstCurb.outerEdge.lastIndex)]
+            val prevOuter = firstCurb.outerEdge[(midIdx - 1).coerceAtLeast(0)]
+            val tangent = atan2(nextOuter.second - prevOuter.second, nextOuter.first - prevOuter.first)
+
+            // Position on the apex curb vs shifted onto the centerline away from the curb
+            val startX = if (enableCurbs) onCurbX else {
+                val (nearestIdx, _) = TrackCatalog.nearestTrackPoint(track, onCurbX, onCurbY, firstCurb.zLayer)
+                track.centerline[nearestIdx].x
+            }
+            val startY = if (enableCurbs) onCurbY else {
+                val (nearestIdx, _) = TrackCatalog.nearestTrackPoint(track, onCurbX, onCurbY, firstCurb.zLayer)
+                track.centerline[nearestIdx].y
+            }
+            val racersField = RacePhysicsEngine::class.java.getDeclaredField("racers").apply { isAccessible = true }
+            val mr = (racersField.get(engine) as List<*>).first()!!
+            val cls = mr::class.java
+            cls.getDeclaredField("x").apply { isAccessible = true }.setFloat(mr, startX)
+            cls.getDeclaredField("y").apply { isAccessible = true }.setFloat(mr, startY)
+            cls.getDeclaredField("angleRad").apply { isAccessible = true }.setFloat(mr, tangent)
+            cls.getDeclaredField("vx").apply { isAccessible = true }.setFloat(mr, cos(tangent) * 140f)
+            cls.getDeclaredField("vy").apply { isAccessible = true }.setFloat(mr, sin(tangent) * 140f)
+
+            var sawCurb = false
+            repeat(6) {
+                engine.submitInput("p1", ControlInput(throttle = 1f, steer = 0f))
+                snap = engine.step(0.016f)
+                if (snap.racers.first().isOnInsideCurb) sawCurb = true
+            }
+            val r = snap.racers.first()
+            return r.speed to (sawCurb to r.curbTickSeq)
+        }
+
+        val (curbSpeed, curbFeedback) = measureStraightAccel(enableCurbs = true)
+        val (asphaltSpeed, asphaltFeedback) = measureStraightAccel(enableCurbs = false)
+        assertTrue("Rolling over inside apex curb must set isOnInsideCurb", curbFeedback.first)
+        assertTrue("Rolling over inside apex curb at speed must increment curbTickSeq", curbFeedback.second > 0)
+        assertFalse("Centerline asphalt must not trigger inside curb", asphaltFeedback.first)
+        assertEquals(0, asphaltFeedback.second)
+        assertEquals(
+            "Inside-apex curb must apply zero speed/accel penalty ($curbSpeed vs $asphaltSpeed)",
+            asphaltSpeed,
+            curbSpeed,
+            1.5f
+        )
+    }
+
+    @Test
+    fun skidMarkRingBuffer_emitsOnBrakingAndDriftCapsAt200AndFadesSmoothly() {
+        val buffer = com.example.ui.components.SkidMarkRingBuffer(
+            capacity = 200,
+            fadeDurationSec = 4.5f,
+            minStepDist = 10f
+        )
+        fun racer(
+            x: Float,
+            y: Float,
+            vx: Float,
+            vy: Float,
+            angleRad: Float = 0f,
+            braking: Boolean = false,
+            jumpZ: Float = 0f
+        ) = com.example.model.RacerState(
+            playerId = "p1",
+            name = "Acro",
+            carType = RcCarType.DRIFT_PHANTOM.name,
+            primaryColorArgb = 0xFFFF5722L,
+            accentColorArgb = 0xFFFFFFFFL,
+            x = x,
+            y = y,
+            vx = vx,
+            vy = vy,
+            angleRad = angleRad,
+            speed = kotlin.math.hypot(vx, vy),
+            isBraking = braking,
+            jumpZ = jumpZ
+        )
+
+        // 1. Normal straight cruising without brake or drift produces 0 segments
+        buffer.recordRacers(listOf(racer(100f, 100f, 220f, 0f, braking = false)), nowSec = 1.0f, isDriftMode = false, isRaceActive = true)
+        buffer.recordRacers(listOf(racer(130f, 100f, 220f, 0f, braking = false)), nowSec = 1.1f, isDriftMode = false, isRaceActive = true)
+        assertEquals(0, buffer.totalBufferedCount())
+
+        // 2. Active braking while moving forward emits rear left+right tire segments
+        buffer.recordRacers(listOf(racer(150f, 100f, 190f, 0f, braking = true)), nowSec = 1.2f, isDriftMode = false, isRaceActive = true)
+        buffer.recordRacers(listOf(racer(172f, 100f, 150f, 0f, braking = true)), nowSec = 1.3f, isDriftMode = false, isRaceActive = true)
+        assertEquals(2, buffer.totalBufferedCount())
+
+        // 3. Airborne braking emits nothing
+        buffer.recordRacers(listOf(racer(200f, 100f, 150f, 0f, braking = true, jumpZ = 0.5f)), nowSec = 1.4f, isDriftMode = false, isRaceActive = true)
+        assertEquals(2, buffer.totalBufferedCount())
+
+        // 4. Sideways drift slide emits skid segments even without brake pressed, and respects cap = 200
+        for (step in 0 until 150) {
+            val t = 2.0f + step * 0.02f
+            // Angle = 0, moving diagonally so lateralVel > 68f & speed > 90f
+            buffer.recordRacers(
+                listOf(racer(x = 220f + step * 18f, y = 100f + step * 8f, vx = 210f, vy = 120f, angleRad = 0f, braking = false)),
+                nowSec = t,
+                isDriftMode = true,
+                isRaceActive = true
+            )
+        }
+        assertEquals("Skid mark buffer must cap cleanly at 200 segments", 200, buffer.totalBufferedCount())
+        assertTrue(buffer.activeSegmentCount(nowSec = 5.0f) > 0)
+
+        // Verify smooth fade over 4.5s and full expiry at >= 4.5s past newest timestamp
+        val latestTimestamp = 2.0f + 149 * 0.02f
+        val alphasMidFade = mutableListOf<Float>()
+        buffer.forEachActiveSegment(nowSec = latestTimestamp + 2.25f, zLayerFilter = 0) { _, _, _, _, alpha ->
+            alphasMidFade.add(alpha)
+        }
+        assertTrue(alphasMidFade.isNotEmpty())
+        assertTrue("Older marks must fade partially below full alpha", alphasMidFade.all { it in 0.01f..0.4f })
+        assertEquals(0, buffer.activeSegmentCount(nowSec = latestTimestamp + 4.51f))
+    }
 }

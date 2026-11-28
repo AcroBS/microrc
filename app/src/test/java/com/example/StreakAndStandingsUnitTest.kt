@@ -747,4 +747,140 @@ class StreakAndStandingsUnitTest {
         assertFalse(unracedAll.any { it.trackKey == "SKYWAY_OVERPASS" })
         assertTrue(unracedAll.any { it.trackKey == "BACKYARD_DIRT" })
     }
+
+    @Test
+    fun weeklyCrewCup_scoresDailyGpAndDriftThreeTwoOneResetsMondayUtcAndTracksPreviousChamp() {
+        // 2026-11-29 is Sunday UTC -> week Mon 20261123..Sun 20261129
+        // 2026-11-30 is Monday UTC -> NEW week Mon 20261130..Sun 20261206 (crosses month boundary!)
+        assertEquals("20261123", com.example.data.WeeklyCrewCupCalculator.weekStartDateKeyUtc("20261123"))
+        assertEquals("20261123", com.example.data.WeeklyCrewCupCalculator.weekStartDateKeyUtc("20261129"))
+        assertEquals("20261129", com.example.data.WeeklyCrewCupCalculator.weekEndDateKeyUtc("20261123"))
+        assertEquals("20261130", com.example.data.WeeklyCrewCupCalculator.weekStartDateKeyUtc("20261130"))
+        assertEquals("20261123", com.example.data.WeeklyCrewCupCalculator.previousWeekStartDateKeyUtc("20261130"))
+        assertEquals("20261206", com.example.data.WeeklyCrewCupCalculator.weekEndDateKeyUtc("20261130"))
+
+        val myUid = "uid_me"
+        val robUid = "uid_rob"
+        val samUid = "uid_sam"
+        val novaUid = "uid_nova"
+        fun friend(uid: String, name: String) = FriendUiModel(
+            friendshipId = "f_$uid",
+            friendUid = uid,
+            displayName = name,
+            friendCode = "RC$uid",
+            carType = RcCarType.VOLT_BUGGY,
+            primaryColorArgb = 0xFF00E5FF,
+            accentColorArgb = 0xFFFFFFFF,
+            effectivelyOnline = true,
+            activityStatus = "ONLINE",
+            activeRoomId = "",
+            activeRoomCode = "",
+            activeRoomName = "",
+            statusLabel = "Online"
+        )
+        val friends = listOf(friend(robUid, "Rob"), friend(samUid, "Sam"), friend(novaUid, "Nova"))
+
+        val cloudEntries = listOf(
+            // Non-friend should be excluded from Weekly Crew Cup points
+            LeaderboardEntryDoc(
+                id = "stranger_gp", userId = "uid_stranger", driverName = "Stranger",
+                gameMode = GameMode.RACE.name, trackKey = "daily_20261124", boardKey = "RACE_daily_20261124_3L",
+                totalLaps = 3L, bestRaceTimeMs = 15_000L
+            ),
+            // Week 1 (20261123..20261129): Tuesday 20261124 Daily GP -> Rob 1st (3), Acro 2nd (2), Sam 3rd (1), Nova 4th (0)
+            LeaderboardEntryDoc(
+                id = "w1_gp_rob", userId = robUid, driverName = "Rob",
+                gameMode = GameMode.RACE.name, trackKey = "daily_20261124", boardKey = "RACE_daily_20261124_3L",
+                totalLaps = 3L, bestRaceTimeMs = 30_000L
+            ),
+            LeaderboardEntryDoc(
+                id = "w1_gp_me", userId = myUid, driverName = "Acro",
+                gameMode = GameMode.RACE.name, trackKey = "daily_20261124", boardKey = "RACE_daily_20261124_3L",
+                totalLaps = 3L, bestRaceTimeMs = 31_000L
+            ),
+            LeaderboardEntryDoc(
+                id = "w1_gp_sam", userId = samUid, driverName = "Sam",
+                gameMode = GameMode.RACE.name, trackKey = "daily_20261124", boardKey = "RACE_daily_20261124_3L",
+                totalLaps = 3L, bestRaceTimeMs = 32_000L
+            ),
+            LeaderboardEntryDoc(
+                id = "w1_gp_nova", userId = novaUid, driverName = "Nova",
+                gameMode = GameMode.RACE.name, trackKey = "daily_20261124", boardKey = "RACE_daily_20261124_3L",
+                totalLaps = 3L, bestRaceTimeMs = 33_000L
+            ),
+            // Week 1 Sunday 20261129 Daily Drift -> Rob 1st (3), Acro 2nd (2) => Week 1 totals: Rob=6, Acro=4, Sam=1, Nova=0
+            LeaderboardEntryDoc(
+                id = "w1_dr_rob", userId = robUid, driverName = "Rob",
+                gameMode = GameMode.DRIFT.name, trackKey = "daily_drift_20261129", boardKey = "DRIFT_daily_drift_20261129_3L",
+                totalLaps = 3L, bestRaceTimeMs = 36_000L
+            ),
+            LeaderboardEntryDoc(
+                id = "w1_dr_me", userId = myUid, driverName = "Acro",
+                gameMode = GameMode.DRIFT.name, trackKey = "daily_drift_20261129", boardKey = "DRIFT_daily_drift_20261129_3L",
+                totalLaps = 3L, bestRaceTimeMs = 37_500L
+            ),
+            // Built-in all-time board must NEVER contribute to Weekly Crew Cup points
+            LeaderboardEntryDoc(
+                id = "alltime_me", userId = myUid, driverName = "Acro",
+                gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_3L",
+                totalLaps = 3L, bestRaceTimeMs = 25_000L
+            )
+        )
+
+        // Check on Sunday 2026-11-29 (still Week 1)
+        val sundaySummary = FriendStandingsCalculator.compute(
+            myUid = myUid,
+            myName = "Acro",
+            friends = friends,
+            cloudEntries = cloudEntries,
+            localRecords = emptyList(),
+            todayDateKey = "20261129"
+        )
+        assertEquals(6, sundaySummary.crewLeaderboard.first { it.userId == robUid }.weeklyCupPoints)
+        assertEquals(4, sundaySummary.crewLeaderboard.first { it.userId == myUid }.weeklyCupPoints)
+        assertEquals(1, sundaySummary.crewLeaderboard.first { it.userId == samUid }.weeklyCupPoints)
+        assertEquals(0, sundaySummary.crewLeaderboard.first { it.userId == novaUid }.weeklyCupPoints)
+
+        // Advance to Monday 2026-11-30 (Week 2 reset at 00:00 UTC):
+        // All weeklyCupPoints reset to 0 until Monday's dailies are driven, and Rob becomes previousWeekChamp!
+        val mondaySummary = FriendStandingsCalculator.compute(
+            myUid = myUid,
+            myName = "Acro",
+            friends = friends,
+            cloudEntries = cloudEntries,
+            localRecords = emptyList(),
+            todayDateKey = "20261130"
+        )
+        assertTrue(mondaySummary.crewLeaderboard.all { it.weeklyCupPoints == 0 })
+        assertNotNull(mondaySummary.previousWeekChamp)
+        assertEquals("20261123", mondaySummary.previousWeekChamp!!.weekStartDateKey)
+        assertEquals(robUid, mondaySummary.previousWeekChamp!!.champUid)
+        assertEquals(6, mondaySummary.previousWeekChamp!!.points)
+        assertTrue(mondaySummary.crewLeaderboard.first { it.userId == robUid }.isWeeklyChamp)
+        assertFalse(mondaySummary.crewLeaderboard.first { it.userId == myUid }.isWeeklyChamp)
+
+        // When Week 1 cloud docs are absent, matching storedPreviousWeekChamp preserves Week 1 champ,
+        // while a stale record from an older week is ignored after rollover.
+        val fallbackSummary = FriendStandingsCalculator.compute(
+            myUid = myUid,
+            myName = "Acro",
+            friends = friends,
+            cloudEntries = emptyList(),
+            localRecords = emptyList(),
+            todayDateKey = "20261130",
+            storedPreviousWeekChamp = mondaySummary.previousWeekChamp
+        )
+        assertTrue(fallbackSummary.crewLeaderboard.first { it.userId == robUid }.isWeeklyChamp)
+
+        val staleIgnoredSummary = FriendStandingsCalculator.compute(
+            myUid = myUid,
+            myName = "Acro",
+            friends = friends,
+            cloudEntries = emptyList(),
+            localRecords = emptyList(),
+            todayDateKey = "20261207", // Next Monday rollover!
+            storedPreviousWeekChamp = mondaySummary.previousWeekChamp
+        )
+        assertTrue(staleIgnoredSummary.crewLeaderboard.none { it.isWeeklyChamp })
+    }
 }

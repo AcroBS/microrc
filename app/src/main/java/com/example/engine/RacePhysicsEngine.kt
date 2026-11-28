@@ -127,7 +127,10 @@ class RacePhysicsEngine(
         var perfectLaunchBannerMs: Long = 0L,
         var wheelspinSmokeMs: Long = 0L,
         var zLayer: Int = 0,
-        var elevation: Float = 0f
+        var elevation: Float = 0f,
+        var isOnInsideCurb: Boolean = false,
+        var curbTickSeq: Int = 0,
+        var curbHapticCooldownMs: Long = 0L
     )
 
     private data class MutableRocket(
@@ -1703,6 +1706,7 @@ class RacePhysicsEngine(
         if (racer.invertedSteerMs > 0L) racer.invertedSteerMs = (racer.invertedSteerMs - dtMs).coerceAtLeast(0L)
         if (racer.portalCooldownMs > 0L) racer.portalCooldownMs = (racer.portalCooldownMs - dtMs).coerceAtLeast(0L)
         if (racer.wallBumpCooldownMs > 0L) racer.wallBumpCooldownMs = (racer.wallBumpCooldownMs - dtMs).coerceAtLeast(0L)
+        if (racer.curbHapticCooldownMs > 0L) racer.curbHapticCooldownMs = (racer.curbHapticCooldownMs - dtMs).coerceAtLeast(0L)
         if (racer.jumpCooldownMs > 0L) racer.jumpCooldownMs = (racer.jumpCooldownMs - dtMs).coerceAtLeast(0L)
         if (racer.flagPickupImmunityMs > 0L) {
             racer.flagPickupImmunityMs = (racer.flagPickupImmunityMs - dtMs).coerceAtLeast(0L)
@@ -2093,6 +2097,23 @@ class RacePhysicsEngine(
         }
         val inGravelTrap = !isAirborne && !track.isStunt &&
             TrackCatalog.isPointOnGravelPatch(track, racer.x, racer.y, racer.zLayer)
+        val onInsideCurb = !isAirborne && !track.isArena && !track.isStunt &&
+            TrackCatalog.isPointOnInsideApexCurb(
+                track = track,
+                x = racer.x,
+                y = racer.y,
+                zLayer = racer.zLayer,
+                carRadiusPx = racer.carType.radiusPx
+            )
+        racer.isOnInsideCurb = onInsideCurb
+        if (onInsideCurb &&
+            phase == RacePhase.RACING &&
+            hypot(racer.vx, racer.vy) > 55f &&
+            racer.curbHapticCooldownMs == 0L
+        ) {
+            racer.curbHapticCooldownMs = 135L
+            racer.curbTickSeq += 1
+        }
 
         // Moving hydroplane spin/skid on rain puddles across all modes — retains forward
         // momentum and slides sideways while spinning, distinct from mine/rocket/shock stun.
@@ -3953,7 +3974,9 @@ class RacePhysicsEngine(
                     perfectLaunchBannerMs = r.perfectLaunchBannerMs,
                     wheelspinSmokeMs = r.wheelspinSmokeMs,
                     zLayer = r.zLayer,
-                    elevation = r.elevation
+                    elevation = r.elevation,
+                    isOnInsideCurb = r.isOnInsideCurb,
+                    curbTickSeq = r.curbTickSeq
                 )
             },
             itemBoxes = itemBoxes.toList(),

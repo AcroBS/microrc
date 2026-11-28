@@ -479,6 +479,7 @@ fun MicroRCApp(
     val onlineFriendsList = remember(friendsList) { friendsList.filter { it.effectivelyOnline } }
     val onlineFriendsCount = onlineFriendsList.size
     val friendCircleEntries = activeOnlineVm?.let { it.friendCircleEntries.collectAsState().value }.orEmpty()
+    val storedWeeklyChamp by viewModel.weeklyCrewChamp.collectAsState()
     val friendStandings = remember(
         currentUser?.uid,
         profile.name,
@@ -486,7 +487,8 @@ fun MicroRCApp(
         friendCircleEntries,
         localLeaderboard,
         currentUtcDateKey,
-        customTrackNames
+        customTrackNames,
+        storedWeeklyChamp
     ) {
         FriendStandingsCalculator.compute(
             myUid = currentUser?.uid,
@@ -496,8 +498,13 @@ fun MicroRCApp(
             localRecords = localLeaderboard,
             todayDateKey = currentUtcDateKey,
             maxHighlights = 10,
-            customTrackNames = customTrackNames
+            customTrackNames = customTrackNames,
+            storedPreviousWeekChamp = storedWeeklyChamp
         )
+    }
+
+    LaunchedEffect(friendStandings.previousWeekChamp) {
+        friendStandings.previousWeekChamp?.let { viewModel.saveWeeklyCrewChamp(it) }
     }
 
     LaunchedEffect(isOnlineSession, onlineResults?.phase, onlineResults?.raceTimeMs) {

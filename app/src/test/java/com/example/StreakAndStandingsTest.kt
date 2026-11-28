@@ -198,7 +198,7 @@ class StreakAndStandingsTest {
         composeTestRule.onNodeWithTag("home_standings_rank_badge", useUnmergedTree = true).assertIsDisplayed()
         composeTestRule.onNodeWithText("CREW RANKING").assertIsDisplayed()
         composeTestRule.onNodeWithText("Alex (You)").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Lead 1 • Chase 0").assertIsDisplayed()
+        composeTestRule.onNodeWithText("0 pts • Lead 1 • Chase 0").assertIsDisplayed()
 
         composeTestRule.onNodeWithTag("home_challenges_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("home_online_section").performScrollTo().assertIsDisplayed()
@@ -703,7 +703,7 @@ class StreakAndStandingsTest {
         composeTestRule.onNodeWithText("Acro (You)").assertIsDisplayed()
         composeTestRule.onNodeWithText("Rob").assertIsDisplayed()
         composeTestRule.onNodeWithText("Frisoer").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Lead 2 • Chase 1").assertIsDisplayed()
+        composeTestRule.onNodeWithText("0 pts • Lead 2 • Chase 1").assertIsDisplayed()
 
         composeTestRule.onNodeWithTag("standings_chasing_section").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithText("Chasing (1)").assertIsDisplayed()
@@ -860,11 +860,11 @@ class StreakAndStandingsTest {
         composeTestRule.onNodeWithTag("home_crew_ranking_row_4", useUnmergedTree = true).assertDoesNotExist()
 
         composeTestRule.onNodeWithText("Acro (You)").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Lead 2 • Chase 0").assertIsDisplayed()
+        composeTestRule.onNodeWithText("0 pts • Lead 2 • Chase 0").assertIsDisplayed()
         composeTestRule.onNodeWithText("Frisoer").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Lead 0 • Chase 1").assertIsDisplayed()
+        composeTestRule.onNodeWithText("0 pts • Lead 0 • Chase 1").assertIsDisplayed()
         composeTestRule.onNodeWithText("Rob").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Lead 0 • Chase 2").assertIsDisplayed()
+        composeTestRule.onNodeWithText("0 pts • Lead 0 • Chase 2").assertIsDisplayed()
 
         // Individual track delta rows are moved out of HomeScreen into Friend Standings
         composeTestRule.onNodeWithText("You lead by +0.67s").assertDoesNotExist()
@@ -1222,5 +1222,177 @@ class StreakAndStandingsTest {
         composeTestRule.onNodeWithTag("standings_chasing_row_0").performScrollTo().performClick()
         assertEquals("RACE_LIVING_ROOM_GP_5L", launchedItems.last().boardKey)
         assertEquals(5, launchedItems.last().totalLaps)
+    }
+
+    @Test
+    fun weeklyCrewCup_displaysWeeklyPointsAndChampTrophyBadgeOnHomeAndStandings() {
+        // Choose Wednesday 2026-11-25 UTC (Mon=20261123, prev week Mon=20261116..20261122)
+        val today = "20261125"
+        val prevDay = "20261120"
+        val friends = listOf(
+            FriendUiModel(
+                friendshipId = "f_rob",
+                friendUid = "uid_rob",
+                displayName = "Rob",
+                friendCode = "RCROB001",
+                carType = RcCarType.VOLT_BUGGY,
+                primaryColorArgb = 0xFF00E5FF,
+                accentColorArgb = 0xFFFFFFFF,
+                effectivelyOnline = true,
+                activityStatus = "ONLINE",
+                activeRoomId = "",
+                activeRoomCode = "",
+                activeRoomName = "",
+                statusLabel = "Online"
+            )
+        )
+        val summary = FriendStandingsCalculator.compute(
+            myUid = "uid_me",
+            myName = "Acro",
+            friends = friends,
+            cloudEntries = listOf(
+                // Previous week (Rob wins Daily GP = Weekly Champ badge)
+                LeaderboardEntryDoc(
+                    id = "prev_rob_gp", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.RACE.name,
+                    trackKey = "daily_$prevDay",
+                    boardKey = "RACE_daily_${prevDay}_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 31_000L
+                ),
+                LeaderboardEntryDoc(
+                    id = "prev_me_gp", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.RACE.name,
+                    trackKey = "daily_$prevDay",
+                    boardKey = "RACE_daily_${prevDay}_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 32_500L
+                ),
+                // Current week Daily GP (1st Acro = 3 pts, 2nd Rob = 2 pts)
+                LeaderboardEntryDoc(
+                    id = "cur_me_gp", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.RACE.name,
+                    trackKey = "daily_$today",
+                    boardKey = "RACE_daily_${today}_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 29_500L
+                ),
+                LeaderboardEntryDoc(
+                    id = "cur_rob_gp", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.RACE.name,
+                    trackKey = "daily_$today",
+                    boardKey = "RACE_daily_${today}_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 30_800L
+                ),
+                // Current week Daily Drift (1st Acro = 3 pts, 2nd Rob = 2 pts -> Acro 6 pts, Rob 4 pts)
+                LeaderboardEntryDoc(
+                    id = "cur_me_dr", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.DRIFT.name,
+                    trackKey = "daily_drift_$today",
+                    boardKey = "DRIFT_daily_drift_${today}_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 36_200L
+                ),
+                LeaderboardEntryDoc(
+                    id = "cur_rob_dr", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.DRIFT.name,
+                    trackKey = "daily_drift_$today",
+                    boardKey = "DRIFT_daily_drift_${today}_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 37_400L
+                )
+            ),
+            localRecords = emptyList(),
+            todayDateKey = today
+        )
+
+        composeTestRule.setContent {
+            MicroRCTheme {
+                HomeScreen(
+                    profile = PlayerProfile(playerId = "uid_me", name = "Acro"),
+                    onHostRace = {},
+                    onJoinRace = {},
+                    onSoloRace = {},
+                    onOpenGarage = {},
+                    onUpdateDriverName = {},
+                    isSignedIn = true,
+                    friendsCount = 1,
+                    friendStandings = summary
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("home_streak_standings_card").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("6 pts • Lead 2 • Chase 0").assertIsDisplayed()
+        composeTestRule.onNodeWithText("4 pts • Lead 0 • Chase 2").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_weekly_champ_badge_uid_rob", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_weekly_champ_badge_uid_me", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun friendStandingsScreen_displaysWeeklyCupPointsAndWeeklyChampBadge() {
+        val today = "20261125"
+        val prevDay = "20261121"
+        val friends = listOf(
+            FriendUiModel(
+                friendshipId = "f_rob",
+                friendUid = "uid_rob",
+                displayName = "Rob",
+                friendCode = "RCROB001",
+                carType = RcCarType.VOLT_BUGGY,
+                primaryColorArgb = 0xFF00E5FF,
+                accentColorArgb = 0xFFFFFFFF,
+                effectivelyOnline = true,
+                activityStatus = "ONLINE",
+                activeRoomId = "",
+                activeRoomCode = "",
+                activeRoomName = "",
+                statusLabel = "Online"
+            )
+        )
+        val summary = FriendStandingsCalculator.compute(
+            myUid = "uid_me",
+            myName = "Acro",
+            friends = friends,
+            cloudEntries = listOf(
+                LeaderboardEntryDoc(
+                    id = "prev_me_gp", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.RACE.name,
+                    trackKey = "daily_$prevDay",
+                    boardKey = "RACE_daily_${prevDay}_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 28_900L
+                ),
+                LeaderboardEntryDoc(
+                    id = "cur_me_gp", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.RACE.name,
+                    trackKey = "daily_$today",
+                    boardKey = "RACE_daily_${today}_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 29_500L
+                ),
+                LeaderboardEntryDoc(
+                    id = "cur_rob_gp", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.RACE.name,
+                    trackKey = "daily_$today",
+                    boardKey = "RACE_daily_${today}_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 30_800L
+                )
+            ),
+            localRecords = emptyList(),
+            todayDateKey = today
+        )
+
+        composeTestRule.setContent {
+            MicroRCTheme {
+                com.example.ui.screens.FriendStandingsScreen(
+                    standings = summary,
+                    isSignedIn = true,
+                    friendsCount = 1,
+                    onOpenManageFriends = {},
+                    onLaunchGhostRace = {},
+                    onBack = {}
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithTag("standings_crew_ranking_card").assertIsDisplayed()
+        composeTestRule.onNodeWithText("3 pts • Lead 1 • Chase 0").assertIsDisplayed()
+        composeTestRule.onNodeWithText("2 pts • Lead 0 • Chase 1").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("standings_weekly_champ_badge_uid_me", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("standings_weekly_champ_badge_uid_rob", useUnmergedTree = true).assertDoesNotExist()
     }
 }

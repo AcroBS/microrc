@@ -172,6 +172,65 @@ data class FriendBoardStandingItem(
     val topFriendGhostId: String? = null
 )
 
+@com.squareup.moshi.JsonClass(generateAdapter = true)
+data class WeeklyCrewChampRecord(
+    val weekStartDateKey: String = "",
+    val champUid: String = "",
+    val champName: String = "",
+    val points: Int = 0
+)
+
+object WeeklyCrewCupCalculator {
+    private val DATE_REGEX = Regex("""^\d{8}$""")
+    private val UTC_TZ: TimeZone = TimeZone.getTimeZone("UTC")
+
+    fun weekStartDateKeyUtc(dateKey: String): String {
+        val clean = dateKey.trim()
+        if (!DATE_REGEX.matches(clean)) return ""
+        val fmt = SimpleDateFormat("yyyyMMdd", Locale.US).apply {
+            timeZone = UTC_TZ
+            isLenient = false
+        }
+        val parsed = runCatching { fmt.parse(clean) }.getOrNull() ?: return ""
+        val cal = Calendar.getInstance(UTC_TZ, Locale.US).apply {
+            time = parsed
+            val daysFromMonday = (get(Calendar.DAY_OF_WEEK) - Calendar.MONDAY + 7) % 7
+            add(Calendar.DAY_OF_YEAR, -daysFromMonday)
+        }
+        return fmt.format(cal.time)
+    }
+
+    fun addUtcDays(dateKey: String, days: Int): String {
+        val clean = dateKey.trim()
+        if (!DATE_REGEX.matches(clean)) return ""
+        val fmt = SimpleDateFormat("yyyyMMdd", Locale.US).apply {
+            timeZone = UTC_TZ
+            isLenient = false
+        }
+        val parsed = runCatching { fmt.parse(clean) }.getOrNull() ?: return ""
+        val cal = Calendar.getInstance(UTC_TZ, Locale.US).apply {
+            time = parsed
+            add(Calendar.DAY_OF_YEAR, days)
+        }
+        return fmt.format(cal.time)
+    }
+
+    fun weekEndDateKeyUtc(weekStartDateKey: String): String = addUtcDays(weekStartDateKey, 6)
+
+    fun previousWeekStartDateKeyUtc(dateKey: String): String {
+        val curStart = weekStartDateKeyUtc(dateKey)
+        if (curStart.isEmpty()) return ""
+        return addUtcDays(curStart, -7)
+    }
+
+    fun pointsForRank(zeroBasedIndex: Int): Int = when (zeroBasedIndex) {
+        0 -> 3
+        1 -> 2
+        2 -> 1
+        else -> 0
+    }
+}
+
 data class FriendCrewMemberRank(
     val userId: String,
     val displayName: String,
@@ -182,7 +241,9 @@ data class FriendCrewMemberRank(
     val h2hMatchupsWon: Int,
     val boardsEntered: Int,
     val overallPoints: Int = 0,
-    val trailingBoardsCount: Int = 0
+    val trailingBoardsCount: Int = 0,
+    val weeklyCupPoints: Int = 0,
+    val isWeeklyChamp: Boolean = false
 )
 
 enum class StandingsDistanceFilter(
@@ -210,7 +271,8 @@ data class FriendStandingsSummary(
     val highlightBoards: List<FriendBoardStandingItem> = emptyList(),
     val allBoards: List<FriendBoardStandingItem> = emptyList(),
     val todayDailyGpStanding: FriendBoardStandingItem? = null,
-    val todayDailyDriftStanding: FriendBoardStandingItem? = null
+    val todayDailyDriftStanding: FriendBoardStandingItem? = null,
+    val previousWeekChamp: WeeklyCrewChampRecord? = null
 )
 
 private data class NormalizedStandingEntry(
@@ -229,21 +291,20 @@ object FriendStandingsCalculator {
 
     private val DAILY_BOARD_DATE_REGEX = Regex("""^(?:RACE_daily|DRIFT_daily_drift)_(\d{8})(?:_|$)""")
 
+    internal fun extractDailyDateKey(trackKey: String, boardKey: String): String? {
+        val dateFromTrack = DailyChallengeCatalog.extractDateKey(trackKey)
+            ?: com.example.drift.DriftDailyChallenge.extractDateKey(trackKey)
+        if (dateFromTrack != null) return dateFromTrack
+        return DAILY_BOARD_DATE_REGEX.find(boardKey)?.groupValues?.getOrNull(1)
+    }
+
     internal fun isExpiredDailyBoard(
         trackKey: String,
         boardKey: String,
         todayDateKey: String
     ): Boolean {
-        val dateFromTrack = DailyChallengeCatalog.extractDateKey(trackKey)
-            ?: com.example.drift.DriftDailyChallenge.extractDateKey(trackKey)
-        if (dateFromTrack != null) {
-            return dateFromTrack != todayDateKey
-        }
-        val boardMatch = DAILY_BOARD_DATE_REGEX.find(boardKey)
-        if (boardMatch != null) {
-            return boardMatch.groupValues[1] != todayDateKey
-        }
-        return false
+        val dailyDate = extractDailyDateKey(trackKey, boardKey) ?: return false
+        return dailyDate != todayDateKey
     }
 
     fun compute(
@@ -254,18 +315,24 @@ object FriendStandingsCalculator {
         localRecords: List<LocalLeaderboardRecord>,
         todayDateKey: String = DailyChallengeCatalog.todayDateKey(),
         maxHighlights: Int = 8,
-        customTrackNames: Map<String, String> = emptyMap()
+        customTrackNames: Map<String, String> = emptyMap(),
+        storedPreviousWeekChamp: WeeklyCrewChampRecord? = null
     ): FriendStandingsSummary {
         val friendMap = friends.associateBy { it.friendUid }
         val cleanMyUid = myUid?.takeIf { it.isNotBlank() } ?: "local_self"
         val cleanMyName = myName.trim().ifEmpty { "You" }
+        val currentWeekStart = WeeklyCrewCupCalculator.weekStartDateKeyUtc(todayDateKey)
+        val currentWeekEnd = WeeklyCrewCupCalculator.weekEndDateKeyUtc(currentWeekStart)
+        val prevWeekStart = WeeklyCrewCupCalculator.previousWeekStartDateKeyUtc(todayDateKey)
+        val prevWeekEnd = WeeklyCrewCupCalculator.weekEndDateKeyUtc(prevWeekStart)
 
-        // 1. Collect valid cloud entries for self + friends (excluding past/expired Daily Challenges)
+        // 1. Collect valid cloud entries for self + friends (excluding past Daily Challenges from active boards,
+        //    while retaining current & previous UTC week Daily GP / Daily Drift entries for Weekly Crew Cup)
         val mergedByUserAndBoard = LinkedHashMap<Pair<String, String>, NormalizedStandingEntry>()
+        val weeklyDailyByUserAndBoard = LinkedHashMap<Pair<String, String>, Pair<String, NormalizedStandingEntry>>()
         for (doc in cloudEntries) {
             if (doc.userId.isBlank() || doc.boardKey.isBlank()) continue
             if (doc.userId != cleanMyUid && doc.userId !in friendMap) continue
-            if (isExpiredDailyBoard(doc.trackKey, doc.boardKey, todayDateKey)) continue
             val rawMode = runCatching { GameMode.valueOf(doc.gameMode) }.getOrDefault(GameMode.RACE)
             val mode = if (com.example.drift.DriftFeature.isDriftBoardKey(doc.boardKey)) GameMode.DRIFT else rawMode
             val isStunts = mode == GameMode.STUNTS || doc.boardKey.startsWith("STUNTS_")
@@ -288,14 +355,26 @@ object FriendStandingsCalculator {
                 bestScore = doc.bestScore.toInt(),
                 ghostId = if (doc.hasGhost && doc.ghostId.isNotBlank()) doc.ghostId else null
             )
+            val dailyDate = extractDailyDateKey(doc.trackKey, doc.boardKey)
+            if (dailyDate != null && !isStunts && currentWeekStart.isNotEmpty()) {
+                val inCupWindow = (dailyDate in currentWeekStart..currentWeekEnd) ||
+                    (prevWeekStart.isNotEmpty() && dailyDate in prevWeekStart..prevWeekEnd)
+                if (inCupWindow) {
+                    val cupBoardId = "${mode.name}_$dailyDate"
+                    val cupKey = candidate.userId to cupBoardId
+                    val existing = weeklyDailyByUserAndBoard[cupKey]?.second
+                    weeklyDailyByUserAndBoard[cupKey] = dailyDate to pickBetter(existing, candidate, isStunts = false)
+                }
+            }
+            if (dailyDate != null && dailyDate != todayDateKey) continue
+
             val key = candidate.userId to candidate.boardKey
             mergedByUserAndBoard[key] = pickBetter(mergedByUserAndBoard[key], candidate, isStunts)
         }
 
-        // 2. Merge local solo PBs for self (excluding past/expired Daily Challenges)
+        // 2. Merge local solo PBs for self (excluding past Daily Challenges from active boards)
         for (rec in localRecords) {
             if (rec.boardKey.isBlank()) continue
-            if (isExpiredDailyBoard(rec.trackKey, rec.boardKey, todayDateKey)) continue
             val rawMode = runCatching { GameMode.valueOf(rec.gameMode) }.getOrDefault(GameMode.RACE)
             val mode = if (com.example.drift.DriftFeature.isDriftBoardKey(rec.boardKey)) GameMode.DRIFT else rawMode
             val isStunts = mode == GameMode.STUNTS || rec.boardKey.startsWith("STUNTS_")
@@ -313,6 +392,19 @@ object FriendStandingsCalculator {
                 bestScore = rec.bestScore,
                 ghostId = null
             )
+            val dailyDate = extractDailyDateKey(rec.trackKey, rec.boardKey)
+            if (dailyDate != null && !isStunts && currentWeekStart.isNotEmpty()) {
+                val inCupWindow = (dailyDate in currentWeekStart..currentWeekEnd) ||
+                    (prevWeekStart.isNotEmpty() && dailyDate in prevWeekStart..prevWeekEnd)
+                if (inCupWindow) {
+                    val cupBoardId = "${mode.name}_$dailyDate"
+                    val cupKey = cleanMyUid to cupBoardId
+                    val existing = weeklyDailyByUserAndBoard[cupKey]?.second
+                    weeklyDailyByUserAndBoard[cupKey] = dailyDate to pickBetter(existing, candidate, isStunts = false)
+                }
+            }
+            if (dailyDate != null && dailyDate != todayDateKey) continue
+
             val key = cleanMyUid to rec.boardKey
             mergedByUserAndBoard[key] = pickBetter(mergedByUserAndBoard[key], candidate, isStunts)
         }
@@ -445,6 +537,60 @@ object FriendStandingsCalculator {
             )
         }
 
+        // 3b. Weekly Crew Cup points (3/2/1 on Daily GP & Daily Drift, UTC Mon-Sun reset)
+        val currentWeekCupPoints = mutableMapOf<String, Int>()
+        val prevWeekCupPoints = mutableMapOf<String, Int>()
+        val prevWeekFirstPlaces = mutableMapOf<String, Int>()
+
+        val cupBoards = weeklyDailyByUserAndBoard.entries.groupBy { (pairKey, _) ->
+            pairKey.second
+        }
+        for ((_, boardEntriesWithKey) in cupBoards) {
+            val dailyDate = boardEntriesWithKey.first().value.first
+            val ranked = boardEntriesWithKey
+                .map { it.value.second }
+                .sortedWith(
+                    compareBy<NormalizedStandingEntry> { it.bestRaceTimeMs }
+                        .thenBy { it.userId != cleanMyUid }
+                        .thenBy { it.userId }
+                )
+            ranked.forEachIndexed { idx, entry ->
+                val pts = WeeklyCrewCupCalculator.pointsForRank(idx)
+                if (pts <= 0) return@forEachIndexed
+                crewNames.putIfAbsent(entry.userId, entry.driverName)
+                if (currentWeekStart.isNotEmpty() && dailyDate in currentWeekStart..currentWeekEnd) {
+                    currentWeekCupPoints[entry.userId] = (currentWeekCupPoints[entry.userId] ?: 0) + pts
+                } else if (prevWeekStart.isNotEmpty() && dailyDate in prevWeekStart..prevWeekEnd) {
+                    prevWeekCupPoints[entry.userId] = (prevWeekCupPoints[entry.userId] ?: 0) + pts
+                    if (idx == 0) {
+                        prevWeekFirstPlaces[entry.userId] = (prevWeekFirstPlaces[entry.userId] ?: 0) + 1
+                    }
+                }
+            }
+        }
+
+        val resolvedPreviousWeekChamp: WeeklyCrewChampRecord? = when {
+            prevWeekCupPoints.isNotEmpty() && prevWeekStart.isNotEmpty() -> {
+                val winnerUid = prevWeekCupPoints.keys.sortedWith(
+                    compareByDescending<String> { prevWeekCupPoints[it] ?: 0 }
+                        .thenByDescending { prevWeekFirstPlaces[it] ?: 0 }
+                        .thenBy { it != cleanMyUid }
+                        .thenBy { crewNames[it]?.lowercase(Locale.US).orEmpty() }
+                ).first()
+                WeeklyCrewChampRecord(
+                    weekStartDateKey = prevWeekStart,
+                    champUid = winnerUid,
+                    champName = crewNames[winnerUid] ?: "Driver",
+                    points = prevWeekCupPoints[winnerUid] ?: 0
+                )
+            }
+            storedPreviousWeekChamp != null &&
+                prevWeekStart.isNotEmpty() &&
+                storedPreviousWeekChamp.weekStartDateKey == prevWeekStart &&
+                storedPreviousWeekChamp.champUid.isNotBlank() -> storedPreviousWeekChamp
+            else -> null
+        }
+
         // 4. Overall ranking across ALL friends + yourself (including friends with 0 entries yet)
         val allRosterUids = (listOf(cleanMyUid) + friends.map { it.friendUid } + boardsEntered.keys)
             .filter { it.isNotBlank() }
@@ -453,6 +599,7 @@ object FriendStandingsCalculator {
         val sortedCrew = allRosterUids.sortedWith(
             compareByDescending<String> { contestedWins[it] ?: 0 }
                 .thenByDescending { h2hWins[it] ?: 0 }
+                .thenByDescending { currentWeekCupPoints[it] ?: 0 }
                 .thenByDescending { totalLeads[it] ?: 0 }
                 .thenByDescending { boardsEntered[it] ?: 0 }
                 .thenBy { it != cleanMyUid }
@@ -464,6 +611,7 @@ object FriendStandingsCalculator {
             val h2h = h2hWins[uid] ?: 0
             val leads = totalLeads[uid] ?: 0
             val boards = boardsEntered[uid] ?: 0
+            val weeklyPts = currentWeekCupPoints[uid] ?: 0
             val points = wins * 3 + h2h + boards
             FriendCrewMemberRank(
                 userId = uid,
@@ -475,7 +623,9 @@ object FriendStandingsCalculator {
                 h2hMatchupsWon = h2h,
                 boardsEntered = boards,
                 overallPoints = points,
-                trailingBoardsCount = trails
+                trailingBoardsCount = trails,
+                weeklyCupPoints = weeklyPts,
+                isWeeklyChamp = resolvedPreviousWeekChamp?.champUid == uid
             )
         }
         val myCrewRank = crewLeaderboard.firstOrNull { it.isSelf }?.rank ?: 1
@@ -534,7 +684,8 @@ object FriendStandingsCalculator {
             highlightBoards = highlighted,
             allBoards = sortedBoards,
             todayDailyGpStanding = todayDailyGpStanding,
-            todayDailyDriftStanding = todayDailyDriftStanding
+            todayDailyDriftStanding = todayDailyDriftStanding,
+            previousWeekChamp = resolvedPreviousWeekChamp
         )
     }
 

@@ -364,7 +364,9 @@ data class RacerState(
     val perfectLaunchBannerMs: Long = 0L,
     val wheelspinSmokeMs: Long = 0L,
     val zLayer: Int = 0,
-    val elevation: Float = 0f
+    val elevation: Float = 0f,
+    val isOnInsideCurb: Boolean = false,
+    val curbTickSeq: Int = 0
 )
 
 @JsonClass(generateAdapter = true)

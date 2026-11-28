@@ -1515,25 +1515,42 @@ private fun HomeCrewRankingCard(
                                 modifier = Modifier.width(34.dp)
                             )
 
-                            Text(
-                                text = if (member.isSelf) "${member.displayName} (You)" else member.displayName,
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontFamily = PlusJakartaFontFamily,
-                                    fontWeight = if (member.isSelf || member.rank == 1) FontWeight.Bold else FontWeight.SemiBold
-                                ),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = if (member.isSelf) "${member.displayName} (You)" else member.displayName,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        fontFamily = PlusJakartaFontFamily,
+                                        fontWeight = if (member.isSelf || member.rank == 1) FontWeight.Bold else FontWeight.SemiBold
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                if (member.isWeeklyChamp) {
+                                    Icon(
+                                        imageVector = Icons.Default.EmojiEvents,
+                                        contentDescription = "Weekly Champ",
+                                        tint = goldAccent,
+                                        modifier = Modifier
+                                            .size(14.dp)
+                                            .testTag("home_weekly_champ_badge_${member.userId}")
+                                    )
+                                }
+                            }
 
                             Text(
-                                text = "Lead ${member.contestedWins} • Chase ${member.trailingBoardsCount}",
-                                style = MaterialTheme.typography.labelMedium.copy(
+                                text = "${member.weeklyCupPoints} pts • Lead ${member.contestedWins} • Chase ${member.trailingBoardsCount}",
+                                style = MaterialTheme.typography.labelSmall.copy(
                                     fontFamily = JetBrainsMonoFontFamily
                                 ),
                                 color = if (member.rank == 1) goldAccent else MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }

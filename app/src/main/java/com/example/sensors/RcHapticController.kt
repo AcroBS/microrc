@@ -32,6 +32,7 @@ class RcHapticController(context: Context) {
 
     private var lastCollisionMs: Long = 0L
     private var lastPowerUpMs: Long = 0L
+    private var lastCurbTickMs: Long = 0L
 
     fun onCollision(heavy: Boolean = false) {
         if (!enabled) return
@@ -76,6 +77,14 @@ class RcHapticController(context: Context) {
             amplitudes = intArrayOf(0, 140, 0, 195, 0, 250),
             fallbackMs = 60L
         )
+    }
+
+    fun onCurbTick() {
+        if (!enabled) return
+        val now = SystemClock.uptimeMillis()
+        if (now - lastCurbTickMs < 110L) return
+        lastCurbTickMs = now
+        vibrateOneShot(durationMs = 11L, amplitude = 85)
     }
 
     private fun vibrateOneShot(durationMs: Long, amplitude: Int) {

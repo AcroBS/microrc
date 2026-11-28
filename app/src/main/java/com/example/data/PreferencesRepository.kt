@@ -63,6 +63,7 @@ class PreferencesRepository(context: Context) {
     private val localLeaderboardListAdapter = moshi.adapter<List<LocalLeaderboardRecord>>(
         Types.newParameterizedType(List::class.java, LocalLeaderboardRecord::class.java)
     )
+    private val weeklyChampAdapter = moshi.adapter(WeeklyCrewChampRecord::class.java)
 
     private object Keys {
         val PLAYER_ID = stringPreferencesKey("player_id")
@@ -113,6 +114,7 @@ class PreferencesRepository(context: Context) {
         val CAR_UPGRADES_JSON = stringPreferencesKey("car_upgrades_json")
         val GARAGE_EARNED_TOKENS = intPreferencesKey("garage_earned_tokens")
         val GARAGE_LAST_TOKEN_DATE_KEY = stringPreferencesKey("garage_last_token_date_key")
+        val WEEKLY_CREW_CHAMP_JSON = stringPreferencesKey("weekly_crew_champ_json")
     }
 
     val profileFlow: Flow<PlayerProfile> = dataStore.data.map { prefs ->
@@ -247,6 +249,27 @@ class PreferencesRepository(context: Context) {
             storedBest = prefs[Keys.STREAK_BEST_DAYS] ?: 0,
             lastDateKey = prefs[Keys.STREAK_LAST_DATE_KEY]
         )
+    }
+
+    val weeklyCrewChampFlow: Flow<WeeklyCrewChampRecord?> = dataStore.data.map { prefs ->
+        val raw = prefs[Keys.WEEKLY_CREW_CHAMP_JSON]
+        if (raw.isNullOrBlank()) {
+            null
+        } else {
+            runCatching { weeklyChampAdapter.fromJson(raw) }.getOrNull()
+        }
+    }
+
+    suspend fun saveWeeklyCrewChamp(record: WeeklyCrewChampRecord) {
+        if (record.weekStartDateKey.isBlank() || record.champUid.isBlank()) return
+        dataStore.edit { prefs ->
+            val current = prefs[Keys.WEEKLY_CREW_CHAMP_JSON]?.let {
+                runCatching { weeklyChampAdapter.fromJson(it) }.getOrNull()
+            }
+            if (current != record) {
+                prefs[Keys.WEEKLY_CREW_CHAMP_JSON] = weeklyChampAdapter.toJson(record)
+            }
+        }
     }
 
     suspend fun getLastNotifiedDailyKey(): String? {
