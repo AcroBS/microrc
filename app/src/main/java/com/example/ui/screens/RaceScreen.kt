@@ -284,16 +284,6 @@ fun RaceScreen(
         lastPortalWarpSeq = seq
     }
 
-    var lastCurbTickSeq by remember(localRacer?.playerId) { mutableStateOf<Int?>(null) }
-    LaunchedEffect(localRacer?.curbTickSeq) {
-        val seq = localRacer?.curbTickSeq ?: return@LaunchedEffect
-        val prev = lastCurbTickSeq
-        if (prev != null && seq > prev) {
-            hapticController?.onCurbTick()
-        }
-        lastCurbTickSeq = seq
-    }
-
     val meteorFlashAlpha = remember { Animatable(0f) }
     val meteorShakeAnim = remember { Animatable(0f) }
     var lastMeteorImpactSeq by remember { mutableStateOf<Int?>(null) }

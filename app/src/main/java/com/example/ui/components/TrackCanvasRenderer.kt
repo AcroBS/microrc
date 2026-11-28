@@ -61,16 +61,6 @@ private val racerNamePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
 
 private val nightLayerPaint = ComposePaint()
 
-private class CachedCurbLayerPaths(
-    val zLayer: Int,
-    val redPath: Path,
-    val whitePath: Path
-)
-
-private val curbLayerPathCache = java.util.Collections.synchronizedMap(
-    java.util.WeakHashMap<TrackDefinition, List<CachedCurbLayerPaths>>()
-)
-
 fun DrawScope.drawTrackWorld(
     track: TrackDefinition,
     itemBoxes: List<ItemBoxState>,
@@ -262,16 +252,32 @@ fun DrawScope.drawTrackWorld(
         val avgHalfW = pts[0].halfWidth
         val roadWidth = avgHalfW * 2f
 
-        // Continuous solid dark outer collision wall around the entire circuit
+        if (hardBoundary) {
+            drawPath(
+                path = roadPath,
+                color = Color(0xFF0E131B),
+                style = Stroke(width = roadWidth + 42f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
+            drawPath(
+                path = roadPath,
+                color = Color(track.id.borderColorHex),
+                style = Stroke(width = roadWidth + 36f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            )
+        }
         drawPath(
             path = roadPath,
-            color = Color(0xFF0E131B),
-            style = Stroke(width = roadWidth + 32f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            color = Color(track.id.kerbSecondaryHex),
+            style = Stroke(width = roadWidth + 28f, cap = StrokeCap.Round, join = StrokeJoin.Round)
         )
         drawPath(
             path = roadPath,
-            color = Color(track.id.borderColorHex).copy(alpha = 0.55f),
-            style = Stroke(width = roadWidth + 6f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+            color = Color(track.id.kerbPrimaryHex),
+            style = Stroke(
+                width = roadWidth + 28f,
+                cap = StrokeCap.Butt,
+                join = StrokeJoin.Round,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(40f, 40f), 0f)
+            )
         )
 
         drawPath(
@@ -368,14 +374,6 @@ fun DrawScope.drawTrackWorld(
                 track = track,
                 hardBoundary = hardBoundary,
                 activeEvent = activeEvent
-            )
-        }
-
-        // 4a. Flat Arcade Inside-Apex Curbs on sharp corners inside the dark outer rim
-        if (!track.isArena && !track.isStunt) {
-            drawInsideApexCurbs(
-                track = track,
-                zLayerFilter = if (hasOverpasses) currentLayer else null
             )
         }
 
@@ -1053,31 +1051,6 @@ fun DrawScope.drawTrackWorld(
                     )
                 }
             }
-            if (r.isOnInsideCurb && r.jumpZ <= 0.05f && r.speed > 55f) {
-                val deg = r.angleRad * 180f / PI.toFloat()
-                val curbIntensity = ((r.speed - 55f) / 180f).coerceIn(0.35f, 1f)
-                withTransform({
-                    translate(r.x, r.y)
-                    rotate(deg, Offset.Zero)
-                }) {
-                    for (cIdx in 0 until 2) {
-                        val phase = ((animTimeSec * 6.0f + cIdx * 0.5f + r.x * 0.03f) % 1f)
-                        val backX = -15f - phase * 20f
-                        val puffR = (3.4f + phase * 4.2f) * curbIntensity
-                        val alpha = (1f - phase) * 0.38f * curbIntensity
-                        drawCircle(
-                            color = Color(0xFFECEFF1).copy(alpha = alpha),
-                            radius = puffR,
-                            center = Offset(backX, -11f)
-                        )
-                        drawCircle(
-                            color = Color(0xFFECEFF1).copy(alpha = alpha),
-                            radius = puffR,
-                            center = Offset(backX, 11f)
-                        )
-                    }
-                }
-            }
             if (r.jumpZ <= 0.05f && r.speed > 30f && !track.isStunt && TrackCatalog.isPointOnGravelPatch(track, r.x, r.y, r.zLayer)) {
                 val deg = r.angleRad * 180f / PI.toFloat()
                 val dustIntensity = ((r.speed - 30f) / 160f).coerceIn(0.38f, 1f)
@@ -1725,16 +1698,28 @@ private fun DrawScope.drawOverpassBridgeSpans(
             )
         }
 
-        // 2. Elevated overpass road deck with solid dark outer rim
+        // 2. Elevated overpass road deck with continuous striped borders & side-rails
+        if (hardBoundary) {
+            drawPath(
+                path = bridgePath,
+                color = Color(0xFF0E131B),
+                style = Stroke(width = roadWidth + 36f, cap = StrokeCap.Butt, join = StrokeJoin.Round)
+            )
+        }
         drawPath(
             path = bridgePath,
-            color = Color(0xFF0E131B),
-            style = Stroke(width = roadWidth + 32f, cap = StrokeCap.Butt, join = StrokeJoin.Round)
+            color = Color(track.id.kerbSecondaryHex),
+            style = Stroke(width = roadWidth + 28f, cap = StrokeCap.Butt, join = StrokeJoin.Round)
         )
         drawPath(
             path = bridgePath,
-            color = Color(track.id.borderColorHex).copy(alpha = 0.55f),
-            style = Stroke(width = roadWidth + 6f, cap = StrokeCap.Butt, join = StrokeJoin.Round)
+            color = Color(track.id.kerbPrimaryHex),
+            style = Stroke(
+                width = roadWidth + 28f,
+                cap = StrokeCap.Butt,
+                join = StrokeJoin.Round,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(40f, 40f), 0f)
+            )
         )
         drawPath(
             path = bridgePath,
@@ -1802,49 +1787,6 @@ private fun DrawScope.drawOverpassBridgeSpans(
             drawCircle(color = Color(0xFF3E2723), radius = 6.2f, center = post)
             drawCircle(color = Color(0xFFFFECB3), radius = 3.2f, center = post)
         }
-    }
-}
-
-private fun getCachedCurbLayers(track: TrackDefinition): List<CachedCurbLayerPaths> {
-    curbLayerPathCache[track]?.let { return it }
-    val curbs = TrackCatalog.insideApexCurbsForTrack(track)
-    if (curbs.isEmpty()) {
-        curbLayerPathCache[track] = emptyList()
-        return emptyList()
-    }
-    val byLayer = curbs.groupBy { it.zLayer }
-    val built = byLayer.map { (layer, layerCurbs) ->
-        val redPath = Path()
-        val whitePath = Path()
-        for (curb in layerCurbs) {
-            val inner = curb.innerEdge
-            val outer = curb.outerEdge
-            val segCount = minOf(inner.size, outer.size) - 1
-            for (k in 0 until segCount) {
-                val target = if (k % 2 == 0) redPath else whitePath
-                target.moveTo(inner[k].first, inner[k].second)
-                target.lineTo(outer[k].first, outer[k].second)
-                target.lineTo(outer[k + 1].first, outer[k + 1].second)
-                target.lineTo(inner[k + 1].first, inner[k + 1].second)
-                target.close()
-            }
-        }
-        CachedCurbLayerPaths(zLayer = layer, redPath = redPath, whitePath = whitePath)
-    }
-    curbLayerPathCache[track] = built
-    return built
-}
-
-private fun DrawScope.drawInsideApexCurbs(
-    track: TrackDefinition,
-    zLayerFilter: Int?
-) {
-    val layers = getCachedCurbLayers(track)
-    if (layers.isEmpty()) return
-    for (entry in layers) {
-        if (zLayerFilter != null && entry.zLayer != zLayerFilter) continue
-        drawPath(path = entry.redPath, color = Color(0xFFD93025))
-        drawPath(path = entry.whitePath, color = Color(0xFFF5F5F5))
     }
 }
 

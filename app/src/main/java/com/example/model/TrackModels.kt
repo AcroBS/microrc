@@ -136,17 +136,6 @@ data class GravelPatch(
     val zLayer: Int = 0
 )
 
-data class InsideApexCurb(
-    val innerEdge: List<Pair<Float, Float>>,
-    val outerEdge: List<Pair<Float, Float>>,
-    val sideSign: Float,
-    val zLayer: Int = 0,
-    val startArcS: Float = 0f,
-    val endArcS: Float = 0f,
-    val totalSplineLength: Float = 0f,
-    val stripWidthPx: Float = 18f
-)
-
 data class ItemBoxSpawn(
     val id: Int,
     val x: Float,

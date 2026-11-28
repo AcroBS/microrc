@@ -4,7 +4,6 @@ import com.example.model.ArenaShape
 import com.example.model.BoostPad
 import com.example.model.CustomTrackData
 import com.example.model.GravelPatch
-import com.example.model.InsideApexCurb
 import com.example.model.ItemBoxSpawn
 import com.example.model.PropShape
 import com.example.model.StuntGolfHole
@@ -35,9 +34,6 @@ object TrackCatalog {
     const val GRAVEL_EDGE_INSET = 4f
     const val ARENA_GRAVEL_HALF_WIDTH = 94f
     const val MAX_LATERAL_OFFSET = 0.55f
-    const val CURB_CURVATURE_THRESHOLD = 0.0026f
-    const val CURB_STRIP_WIDTH = 18f
-    const val CURB_OUTER_INSET = 1f
     val LANE_LATERAL_OFFSETS = listOf(-0.45f, 0f, 0.45f)
 
     data class SplineProjection(
@@ -69,8 +65,6 @@ object TrackCatalog {
 
     private val splineTableCache = Collections.synchronizedMap(WeakHashMap<List<TrackPoint>, SplineArcTable>())
     private val trackGravelCache = Collections.synchronizedMap(WeakHashMap<TrackDefinition, List<GravelPatch>>())
-    private val trackCurbCache = Collections.synchronizedMap(WeakHashMap<TrackDefinition, List<InsideApexCurb>>())
-
     private val tracks: Map<TrackId, TrackDefinition> = TrackId.entries.associateWith { id ->
         buildTrack(id)
     }
@@ -1925,162 +1919,6 @@ object TrackCatalog {
             if (localFwd < GRAVEL_START_OFFSET || localFwd > GRAVEL_START_OFFSET + GRAVEL_LENGTH) continue
             val localLat = -dx * s + dy * c
             if (abs(localLat) <= ARENA_GRAVEL_HALF_WIDTH) return true
-        }
-        return false
-    }
-
-    /**
-     * Computes flat inside-apex striped curb strips exclusively for sharp closed-circuit corners
-     * where signed curvature exceeds [CURB_CURVATURE_THRESHOLD], positioned strictly inside the
-     * solid hard boundary wall. Returns empty for Arenas and Stunt tracks.
-     */
-    fun insideApexCurbsForTrack(track: TrackDefinition): List<InsideApexCurb> {
-        if (track.isArena || track.isStunt || track.centerline.size < 12) return emptyList()
-        trackCurbCache[track]?.let { return it }
-
-        val pts = track.centerline
-        val n = pts.size
-        val table = getSplineArcTable(pts)
-        val window = 2
-
-        val sideSigns = FloatArray(n)
-        val normX = FloatArray(n)
-        val normY = FloatArray(n)
-
-        for (i in 0 until n) {
-            val pPrev = pts[(i - window).mod(n)]
-            val pCurr = pts[i]
-            val pNext = pts[(i + window).mod(n)]
-
-            val dx1 = pCurr.x - pPrev.x
-            val dy1 = pCurr.y - pPrev.y
-            val dx2 = pNext.x - pCurr.x
-            val dy2 = pNext.y - pCurr.y
-            val len1 = hypot(dx1, dy1)
-            val len2 = hypot(dx2, dy2)
-
-            val tx = pNext.x - pPrev.x
-            val ty = pNext.y - pPrev.y
-            val tLen = hypot(tx, ty).coerceAtLeast(1e-4f)
-            normX[i] = -ty / tLen
-            normY[i] = tx / tLen
-
-            if (pCurr.elevation > 0.45f || len1 < 1e-2f || len2 < 1e-2f) {
-                sideSigns[i] = 0f
-                continue
-            }
-
-            var dAng = atan2(dy2, dx2) - atan2(dy1, dx1)
-            while (dAng > PI.toFloat()) dAng -= 2f * PI.toFloat()
-            while (dAng < -PI.toFloat()) dAng += 2f * PI.toFloat()
-
-            val arcStep = (0.5f * (len1 + len2)).coerceAtLeast(1f)
-            val signedCurvature = dAng / arcStep
-            sideSigns[i] = when {
-                signedCurvature >= CURB_CURVATURE_THRESHOLD -> 1f
-                signedCurvature <= -CURB_CURVATURE_THRESHOLD -> -1f
-                else -> 0f
-            }
-        }
-
-        val rawRuns = mutableListOf<MutableList<Int>>()
-        var currentRun: MutableList<Int>? = null
-        for (i in 0 until n) {
-            val s = sideSigns[i]
-            if (s == 0f) {
-                currentRun = null
-                continue
-            }
-            val layer = pts[i].zLayer
-            val prevRun = currentRun
-            if (prevRun != null) {
-                val prevIdx = prevRun.last()
-                if (sideSigns[prevIdx] == s && pts[prevIdx].zLayer == layer) {
-                    prevRun.add(i)
-                    continue
-                }
-            }
-            currentRun = mutableListOf(i)
-            rawRuns.add(currentRun)
-        }
-
-        if (rawRuns.size >= 2) {
-            val first = rawRuns.first()
-            val last = rawRuns.last()
-            if (first.first() == 0 &&
-                last.last() == n - 1 &&
-                sideSigns[first.first()] == sideSigns[last.last()] &&
-                pts[first.first()].zLayer == pts[last.last()].zLayer
-            ) {
-                last.addAll(first)
-                rawRuns.removeAt(0)
-            }
-        }
-
-        val built = ArrayList<InsideApexCurb>(rawRuns.size)
-        for (run in rawRuns) {
-            if (run.size < 3) continue
-            val sideSign = sideSigns[run.first()]
-            val layer = pts[run.first()].zLayer
-            val innerEdge = ArrayList<Pair<Float, Float>>(run.size)
-            val outerEdge = ArrayList<Pair<Float, Float>>(run.size)
-            for (idx in run) {
-                val p = pts[idx]
-                val outerOffset = (p.halfWidth - CURB_OUTER_INSET).coerceAtLeast(16f) * sideSign
-                val innerOffset = (p.halfWidth - CURB_OUTER_INSET - CURB_STRIP_WIDTH).coerceAtLeast(8f) * sideSign
-                outerEdge.add((p.x + normX[idx] * outerOffset) to (p.y + normY[idx] * outerOffset))
-                innerEdge.add((p.x + normX[idx] * innerOffset) to (p.y + normY[idx] * innerOffset))
-            }
-            built.add(
-                InsideApexCurb(
-                    innerEdge = innerEdge,
-                    outerEdge = outerEdge,
-                    sideSign = sideSign,
-                    zLayer = layer,
-                    startArcS = table.cumLen[run.first()],
-                    endArcS = table.cumLen[run.last()],
-                    totalSplineLength = table.totalLength,
-                    stripWidthPx = CURB_STRIP_WIDTH
-                )
-            )
-        }
-
-        trackCurbCache[track] = built
-        return built
-    }
-
-    /**
-     * Returns true when a car at (x, y) on [zLayer] has its inside wheels rolling over an
-     * inside-apex curb strip. Used strictly for visual wheel dust & micro-haptic ticks.
-     */
-    fun isPointOnInsideApexCurb(
-        track: TrackDefinition,
-        x: Float,
-        y: Float,
-        zLayer: Int? = null,
-        carRadiusPx: Float = 21f
-    ): Boolean {
-        if (track.isArena || track.isStunt || track.centerline.size < 12) return false
-        val curbs = insideApexCurbsForTrack(track)
-        if (curbs.isEmpty()) return false
-
-        val proj = projectOntoCenterline(track.centerline, x, y, zLayer)
-        val outerLat = (proj.halfWidth - CURB_OUTER_INSET).coerceAtLeast(16f)
-        val innerLat = (proj.halfWidth - CURB_OUTER_INSET - CURB_STRIP_WIDTH).coerceAtLeast(8f)
-        val tireReach = carRadiusPx * 0.65f
-
-        for (curb in curbs) {
-            if (zLayer != null && curb.zLayer != zLayer) continue
-            val signedLat = proj.lateralOffsetPx * curb.sideSign
-            if (signedLat + tireReach < innerLat || signedLat - tireReach > outerLat) continue
-
-            val totalLen = curb.totalSplineLength
-            if (totalLen <= 1e-3f) continue
-            val spanLen = ((curb.endArcS - curb.startArcS) % totalLen + totalLen) % totalLen
-            val deltaS = ((proj.arcS - curb.startArcS) % totalLen + totalLen) % totalLen
-            if (deltaS <= spanLen + 10f || deltaS >= totalLen - 10f) {
-                return true
-            }
         }
         return false
     }
