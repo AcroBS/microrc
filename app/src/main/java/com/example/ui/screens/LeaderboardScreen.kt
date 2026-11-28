@@ -210,6 +210,8 @@ fun LeaderboardScreen(
     val dailyDriftTrackDef = remember(dailyDriftCustomTrack) { TrackCatalog.buildCustomTrack(dailyDriftCustomTrack) }
     val dailyDriftBoardKey = remember(todayKey) { com.example.drift.DriftDailyChallenge.boardKeyForDate(todayKey) }
     val dailyResetLabel = remember(todayKey) { DailyChallengeCatalog.formatCountdownUntilReset() }
+    val dailyGpWeather = remember(todayKey) { DailyChallengeCatalog.weatherThemeForDate(todayKey) }
+    val dailyDriftWeather = remember(todayKey) { com.example.drift.DriftDailyChallenge.weatherThemeForDate(todayKey) }
 
     val selectedMode = when (selectedTab) {
         LeaderboardFilterTab.STUNTS -> GameMode.STUNTS
@@ -525,6 +527,7 @@ fun LeaderboardScreen(
                     val isDailyDriftTab = selectedTab == LeaderboardFilterTab.DAILY_DRIFT
                     val activeDailyTrack = if (isDailyDriftTab) dailyDriftCustomTrack else dailyCustomTrack
                     val activeDailyTrackDef = if (isDailyDriftTab) dailyDriftTrackDef else dailyTrackDef
+                    val activeDailyWeather = if (isDailyDriftTab) dailyDriftWeather else dailyGpWeather
                     // Daily Challenge Card with Deterministic Mini-Map & Optional Ghost Car
                     val anyDailyGhostAvailable = topCloudDailyGhostEntry != null || localGhostPlayback != null
                     Card(
@@ -566,7 +569,7 @@ fun LeaderboardScreen(
                                         val dailyFeatureSummary = buildList {
                                             if (isDailyDriftTab) add("Drift Obstacles") else add("Fixed Portals")
                                             if (activeDailyTrack.ramps.isNotEmpty()) add("${activeDailyTrack.ramps.size} Jumps")
-                                            if (activeDailyTrack.isNightTrack) add("Night")
+                                            add("${activeDailyWeather.badgeLabel} Weather")
                                             add("1 Nitro/Lap")
                                         }.joinToString(" • ")
                                         Text(
@@ -600,7 +603,7 @@ fun LeaderboardScreen(
                                 }
                             }
 
-                            // Deterministic Track Mini-Map Preview
+                            // Deterministic Track Mini-Map Preview with Daily Environment Badge
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -611,6 +614,14 @@ fun LeaderboardScreen(
                                 Canvas(modifier = Modifier.fillMaxSize()) {
                                     drawTrackMiniMap(track = activeDailyTrackDef)
                                 }
+                                DailyWeatherBadgePill(
+                                    weatherTheme = activeDailyWeather,
+                                    containerAlpha = 0.92f,
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(8.dp)
+                                        .testTag("leaderboard_daily_weather_badge")
+                                )
                             }
 
                             // Optional Ghost Car Toggle (shown when another player or PB already placed a time)

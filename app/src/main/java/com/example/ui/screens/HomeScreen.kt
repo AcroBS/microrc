@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -111,7 +112,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -497,7 +500,7 @@ fun HomeScreen(
 
                             Column(
                                 modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                                verticalArrangement = Arrangement.spacedBy(5.dp)
                             ) {
                                 Text(
                                     text = profile.carType.displayName,
@@ -506,16 +509,35 @@ fun HomeScreen(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                Text(
-                                    text = "SPD ${profile.carType.topSpeedStat} • HDL ${profile.carType.handlingStat} • GRP ${profile.carType.gripStat}",
-                                    style = MaterialTheme.typography.labelMedium.copy(
-                                        fontFamily = JetBrainsMonoFontFamily
-                                    ),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.testTag("home_car_telemetry_text")
-                                )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("home_car_telemetry_text"),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    HomeCompactStatBar(
+                                        label = "SPD",
+                                        value = profile.carType.topSpeedStat,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        testTag = "home_stat_bar_speed",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    HomeCompactStatBar(
+                                        label = "HDL",
+                                        value = profile.carType.handlingStat,
+                                        color = goldAccent,
+                                        testTag = "home_stat_bar_handling",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    HomeCompactStatBar(
+                                        label = "GRP",
+                                        value = profile.carType.gripStat,
+                                        color = MaterialTheme.colorScheme.tertiary,
+                                        testTag = "home_stat_bar_grip",
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
                             }
 
                             FilledTonalButton(
@@ -1029,89 +1051,162 @@ private fun DailyChallengeCompactCard(
             }
 
             Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
-            ) {
-                when (status) {
-                    DailyLeadStatus.YouLead -> {
-                        Icon(
-                            imageVector = Icons.Default.EmojiEvents,
-                            contentDescription = "You lead",
-                            tint = goldAccent,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Text(
-                            text = "You lead",
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontFamily = PlusJakartaFontFamily,
-                                fontWeight = FontWeight.SemiBold
-                            ),
-                            color = goldAccent,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    is DailyLeadStatus.FriendLeads -> {
-                        Text(
-                            text = "${status.friendName} leads",
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontFamily = PlusJakartaFontFamily,
-                                fontWeight = FontWeight.SemiBold
-                            ),
-                            color = MaterialTheme.colorScheme.secondary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    DailyLeadStatus.NotPlayedYet -> {
-                        Text(
-                            text = "Not played yet",
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontFamily = PlusJakartaFontFamily
-                            ),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-
-            val (weatherIcon, weatherTint) = when (weatherTheme) {
-                DailyWeatherTheme.CLEAR -> Icons.Default.WbSunny to Color(0xFFFFD54F)
-                DailyWeatherTheme.NIGHT -> Icons.Default.DarkMode to Color(0xFF90CAF9)
-                DailyWeatherTheme.RAIN -> Icons.Default.WaterDrop to Color(0xFF4FC3F7)
-                DailyWeatherTheme.SNOW -> Icons.Default.AcUnit to Color(0xFFE1F5FE)
-                DailyWeatherTheme.WINDY -> Icons.Default.Air to Color(0xFF80CBC4)
-            }
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                shape = RoundedCornerShape(50),
-                border = BorderStroke(1.dp, weatherTint.copy(alpha = 0.42f)),
-                modifier = Modifier.testTag(weatherBadgeTag)
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Bottom,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
-                    Icon(
-                        imageVector = weatherIcon,
-                        contentDescription = "${weatherTheme.badgeLabel} weather",
-                        tint = weatherTint,
-                        modifier = Modifier.size(12.dp)
-                    )
-                    Text(
-                        text = weatherTheme.badgeLabel,
-                        style = MaterialTheme.typography.labelSmall.copy(fontFamily = PlusJakartaFontFamily),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                    when (status) {
+                        DailyLeadStatus.YouLead -> {
+                            Icon(
+                                imageVector = Icons.Default.EmojiEvents,
+                                contentDescription = "You lead",
+                                tint = goldAccent,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Text(
+                                text = "You lead",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontFamily = PlusJakartaFontFamily,
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                color = goldAccent,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        is DailyLeadStatus.FriendLeads -> {
+                            Text(
+                                text = "${status.friendName} leads",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontFamily = PlusJakartaFontFamily,
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                color = MaterialTheme.colorScheme.secondary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        DailyLeadStatus.NotPlayedYet -> {
+                            Text(
+                                text = "Not played yet",
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontFamily = PlusJakartaFontFamily
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                Box(contentAlignment = Alignment.BottomEnd) {
+                    DailyWeatherBadgePill(
+                        weatherTheme = weatherTheme,
+                        modifier = Modifier.testTag(weatherBadgeTag)
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun HomeCompactStatBar(
+    label: String,
+    value: Int,
+    color: Color,
+    testTag: String,
+    modifier: Modifier = Modifier
+) {
+    val targetFraction = (value / 100f).coerceIn(0f, 1f)
+    val animatedFraction by animateFloatAsState(
+        targetValue = targetFraction,
+        animationSpec = tween(350),
+        label = "home_stat_$label"
+    )
+    Column(
+        modifier = modifier
+            .semantics(mergeDescendants = true) {
+                contentDescription = "$label $value out of 100"
+                progressBarRangeInfo = ProgressBarRangeInfo(targetFraction, 0f..1f)
+            }
+            .testTag(testTag),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontFamily = PlusJakartaFontFamily,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                lineHeight = 12.sp
+            ),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(50))
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(animatedFraction)
+                    .clip(RoundedCornerShape(50))
+                    .background(color)
+            )
+        }
+    }
+}
+
+@Composable
+internal fun DailyWeatherBadgePill(
+    weatherTheme: DailyWeatherTheme,
+    modifier: Modifier = Modifier,
+    containerAlpha: Float = 1f
+) {
+    val (weatherIcon, weatherTint) = when (weatherTheme) {
+        DailyWeatherTheme.CLEAR -> Icons.Default.WbSunny to Color(0xFFFFD54F)
+        DailyWeatherTheme.NIGHT -> Icons.Default.DarkMode to Color(0xFF90CAF9)
+        DailyWeatherTheme.RAIN -> Icons.Default.WaterDrop to Color(0xFF4FC3F7)
+        DailyWeatherTheme.SNOW -> Icons.Default.AcUnit to Color(0xFFE1F5FE)
+        DailyWeatherTheme.WINDY -> Icons.Default.Air to Color(0xFF80CBC4)
+    }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = containerAlpha),
+        shape = RoundedCornerShape(50),
+        border = BorderStroke(1.dp, weatherTint.copy(alpha = 0.42f)),
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Icon(
+                imageVector = weatherIcon,
+                contentDescription = "${weatherTheme.badgeLabel} weather",
+                tint = weatherTint,
+                modifier = Modifier.size(12.dp)
+            )
+            Text(
+                text = weatherTheme.badgeLabel,
+                style = MaterialTheme.typography.labelSmall.copy(fontFamily = PlusJakartaFontFamily),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

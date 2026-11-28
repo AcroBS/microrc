@@ -290,9 +290,10 @@ class DailyChallengeAndNotificationsTest {
         composeTestRule.onNodeWithTag("daily_challenge_button").performClick()
         composeTestRule.waitForIdle()
 
-        // 2. Verify Daily Challenge tab, deterministic preview card & start CTA
+        // 2. Verify Daily Challenge tab, deterministic preview card, weather badge & start CTA
         composeTestRule.onNodeWithTag("leaderboard_mode_DAILY").assertIsDisplayed()
         composeTestRule.onNodeWithTag("daily_challenge_card").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("leaderboard_daily_weather_badge").performScrollTo().assertIsDisplayed()
         composeTestRule.onNodeWithTag("daily_start_button").performScrollTo().assertIsDisplayed()
 
         // 3. Launch Daily Challenge Run directly & verify HUD (1 Nitro ready, No Mine button) + Pause Menu Restart + Exit Race

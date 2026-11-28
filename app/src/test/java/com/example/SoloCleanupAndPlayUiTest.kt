@@ -1,7 +1,9 @@
 package com.example
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performScrollTo
@@ -11,6 +13,7 @@ import com.example.data.TrackCatalog
 import com.example.engine.RacePhysicsEngine
 import com.example.model.ActiveGhostCarState
 import com.example.model.ControlInput
+import com.example.model.DailyWeatherTheme
 import com.example.model.GameMode
 import com.example.model.LobbyPlayer
 import com.example.model.LobbyStatePayload
@@ -356,6 +359,8 @@ class SoloCleanupAndPlayUiTest {
                     onOpenGarage = {},
                     onUpdateDriverName = {},
                     dailyChallengeResetLabel = "Resets in 5h 27m",
+                    dailyChallengeWeather = DailyWeatherTheme.WINDY,
+                    dailyDriftWeather = DailyWeatherTheme.RAIN,
                     playStreak = PlayStreakState(currentStreakDays = 4, bestStreakDays = 4, activeToday = true)
                 )
             }
@@ -364,9 +369,31 @@ class SoloCleanupAndPlayUiTest {
         composeTestRule.onNodeWithText("4d").assertIsDisplayed()
         composeTestRule.onNodeWithText(
             "SPD ${RcCarType.DRIFT_PHANTOM.topSpeedStat} • HDL ${RcCarType.DRIFT_PHANTOM.handlingStat} • GRP ${RcCarType.DRIFT_PHANTOM.gripStat}"
-        ).assertIsDisplayed()
+        ).assertDoesNotExist()
+        composeTestRule.onNodeWithTag("home_car_telemetry_text").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_stat_bar_speed", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_stat_bar_handling", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithTag("home_stat_bar_grip", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText("SPD", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText("HDL", useUnmergedTree = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText("GRP", useUnmergedTree = true).assertIsDisplayed()
+
         composeTestRule.onNodeWithText("Daily GP").assertIsDisplayed()
         composeTestRule.onNodeWithText("Daily Drift").assertIsDisplayed()
         composeTestRule.onNodeWithText("No PB yet").assertDoesNotExist()
+
+        val gpWeatherBounds = composeTestRule.onNodeWithTag("daily_gp_weather_badge", useUnmergedTree = true)
+            .performScrollTo()
+            .assertIsDisplayed()
+            .getUnclippedBoundsInRoot()
+        val gpTitleBounds = composeTestRule.onNodeWithText("Daily GP", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val gpLeadBounds = composeTestRule.onAllNodesWithText("Not played yet", useUnmergedTree = true)[0].getUnclippedBoundsInRoot()
+        val gpCardBounds = composeTestRule.onNodeWithTag("daily_challenge_button").getUnclippedBoundsInRoot()
+        assertTrue("Weather badge must sit to the right of lead status", gpWeatherBounds.left >= gpLeadBounds.right)
+        assertTrue("Weather badge must sit below card title", gpWeatherBounds.top >= gpTitleBounds.bottom)
+        assertTrue(
+            "Weather badge must anchor near bottom-right corner of Daily GP card",
+            gpCardBounds.right - gpWeatherBounds.right <= gpWeatherBounds.left - gpCardBounds.left
+        )
     }
 }
