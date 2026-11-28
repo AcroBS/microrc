@@ -1078,4 +1078,149 @@ class StreakAndStandingsTest {
         composeTestRule.onNodeWithTag("daily_gp_completed_badge", useUnmergedTree = true).assertIsDisplayed()
         composeTestRule.onNodeWithTag("daily_drift_completed_badge", useUnmergedTree = true).assertDoesNotExist()
     }
+
+    @Test
+    fun friendStandingsScreen_filtersByDistanceStreamlinesEmptyChasingAndShowsSkywayCrossover() {
+        val summary = FriendStandingsCalculator.compute(
+            myUid = "uid_me",
+            myName = "Acro",
+            friends = listOf(
+                FriendUiModel(
+                    friendshipId = "f_rob",
+                    friendUid = "uid_rob",
+                    displayName = "Rob",
+                    friendCode = "RCROB001",
+                    carType = RcCarType.VOLT_BUGGY,
+                    primaryColorArgb = 0xFF00E5FF,
+                    accentColorArgb = 0xFFFFFFFF,
+                    effectivelyOnline = true,
+                    activityStatus = "ONLINE",
+                    activeRoomId = "",
+                    activeRoomCode = "",
+                    activeRoomName = "",
+                    statusLabel = "Online"
+                )
+            ),
+            cloudEntries = listOf(
+                // Same track at 1L (Leading), 3L (Leading), and 5L (Chasing)
+                LeaderboardEntryDoc(
+                    id = "me_lr_1", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_1L",
+                    totalLaps = 1L, bestRaceTimeMs = 10_100L
+                ),
+                LeaderboardEntryDoc(
+                    id = "rob_lr_1", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_1L",
+                    totalLaps = 1L, bestRaceTimeMs = 10_600L
+                ),
+                LeaderboardEntryDoc(
+                    id = "me_lr_3", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 30_200L
+                ),
+                LeaderboardEntryDoc(
+                    id = "rob_lr_3", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_3L",
+                    totalLaps = 3L, bestRaceTimeMs = 30_950L
+                ),
+                LeaderboardEntryDoc(
+                    id = "me_lr_5", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_5L",
+                    totalLaps = 5L, bestRaceTimeMs = 51_500L
+                ),
+                LeaderboardEntryDoc(
+                    id = "rob_lr_5", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_5L",
+                    totalLaps = 5L, bestRaceTimeMs = 50_800L, hasGhost = true, ghostId = "ghost_rob_5l"
+                ),
+                // Stunts entry so Stunts filter pill is active
+                LeaderboardEntryDoc(
+                    id = "me_stunt", userId = "uid_me", driverName = "Acro",
+                    gameMode = GameMode.STUNTS.name, trackKey = "STUNTS_GAUNTLET", boardKey = "STUNTS_GAUNTLET_4R",
+                    bestScore = 4500L
+                ),
+                LeaderboardEntryDoc(
+                    id = "rob_stunt", userId = "uid_rob", driverName = "Rob",
+                    gameMode = GameMode.STUNTS.name, trackKey = "STUNTS_GAUNTLET", boardKey = "STUNTS_GAUNTLET_4R",
+                    bestScore = 4100L
+                )
+            ),
+            localRecords = listOf(
+                // Solo PB on Skyway Crossover 3L (not raced by Rob yet)
+                com.example.model.LocalLeaderboardRecord(
+                    boardKey = "RACE_SKYWAY_OVERPASS_3L",
+                    gameMode = GameMode.RACE.name,
+                    trackKey = "SKYWAY_OVERPASS",
+                    totalLaps = 3,
+                    driverName = "Acro",
+                    carType = RcCarType.VOLT_BUGGY.name,
+                    primaryColorArgb = 0xFFFF5722,
+                    accentColorArgb = 0xFFFFD54F,
+                    bestRaceTimeMs = 34_120L
+                )
+            ),
+            todayDateKey = "20261126"
+        )
+
+        val launchedItems = mutableListOf<com.example.data.FriendBoardStandingItem>()
+
+        composeTestRule.setContent {
+            MicroRCTheme {
+                com.example.ui.screens.FriendStandingsScreen(
+                    standings = summary,
+                    isSignedIn = true,
+                    friendsCount = 1,
+                    onOpenManageFriends = {},
+                    onLaunchGhostRace = { launchedItems.add(it) },
+                    onBack = {}
+                )
+            }
+        }
+
+        // Filter bar sits directly below OVERALL CREW RANKING card on a single horizontal row
+        val crewBottom = composeTestRule.onNodeWithTag("standings_crew_ranking_card").fetchSemanticsNode().boundsInRoot.bottom
+        val filterBarNode = composeTestRule.onNodeWithTag("standings_filter_bar").fetchSemanticsNode()
+        assertTrue(filterBarNode.boundsInRoot.top >= crewBottom - 2f)
+
+        val allPillY = composeTestRule.onNodeWithTag("standings_filter_ALL").fetchSemanticsNode().positionInRoot.y
+        val oneLapPillY = composeTestRule.onNodeWithTag("standings_filter_1L").fetchSemanticsNode().positionInRoot.y
+        val fiveLapPillY = composeTestRule.onNodeWithTag("standings_filter_5L").fetchSemanticsNode().positionInRoot.y
+        assertTrue(kotlin.math.abs(allPillY - oneLapPillY) < 4f)
+        assertTrue(kotlin.math.abs(allPillY - fiveLapPillY) < 4f)
+
+        // All view: Chasing (1), Leading (3) [1L, 3L, Stunts], plus Solo PBs showing Skyway Crossover
+        composeTestRule.onNodeWithText("Chasing (1)").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Leading (3)").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("standings_solo_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Skyway Crossover").performScrollTo().assertIsDisplayed()
+
+        // Tap 1L filter: Chasing becomes empty compact single-line ("Chasing (0) • Clean sweep!"), Leading shows 1 row (1L only)
+        composeTestRule.onNodeWithTag("standings_filter_1L").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("standings_chasing_empty_line").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Chasing (0) • Clean sweep!").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("You aren't trailing any friends right now — clean sweep!").assertDoesNotExist()
+        composeTestRule.onNodeWithText("Leading (1)").performScrollTo().assertIsDisplayed()
+
+        // Tapping Leading 1L row launches exact 1L race
+        composeTestRule.onNodeWithTag("standings_leading_row_0").performScrollTo().performClick()
+        assertEquals("RACE_LIVING_ROOM_GP_1L", launchedItems.last().boardKey)
+        assertEquals(1, launchedItems.last().totalLaps)
+
+        // Unraced Skyway Crossover 1L still appears under Open Circuits and launches exact 1L race
+        composeTestRule.onNodeWithTag("standings_unraced_section").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Skyway Crossover").performScrollTo().performClick()
+        assertEquals("RACE_SKYWAY_OVERPASS_1L", launchedItems.last().boardKey)
+        assertEquals(1, launchedItems.last().totalLaps)
+
+        // Tap 5L filter: Chasing (1) has 5L, Leading (0), tapping Chasing launches 5L ghost
+        composeTestRule.onNodeWithTag("standings_filter_5L").performScrollTo().performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithText("Chasing (1)").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithText("Leading (0)").performScrollTo().assertIsDisplayed()
+        composeTestRule.onNodeWithTag("standings_chasing_row_0").performScrollTo().performClick()
+        assertEquals("RACE_LIVING_ROOM_GP_5L", launchedItems.last().boardKey)
+        assertEquals(5, launchedItems.last().totalLaps)
+    }
 }

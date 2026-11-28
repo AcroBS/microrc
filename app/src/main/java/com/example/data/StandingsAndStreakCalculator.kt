@@ -2,8 +2,10 @@ package com.example.data
 
 import com.example.model.FriendUiModel
 import com.example.model.GameMode
+import com.example.model.LeaderboardBoardKey
 import com.example.model.LeaderboardEntryDoc
 import com.example.model.LocalLeaderboardRecord
+import com.example.model.TrackId
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -182,6 +184,18 @@ data class FriendCrewMemberRank(
     val overallPoints: Int = 0,
     val trailingBoardsCount: Int = 0
 )
+
+enum class StandingsDistanceFilter(
+    val label: String,
+    val testSuffix: String,
+    val targetLaps: Int?
+) {
+    ALL("All", "ALL", null),
+    ONE_LAP("1L", "1L", 1),
+    THREE_LAPS("3L", "3L", 3),
+    FIVE_LAPS("5L", "5L", 5),
+    STUNTS("Stunts", "STUNTS", null)
+}
 
 data class FriendStandingsSummary(
     val myCrewRank: Int = 0,
@@ -568,6 +582,89 @@ object FriendStandingsCalculator {
     }
 
     /**
+     * Boards where you have recorded a PB and no friend has posted a time yet.
+     */
+    fun soloOnlyBoards(summary: FriendStandingsSummary): List<FriendBoardStandingItem> {
+        val source = summary.allBoards.ifEmpty { summary.highlightBoards }
+        return source
+            .filter { it.myRank != null && it.topFriendName == null }
+            .sortedWith(
+                compareByDescending<FriendBoardStandingItem> { it.isDaily }
+                    .thenByDescending { it.isCustom }
+                    .thenBy { it.trackName }
+                    .thenBy { it.totalLaps }
+            )
+    }
+
+    fun matchesDistanceFilter(
+        item: FriendBoardStandingItem,
+        filter: StandingsDistanceFilter
+    ): Boolean {
+        return when (filter) {
+            StandingsDistanceFilter.ALL -> true
+            StandingsDistanceFilter.ONE_LAP -> item.gameMode != GameMode.STUNTS && item.totalLaps == 1
+            StandingsDistanceFilter.THREE_LAPS -> item.gameMode != GameMode.STUNTS && item.totalLaps == 3
+            StandingsDistanceFilter.FIVE_LAPS -> item.gameMode != GameMode.STUNTS && item.totalLaps == 5
+            StandingsDistanceFilter.STUNTS -> item.gameMode == GameMode.STUNTS
+        }
+    }
+
+    fun filterBoards(
+        items: List<FriendBoardStandingItem>,
+        filter: StandingsDistanceFilter
+    ): List<FriendBoardStandingItem> {
+        if (filter == StandingsDistanceFilter.ALL) return items
+        return items.filter { matchesDistanceFilter(it, filter) }
+    }
+
+    /**
+     * Built-in circuit tracks (including newer tracks like Skyway Crossover) that have
+     * no recorded crew or solo times yet for the active distance filter.
+     */
+    fun unracedBuiltInRaceBoards(
+        summary: FriendStandingsSummary,
+        filter: StandingsDistanceFilter = StandingsDistanceFilter.ALL
+    ): List<FriendBoardStandingItem> {
+        if (filter == StandingsDistanceFilter.STUNTS) return emptyList()
+        val source = summary.allBoards.ifEmpty { summary.highlightBoards }
+        val existingRaceBoards = source.filter { it.gameMode == GameMode.RACE }
+        val targetLaps = filter.targetLaps
+        val defaultLaps = targetLaps ?: 3
+        return TrackId.entries.mapNotNull { trackId ->
+            val hasEntry = if (targetLaps != null) {
+                existingRaceBoards.any { it.trackKey == trackId.name && it.totalLaps == targetLaps }
+            } else {
+                existingRaceBoards.any { it.trackKey == trackId.name }
+            }
+            if (hasEntry) {
+                null
+            } else {
+                FriendBoardStandingItem(
+                    boardKey = LeaderboardBoardKey.build(GameMode.RACE, trackId.name, defaultLaps),
+                    trackKey = trackId.name,
+                    trackName = trackId.displayName,
+                    gameMode = GameMode.RACE,
+                    totalLaps = defaultLaps,
+                    isDaily = false,
+                    isCustom = false,
+                    myRank = null,
+                    totalDriversOnBoard = 0,
+                    myTimeMs = 0L,
+                    myScore = 0,
+                    leaderUid = "",
+                    leaderName = "",
+                    topFriendName = null,
+                    topFriendTimeMs = 0L,
+                    topFriendScore = 0,
+                    deltaVsTopFriendMs = null,
+                    deltaVsTopFriendScore = null,
+                    topFriendGhostId = null
+                )
+            }
+        }
+    }
+
+    /**
      * Selects up to [limit] active rivalry tracks for the compact Play screen preview:
      * 1. Tracks where a friend is currently ahead of you (Chasing, closest deficits first)
      * 2. Your closest contested leads (narrowest positive margins first)
@@ -615,6 +712,9 @@ object FriendStandingsCalculator {
                 item.myRank == null && item.topFriendName != null -> {
                     "${item.leaderName} leads • ${item.topFriendScore} pts"
                 }
+                item.myRank == null && item.topFriendName == null -> {
+                    "No crew scores yet • Tap to play"
+                }
                 else -> "Your best • ${item.myScore} pts"
             }
         } else {
@@ -629,6 +729,9 @@ object FriendStandingsCalculator {
                 }
                 item.myRank == null && item.topFriendName != null -> {
                     "${item.leaderName} leads • ${formatCompactTime(item.topFriendTimeMs)}"
+                }
+                item.myRank == null && item.topFriendName == null -> {
+                    "No crew times yet • Tap to set pace"
                 }
                 else -> "Your best • ${formatCompactTime(item.myTimeMs)}"
             }

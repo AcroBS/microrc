@@ -32,6 +32,8 @@ import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -42,22 +44,33 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.data.FriendBoardStandingItem
 import com.example.data.FriendCrewMemberRank
 import com.example.data.FriendStandingsCalculator
 import com.example.data.FriendStandingsSummary
+import com.example.data.StandingsDistanceFilter
 import com.example.model.GameMode
 import com.example.ui.theme.JetBrainsMonoFontFamily
 import com.example.ui.theme.PlusJakartaFontFamily
@@ -79,9 +92,55 @@ fun FriendStandingsScreen(
     val goldAccent = adaptiveGoldColor()
     val ghostAccent = adaptiveGhostAccentColor()
 
-    val chasingBoards = remember(standings) { FriendStandingsCalculator.chasingBoards(standings) }
-    val leadingBoards = remember(standings) { FriendStandingsCalculator.leadingBoards(standings) }
-    val unchallengedBoards = remember(standings) { FriendStandingsCalculator.unchallengedFriendBoards(standings) }
+    val hasStuntBoards = remember(standings) {
+        standings.allBoards.any { it.gameMode == GameMode.STUNTS }
+    }
+    val filterOptions = remember(hasStuntBoards) {
+        if (hasStuntBoards) {
+            StandingsDistanceFilter.entries
+        } else {
+            listOf(
+                StandingsDistanceFilter.ALL,
+                StandingsDistanceFilter.ONE_LAP,
+                StandingsDistanceFilter.THREE_LAPS,
+                StandingsDistanceFilter.FIVE_LAPS
+            )
+        }
+    }
+    var selectedFilter by rememberSaveable { mutableStateOf(StandingsDistanceFilter.ALL) }
+    LaunchedEffect(hasStuntBoards) {
+        if (!hasStuntBoards && selectedFilter == StandingsDistanceFilter.STUNTS) {
+            selectedFilter = StandingsDistanceFilter.ALL
+        }
+    }
+
+    val chasingBoards = remember(standings, selectedFilter) {
+        FriendStandingsCalculator.filterBoards(
+            FriendStandingsCalculator.chasingBoards(standings),
+            selectedFilter
+        )
+    }
+    val leadingBoards = remember(standings, selectedFilter) {
+        FriendStandingsCalculator.filterBoards(
+            FriendStandingsCalculator.leadingBoards(standings),
+            selectedFilter
+        )
+    }
+    val unchallengedBoards = remember(standings, selectedFilter) {
+        FriendStandingsCalculator.filterBoards(
+            FriendStandingsCalculator.unchallengedFriendBoards(standings),
+            selectedFilter
+        )
+    }
+    val soloOnlyBoards = remember(standings, selectedFilter) {
+        FriendStandingsCalculator.filterBoards(
+            FriendStandingsCalculator.soloOnlyBoards(standings),
+            selectedFilter
+        )
+    }
+    val unracedBuiltInBoards = remember(standings, selectedFilter) {
+        FriendStandingsCalculator.unracedBuiltInRaceBoards(standings, selectedFilter)
+    }
 
     Box(
         modifier = Modifier
@@ -149,7 +208,7 @@ fun FriendStandingsScreen(
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 if (!isSignedIn || friendsCount == 0) {
                     StandingsEmptyCrewCard(
@@ -163,28 +222,104 @@ fun FriendStandingsScreen(
                         goldAccent = goldAccent
                     )
 
-                    // 2. Interactive "Chasing (Y)" Section
-                    RivalryBoardSection(
-                        title = "Chasing (${chasingBoards.size})",
-                        subtitle = if (chasingBoards.isNotEmpty()) "Tap any track to race rival ghost" else null,
-                        emptyText = "You aren't trailing any friends right now — clean sweep!",
-                        items = chasingBoards,
-                        isLeadingSection = false,
-                        accentColor = MaterialTheme.colorScheme.secondary,
-                        ghostAccent = ghostAccent,
-                        goldAccent = goldAccent,
-                        ghostLoadingId = ghostLoadingId,
-                        sectionTag = "standings_chasing_section",
-                        rowTagPrefix = "standings_chasing_row",
-                        onLaunchGhostRace = onLaunchGhostRace
-                    )
+                    // 2. Compact Race Distance Filter Pill Bar (All | 1L | 3L | 5L [+ Stunts])
+                    SingleChoiceSegmentedButtonRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("standings_filter_bar")
+                    ) {
+                        filterOptions.forEachIndexed { index, option ->
+                            val selected = selectedFilter == option
+                            SegmentedButton(
+                                selected = selected,
+                                onClick = { selectedFilter = option },
+                                shape = SegmentedButtonDefaults.itemShape(
+                                    index = index,
+                                    count = filterOptions.size
+                                ),
+                                icon = {},
+                                colors = SegmentedButtonDefaults.colors(
+                                    activeContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                                    activeContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    inactiveContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                    inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
+                                modifier = Modifier
+                                    .defaultMinSize(minHeight = 48.dp)
+                                    .testTag("standings_filter_${option.testSuffix}")
+                            ) {
+                                Text(
+                                    text = option.label,
+                                    style = MaterialTheme.typography.labelMedium.copy(
+                                        fontFamily = PlusJakartaFontFamily,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                                        fontSize = 13.sp
+                                    ),
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
 
-                    // 3. Interactive "Leading (X)" Section
+                    // 3. Interactive "Chasing (Y)" Section — single-line compact status when 0
+                    if (chasingBoards.isEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                .testTag("standings_chasing_section"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.TrendingUp,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Chasing (0) • Clean sweep!",
+                                style = MaterialTheme.typography.titleSmall.copy(
+                                    fontFamily = PlusJakartaFontFamily,
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.testTag("standings_chasing_empty_line")
+                            )
+                        }
+                    } else {
+                        RivalryBoardSection(
+                            title = "Chasing (${chasingBoards.size})",
+                            subtitle = "Tap any track to race rival ghost",
+                            emptyText = "",
+                            items = chasingBoards,
+                            headerIcon = Icons.AutoMirrored.Filled.TrendingUp,
+                            isLeadingSection = false,
+                            accentColor = MaterialTheme.colorScheme.secondary,
+                            ghostAccent = ghostAccent,
+                            goldAccent = goldAccent,
+                            ghostLoadingId = ghostLoadingId,
+                            sectionTag = "standings_chasing_section",
+                            rowTagPrefix = "standings_chasing_row",
+                            onLaunchGhostRace = onLaunchGhostRace
+                        )
+                    }
+
+                    // 4. Interactive "Leading (X)" Section
                     RivalryBoardSection(
                         title = "Leading (${leadingBoards.size})",
                         subtitle = if (leadingBoards.isNotEmpty()) "Tap any track to extend your lead" else null,
-                        emptyText = "No contested track leads yet — beat a friend's time to claim #1!",
+                        emptyText = if (selectedFilter == StandingsDistanceFilter.ALL) {
+                            "No contested track leads yet — beat a friend's time to claim #1!"
+                        } else {
+                            "No contested ${selectedFilter.label} leads yet — beat a friend's time to claim #1!"
+                        },
                         items = leadingBoards,
+                        headerIcon = Icons.Default.EmojiEvents,
                         isLeadingSection = true,
                         accentColor = goldAccent,
                         ghostAccent = ghostAccent,
@@ -195,13 +330,14 @@ fun FriendStandingsScreen(
                         onLaunchGhostRace = onLaunchGhostRace
                     )
 
-                    // 4. Optional Friend Benchmarks (tracks where friends raced and you haven't set a time yet)
+                    // 5. Optional Friend Benchmarks (tracks where friends raced and you haven't set a time yet)
                     if (unchallengedBoards.isNotEmpty()) {
                         RivalryBoardSection(
                             title = "Friend Benchmarks (${unchallengedBoards.size})",
                             subtitle = "Unchallenged tracks set by your crew",
                             emptyText = "",
                             items = unchallengedBoards,
+                            headerIcon = Icons.Default.Flag,
                             isLeadingSection = false,
                             accentColor = MaterialTheme.colorScheme.primary,
                             ghostAccent = ghostAccent,
@@ -209,6 +345,44 @@ fun FriendStandingsScreen(
                             ghostLoadingId = ghostLoadingId,
                             sectionTag = "standings_unchallenged_section",
                             rowTagPrefix = "standings_unchallenged_row",
+                            onLaunchGhostRace = onLaunchGhostRace
+                        )
+                    }
+
+                    // 6. Your Solo PBs (tracks you raced without friend entries yet, e.g. newly raced circuits)
+                    if (soloOnlyBoards.isNotEmpty()) {
+                        RivalryBoardSection(
+                            title = "Your Solo PBs (${soloOnlyBoards.size})",
+                            subtitle = "Waiting for crew challengers",
+                            emptyText = "",
+                            items = soloOnlyBoards,
+                            headerIcon = Icons.Default.Timer,
+                            isLeadingSection = false,
+                            accentColor = MaterialTheme.colorScheme.primary,
+                            ghostAccent = ghostAccent,
+                            goldAccent = goldAccent,
+                            ghostLoadingId = ghostLoadingId,
+                            sectionTag = "standings_solo_section",
+                            rowTagPrefix = "standings_solo_row",
+                            onLaunchGhostRace = onLaunchGhostRace
+                        )
+                    }
+
+                    // 7. Unraced Built-In Circuits (ensures complete track coverage, including Skyway Crossover)
+                    if (unracedBuiltInBoards.isNotEmpty()) {
+                        RivalryBoardSection(
+                            title = "Open Circuits (${unracedBuiltInBoards.size})",
+                            subtitle = "No crew times yet • Tap to race",
+                            emptyText = "",
+                            items = unracedBuiltInBoards,
+                            headerIcon = Icons.Default.Schedule,
+                            isLeadingSection = false,
+                            accentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ghostAccent = ghostAccent,
+                            goldAccent = goldAccent,
+                            ghostLoadingId = ghostLoadingId,
+                            sectionTag = "standings_unraced_section",
+                            rowTagPrefix = "standings_unraced_row",
                             onLaunchGhostRace = onLaunchGhostRace
                         )
                     }
@@ -408,6 +582,7 @@ private fun RivalryBoardSection(
     subtitle: String?,
     emptyText: String,
     items: List<FriendBoardStandingItem>,
+    headerIcon: ImageVector,
     isLeadingSection: Boolean,
     accentColor: Color,
     ghostAccent: Color,
@@ -435,7 +610,7 @@ private fun RivalryBoardSection(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Icon(
-                    imageVector = if (isLeadingSection) Icons.Default.EmojiEvents else Icons.AutoMirrored.Filled.TrendingUp,
+                    imageVector = headerIcon,
                     contentDescription = null,
                     tint = accentColor,
                     modifier = Modifier.size(16.dp)
@@ -545,13 +720,24 @@ private fun RivalryBoardSection(
                                     }
                                 }
 
+                                val deltaColor = when {
+                                    item.myRank == 1 && item.topFriendName != null -> goldAccent
+                                    item.myRank != null && item.myRank > 1 -> MaterialTheme.colorScheme.secondary
+                                    item.myRank == 1 -> MaterialTheme.colorScheme.primary
+                                    item.topFriendName != null -> MaterialTheme.colorScheme.secondary
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
                                 Text(
                                     text = deltaLine,
                                     style = MaterialTheme.typography.labelMedium.copy(
                                         fontFamily = PlusJakartaFontFamily,
-                                        fontWeight = FontWeight.SemiBold
+                                        fontWeight = if (item.topFriendName != null || item.myRank != null) {
+                                            FontWeight.SemiBold
+                                        } else {
+                                            FontWeight.Medium
+                                        }
                                     ),
-                                    color = if (item.myRank == 1) goldAccent else MaterialTheme.colorScheme.secondary,
+                                    color = deltaColor,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -569,12 +755,21 @@ private fun RivalryBoardSection(
                                 }
                             }
 
+                            val isContestedLead = item.myRank == 1 && item.topFriendName != null
+                            val isUnraced = item.myRank == null && item.topFriendName == null
+                            val actionBg = when {
+                                isContestedLead -> goldAccent.copy(alpha = 0.16f)
+                                isUnraced -> MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                else -> ghostAccent.copy(alpha = 0.16f)
+                            }
+                            val actionTint = when {
+                                isContestedLead -> goldAccent
+                                isUnraced -> MaterialTheme.colorScheme.primary
+                                else -> ghostAccent
+                            }
+
                             Surface(
-                                color = if (item.myRank == 1) {
-                                    goldAccent.copy(alpha = 0.16f)
-                                } else {
-                                    ghostAccent.copy(alpha = 0.16f)
-                                },
+                                color = actionBg,
                                 shape = CircleShape,
                                 modifier = Modifier.size(38.dp)
                             ) {
@@ -589,7 +784,7 @@ private fun RivalryBoardSection(
                                         Icon(
                                             imageVector = Icons.Default.PlayArrow,
                                             contentDescription = "Race ghost on ${item.trackName}",
-                                            tint = if (item.myRank == 1) goldAccent else ghostAccent,
+                                            tint = actionTint,
                                             modifier = Modifier.size(20.dp)
                                         )
                                     }

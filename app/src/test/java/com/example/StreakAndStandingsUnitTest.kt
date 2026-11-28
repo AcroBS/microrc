@@ -649,4 +649,102 @@ class StreakAndStandingsUnitTest {
         assertEquals("BACKYARD_DIRT", preview[2].trackKey)
         assertEquals("You lead by +0.67s", FriendStandingsCalculator.formatRivalryDeltaLine(preview[2]))
     }
+
+    @Test
+    fun friendStandingsCalculator_distanceFiltersSoloOnlyAndUnracedIncludeSkywayCrossover() {
+        val myUid = "uid_me"
+        val robUid = "uid_rob"
+        val friends = listOf(
+            FriendUiModel(
+                friendshipId = "f_rob",
+                friendUid = robUid,
+                displayName = "Rob",
+                friendCode = "RCROB001",
+                carType = RcCarType.VOLT_BUGGY,
+                primaryColorArgb = 0xFF00E5FF,
+                accentColorArgb = 0xFFFFFFFF,
+                effectivelyOnline = true,
+                activityStatus = "ONLINE",
+                activeRoomId = "",
+                activeRoomCode = "",
+                activeRoomName = "",
+                statusLabel = "Online"
+            )
+        )
+        val cloudEntries = listOf(
+            // Living Room GP 1L (Leading) & 3L (Chasing)
+            LeaderboardEntryDoc(
+                id = "me_lr_1", userId = myUid, driverName = "Acro",
+                gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_1L",
+                totalLaps = 1L, bestRaceTimeMs = 10_200L
+            ),
+            LeaderboardEntryDoc(
+                id = "rob_lr_1", userId = robUid, driverName = "Rob",
+                gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_1L",
+                totalLaps = 1L, bestRaceTimeMs = 10_750L
+            ),
+            LeaderboardEntryDoc(
+                id = "me_lr_3", userId = myUid, driverName = "Acro",
+                gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_3L",
+                totalLaps = 3L, bestRaceTimeMs = 30_800L
+            ),
+            LeaderboardEntryDoc(
+                id = "rob_lr_3", userId = robUid, driverName = "Rob",
+                gameMode = GameMode.RACE.name, trackKey = "LIVING_ROOM_GP", boardKey = "RACE_LIVING_ROOM_GP_3L",
+                totalLaps = 3L, bestRaceTimeMs = 30_100L
+            ),
+            // Solo PB on Skyway Crossover 5L (no friend entry yet)
+            LeaderboardEntryDoc(
+                id = "me_sky_5", userId = myUid, driverName = "Acro",
+                gameMode = GameMode.RACE.name, trackKey = "SKYWAY_OVERPASS", boardKey = "RACE_SKYWAY_OVERPASS_5L",
+                totalLaps = 5L, bestRaceTimeMs = 54_200L
+            )
+        )
+
+        val summary = FriendStandingsCalculator.compute(
+            myUid = myUid,
+            myName = "Acro",
+            friends = friends,
+            cloudEntries = cloudEntries,
+            localRecords = emptyList(),
+            todayDateKey = "20261126"
+        )
+
+        val solo = FriendStandingsCalculator.soloOnlyBoards(summary)
+        assertEquals(1, solo.size)
+        assertEquals("SKYWAY_OVERPASS", solo.first().trackKey)
+        assertEquals("Skyway Crossover", solo.first().trackName)
+        assertEquals(5, solo.first().totalLaps)
+
+        // Filtering 1L isolates 1L lead, 0 chasing
+        val leading1L = FriendStandingsCalculator.filterBoards(
+            FriendStandingsCalculator.leadingBoards(summary),
+            com.example.data.StandingsDistanceFilter.ONE_LAP
+        )
+        val chasing1L = FriendStandingsCalculator.filterBoards(
+            FriendStandingsCalculator.chasingBoards(summary),
+            com.example.data.StandingsDistanceFilter.ONE_LAP
+        )
+        assertEquals(1, leading1L.size)
+        assertEquals(1, leading1L.first().totalLaps)
+        assertEquals(0, chasing1L.size)
+
+        // Unraced built-ins for 3L includes SKYWAY_OVERPASS (since only 5L has an entry)
+        val unraced3L = FriendStandingsCalculator.unracedBuiltInRaceBoards(
+            summary,
+            com.example.data.StandingsDistanceFilter.THREE_LAPS
+        )
+        val skyway3L = unraced3L.find { it.trackKey == "SKYWAY_OVERPASS" }
+        assertNotNull(skyway3L)
+        assertEquals("RACE_SKYWAY_OVERPASS_3L", skyway3L!!.boardKey)
+        assertEquals("No crew times yet • Tap to set pace", FriendStandingsCalculator.formatRivalryDeltaLine(skyway3L))
+
+        // Unraced built-ins for ALL omits LIVING_ROOM_GP and SKYWAY_OVERPASS (both have at least 1 entry), includes remaining tracks
+        val unracedAll = FriendStandingsCalculator.unracedBuiltInRaceBoards(
+            summary,
+            com.example.data.StandingsDistanceFilter.ALL
+        )
+        assertFalse(unracedAll.any { it.trackKey == "SKYWAY_OVERPASS" })
+        assertTrue(unracedAll.any { it.trackKey == "BACKYARD_DIRT" })
+    }
 }
